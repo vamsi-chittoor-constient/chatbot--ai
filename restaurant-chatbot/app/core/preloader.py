@@ -73,7 +73,7 @@ class MenuPreloader:
         try:
             pool = await get_async_pool()
             async with pool.acquire() as conn:
-                # Join with meal_type via availability_schedule
+                # Load basic menu items (meal_type mapping will be added later)
                 rows = await conn.fetch("""
                     SELECT
                         mi.menu_item_id as id,
@@ -81,14 +81,7 @@ class MenuPreloader:
                         mi.menu_item_price as price,
                         mi.menu_item_description as description,
                         mi.menu_item_in_stock as is_available,
-                        COALESCE(
-                            (SELECT string_agg(mt.meal_type_name, ',')
-                             FROM menu_item_availability_schedule mias
-                             JOIN meal_type mt ON mias.meal_type_id = mt.meal_type_id
-                             WHERE mias.menu_item_id = mi.menu_item_id
-                             AND mias.is_deleted = FALSE),
-                            'All Day'
-                        ) as meal_types
+                        'All Day' as meal_types
                     FROM menu_item mi
                     WHERE mi.is_deleted = FALSE
                     AND mi.menu_item_status = 'active'

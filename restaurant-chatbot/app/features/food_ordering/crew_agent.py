@@ -30,11 +30,20 @@ import structlog
 import asyncio
 from datetime import datetime
 
+# Phase 1 tools: Customer profile, FAQ, feedback
+from app.features.food_ordering.new_tools_phase1 import get_all_phase1_tools
+# Phase 2 tools: Advanced menu filtering
+from app.features.food_ordering.new_tools_phase2 import get_all_phase2_tools
+# Phase 3 tools: Table reservations
+from app.features.food_ordering.new_tools_phase3 import get_all_phase3_tools
+# Phase 4 & 5 tools: Order enhancements, policies & info
+from app.features.food_ordering.new_tools_phase4_5 import get_all_phase4_tools, get_all_phase5_tools
+
 logger = structlog.get_logger(__name__)
 
 # Cache crews by session to avoid recreating them every message
 _CREW_CACHE = {}
-_CREW_VERSION = 27  # v27: Force view_cart tool call for visual cart card
+_CREW_VERSION = 30  # v30: ALL PHASES COMPLETE - 55 total tools (20 base + 35 new)
 
 # Concurrency configuration - custom ThreadPoolExecutor for handling concurrent users
 import concurrent.futures
@@ -3036,7 +3045,7 @@ def create_cancel_payment_tool(session_id: str):
 # CREW CREATION
 # ============================================================================
 
-def create_food_ordering_crew(session_id: str) -> Crew:
+def create_food_ordering_crew(session_id: str, customer_id: Optional[str] = None) -> Crew:
     """
     Optimized single-agent crew using @tool decorated functions.
 
@@ -3045,6 +3054,10 @@ def create_food_ordering_crew(session_id: str) -> Crew:
     - What each tool does (from docstring)
     - Parameter names and types (from function signature)
     - How to call each tool correctly
+
+    Args:
+        session_id: Current chat session ID
+        customer_id: Current customer ID (None if not authenticated)
     """
     import os
     from langchain_openai import ChatOpenAI
@@ -3082,17 +3095,56 @@ def create_food_ordering_crew(session_id: str) -> Crew:
     payment_status_tool = create_check_payment_status_tool(session_id)
     cancel_payment_tool = create_cancel_payment_tool(session_id)
 
+    # Phase 1 tools: Customer profile, FAQ, feedback (15 new tools)
+    phase1_tools = get_all_phase1_tools(session_id, customer_id)
+
+    # Phase 2 tools: Advanced menu filtering (9 new tools)
+    phase2_tools = get_all_phase2_tools(session_id, customer_id)
+
+    # Phase 3 tools: Table reservations (6 new tools)
+    phase3_tools = get_all_phase3_tools(session_id, customer_id)
+
+    # Phase 4 tools: Order enhancements (3 new tools)
+    phase4_tools = get_all_phase4_tools(session_id, customer_id)
+
+    # Phase 5 tools: Policies & info (2 new tools)
+    phase5_tools = get_all_phase5_tools(session_id)
+
+    logger.info("crew_tools_loaded",
+                base_tools=15,
+                phase1_tools=len(phase1_tools),
+                phase2_tools=len(phase2_tools),
+                phase3_tools=len(phase3_tools),
+                phase4_tools=len(phase4_tools),
+                phase5_tools=len(phase5_tools),
+                total_tools=15 + len(phase1_tools) + len(phase2_tools) + len(phase3_tools) + len(phase4_tools) + len(phase5_tools),
+                customer_authenticated=customer_id is not None,
+                session=session_id)
+
+    # Collect all tools (20 base + 35 new = 55 total)
+    base_tools = [
+        search_tool, add_tool, view_tool, remove_tool, checkout_tool, cancel_tool,
+        status_tool, history_tool, reorder_tool, receipt_tool,
+        initiate_payment_tool, submit_card_tool, verify_otp_tool, payment_status_tool, cancel_payment_tool
+    ]
+    all_tools = base_tools + phase1_tools + phase2_tools + phase3_tools + phase4_tools + phase5_tools
+
     # Single efficient agent with CrewAI best practices
     agent = Agent(
         role="Kavya - Restaurant Assistant",
-        goal="Help customers order food quickly and warmly",
-        backstory="""You are Kavya, a friendly restaurant assistant.
-You help customers browse the menu, add items to cart, complete orders, and process payments.
-Be warm but concise. Use tool outputs to craft natural responses.""",
+        goal="Help customers with food ordering, reservations, and all restaurant services",
+        backstory="""You are Kavya, a friendly and knowledgeable restaurant assistant.
+
+You help customers with:
+- Menu browsing, ordering, and payment
+- Dietary restrictions, allergens, and favorites
+- Table reservations and bookings
+- FAQs, feedback, and restaurant policies
+- Advanced menu filtering by cuisine, tags, and preferences
+
+Be warm, helpful, and efficient. Use tool outputs to provide accurate information.""",
         llm=llm,
-        tools=[search_tool, add_tool, view_tool, remove_tool, checkout_tool, cancel_tool,
-               status_tool, history_tool, reorder_tool, receipt_tool,
-               initiate_payment_tool, submit_card_tool, verify_otp_tool, payment_status_tool, cancel_payment_tool],
+        tools=all_tools,
         # Best practices from docs.crewai.com
         verbose=False,  # Reduce noise in production
         allow_delegation=False,
@@ -3137,14 +3189,83 @@ Example of WRONG behavior (DO NOT DO THIS):
    - Customer: "add 2 burgers" → OK to add directly (quantity specified)
 3. Only ask "dine in or take away?" after customer has selected specific items
 
-## TOOLS
-- search_menu("") → show menu (triggers visual menu card)
-- add_to_cart(item="name", quantity=N) → add item
-- view_cart() → MUST call when user asks to see/view cart (triggers visual cart card)
-- remove_from_cart("item") → remove item
-- checkout() → process order
+## YOUR AVAILABLE TOOLS (55 tools)
 
-**IMPORTANT**: ALWAYS call view_cart() when user asks to see their cart, even if you know the items. The tool call triggers the visual cart display!
+You have access to 55 tools to help customers. ALWAYS use the appropriate tool when customer asks a question or makes a request.
+
+### Menu & Ordering
+- search_menu("keyword") → search menu items (triggers visual menu card)
+- add_to_cart(item="name", quantity=N) → add item to cart
+- view_cart() → MUST call when user asks to see cart (triggers visual cart display!)
+- update_quantity(item="name", quantity=N) → change quantity
+- remove_from_cart("item") → remove item
+- set_special_instructions(item="name", instructions="text") → add cooking notes
+- clear_cart() → empty cart
+- checkout() → place order
+- cancel_order(order_id="") → cancel an order
+- get_order_status(order_id="") → check order status
+- get_order_history() → view past orders
+- reorder_last_order() → repeat last order
+- reorder_from_order_id(order_id="") → reorder specific order
+- get_order_receipt(order_id="") → get receipt
+- add_order_instructions(instruction_type="cooking/delivery", instruction_text="") → add special instructions
+- customize_item_in_cart(item_name="", customization="") → customize cart item
+
+### Advanced Menu Discovery
+- search_by_cuisine(cuisine="Italian/Chinese/Indian") → filter menu by cuisine
+- get_available_cuisines() → list all cuisines
+- search_by_tag(tag="spicy/popular/new") → filter by tags
+- get_popular_items() → show popular items
+- get_combo_deals() → show combo packages
+- get_meal_type_menu(meal_type="breakfast/lunch/dinner") → filter by meal time
+- get_item_details(item_name="") → detailed item info
+
+### Customer Profile & Safety
+- get_customer_allergens() → view saved allergens
+- add_customer_allergen(allergen="", severity="mild/moderate/severe") → save allergen
+- remove_customer_allergen(allergen="") → remove allergen
+- get_dietary_restrictions() → view dietary preferences
+- add_dietary_restriction(restriction="vegan/vegetarian/gluten-free") → save dietary preference
+- filter_menu_by_allergen(allergen="") → show allergen-safe items
+- filter_menu_by_dietary_restriction(restriction="") → show diet-compatible items
+- get_allergen_info_for_item(item_name="") → check item allergens
+- get_favorite_items() → view saved favorites
+- add_to_favorites(item_name="") → save to favorites
+- remove_from_favorites(item_name="") → remove from favorites
+
+### Table Reservations
+- check_table_availability(date="YYYY-MM-DD", time="HH:MM", party_size=N) → check if tables available
+- book_table(date="", time="", party_size=N, special_requests="", occasion="") → book table
+- get_my_bookings() → view reservations
+- cancel_booking(booking_id="") → cancel reservation
+- modify_booking(booking_id="", new_date="", new_time="", new_party_size=N) → change reservation
+- get_available_time_slots(date="YYYY-MM-DD", party_size=N) → show available times
+
+### Help & Support
+- search_faq(query="refund/delivery/payment") → search FAQs
+- get_faq_by_category(category="delivery/payment/ordering") → FAQs by category
+- get_popular_faqs() → show top FAQs
+- get_help_categories() → list FAQ categories
+- get_restaurant_policies(policy_type="refund/cancellation/privacy/all") → show policies
+- get_operating_hours(date="") → show restaurant hours
+- submit_feedback(feedback_type="complaint/suggestion/praise", feedback_text="", rating=N) → collect feedback
+- rate_last_order(rating=N, review="") → rate order
+- get_my_feedback_history() → view past feedback
+
+### Payment
+- initiate_payment(order_id="") → start payment
+- submit_card_details(order_id="", card_number="", expiry="", cvv="") → submit card
+- verify_payment_otp(order_id="", otp="") → verify OTP
+- check_payment_status(order_id="") → check payment status
+- cancel_payment(order_id="") → cancel payment
+
+**CRITICAL RULES:**
+1. When customer asks "what's on the menu?" / "show menu" / "what do you have?" → MUST call search_menu("")
+2. When customer asks "show my cart" / "what's in my cart?" → MUST call view_cart()
+3. When customer asks about policies/hours/FAQs → USE the appropriate tool, don't make up answers
+4. When customer mentions allergens or dietary needs → USE the allergen/dietary tools
+5. When customer wants to book a table → USE the booking tools
+6. ALWAYS use tools to get accurate data - don't guess or make up information!
 
 Be warm and helpful!""",
         expected_output="A friendly, natural language response confirming the action taken",
@@ -3184,15 +3305,20 @@ async def process_with_crew(
         message=user_message[:50]
     )
 
-    # Get or create crew (CACHED per session for speed)
+    # Get or create crew (CACHED per session+user for speed)
+    # Include user_id in cache key so crew is recreated when user logs in/out
     global _CREW_CACHE, _CREW_VERSION
-    cache_key = f"{session_id}:v{_CREW_VERSION}"
+    cache_key = f"{session_id}:u{user_id or 'anon'}:v{_CREW_VERSION}"
 
     if cache_key not in _CREW_CACHE:
-        logger.info("creating_crew", session_id=session_id, version=_CREW_VERSION)
-        _CREW_CACHE[cache_key] = create_food_ordering_crew(session_id)
+        logger.info("creating_crew",
+                   session_id=session_id,
+                   user_id=user_id,
+                   version=_CREW_VERSION,
+                   authenticated=user_id is not None)
+        _CREW_CACHE[cache_key] = create_food_ordering_crew(session_id, customer_id=user_id)
     else:
-        logger.debug("reusing_cached_crew", session_id=session_id)
+        logger.debug("reusing_cached_crew", session_id=session_id, user_id=user_id)
 
     crew = _CREW_CACHE[cache_key]
 
