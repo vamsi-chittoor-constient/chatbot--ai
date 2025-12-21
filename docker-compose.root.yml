@@ -114,7 +114,7 @@ services:
       - MONGODB_DATABASE_NAME=restaurant_ai_analytics
       # PetPooja Integration (call this service)
       - PETPOOJA_SERVICE_URL=http://petpooja-app:8001
-      - PETPOOJA_SERVICE_TOKEN=${MAIN_BACKEND_API_TOKEN}
+      # Note: PETPOOJA_SERVICE_TOKEN is loaded from .env file via env_file
       # Application
       - ENVIRONMENT=production
       - DEBUG=false
@@ -161,24 +161,13 @@ services:
       - POSTGRES_DB=restaurant_ai
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=admin123
-      # API Configuration
+      # API Configuration (override .env defaults for Docker)
       - API_HOST=0.0.0.0
       - API_PORT=8001
       - API_WORKERS=2
       - DEBUG=false
       - LOG_LEVEL=INFO
-      # PetPooja API (from .env file)
-      - PETPOOJA_SANDBOX_ENABLED=${PETPOOJA_SANDBOX_ENABLED}
-      - PETPOOJA_SANDBOX_BASE_URL=${PETPOOJA_SANDBOX_BASE_URL}
-      - PETPOOJA_SANDBOX_ORDER_URL=${PETPOOJA_SANDBOX_ORDER_URL}
-      - PETPOOJA_BASE_URL=${PETPOOJA_BASE_URL}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION}
-      # Security
-      - MAIN_BACKEND_API_TOKEN=${MAIN_BACKEND_API_TOKEN}
-      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      # Note: PetPooja API settings and secrets are loaded from .env file via env_file
     depends_on:
       postgres:
         condition: service_healthy
