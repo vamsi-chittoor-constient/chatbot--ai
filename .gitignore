@@ -41,7 +41,10 @@ yarn-error.log*
 .DS_Store
 
 # Environment variables
-# .env  # Keep .env.example but not actual .env with secrets
+.env
+.env.local
+.env.*.local
+# Keep .env.example for documentation
 
 # Database
 *.db
