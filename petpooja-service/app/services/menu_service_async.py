@@ -120,6 +120,7 @@ async def fetch_and_sync_menu_by_restaurant_id(
             )
             await db.commit()
 
+            logger.info(f"Store result: {store_result}")
             logger.info(f"Menu synced successfully for restaurant_id: {restaurant_id}")
 
             return {

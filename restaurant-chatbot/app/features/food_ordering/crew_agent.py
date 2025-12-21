@@ -3072,7 +3072,7 @@ def create_food_ordering_crew(session_id: str, customer_id: Optional[str] = None
         model="gpt-4o-mini",
         temperature=0.1,  # Lower = faster, more deterministic
         api_key=api_key,
-        max_tokens=256,  # Limit response length for speed
+        max_tokens=1500,  # Increased for function calling with 55 tools (was 256, too low)
     )
 
     # Tools - using factory functions for session-aware tools

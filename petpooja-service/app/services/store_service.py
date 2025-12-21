@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.schemas.webhook import StoreStatus
-from app.core.db_session_async import get_db
+from app.core.db_session_async import AsyncSessionLocal
 from app.models.branch_models import BranchInfoTable, BranchTimingPolicy
 from app.models.other_models import RestaurantTable
 
@@ -30,7 +30,7 @@ async def get_store_status(restaurant_id: str) -> Dict[str, Any]:
     Returns:
         Dict with store status
     """
-    async with get_db() as db:
+    async with AsyncSessionLocal() as db:
         try:
             # Find branch by PetPooja restaurant ID
             branch_result = await db.execute(
@@ -130,7 +130,7 @@ async def update_store_status_from_webhook(
     Returns:
         Dict with update result
     """
-    async with get_db() as db:
+    async with AsyncSessionLocal() as db:
         try:
             is_open = store_status == StoreStatus.OPEN
             status_text = StoreStatus.get_status_text(store_status)

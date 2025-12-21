@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, select
 
-from app.core.db_session_async import get_db
+from app.core.db_session_async import AsyncSessionLocal
 from app.models.menu_models import MenuItem, MenuItemAddonItem
 from app.models.branch_models import BranchInfoTable
 
@@ -141,7 +141,7 @@ async def update_item_stock(
     logger.info(f"Updating {len(item_ids)} items for restaurant {restaurant_id}")
 
     # Get async database session
-    async with get_db() as db:
+    async with AsyncSessionLocal() as db:
         # First, find the branch by PetPooja restaurant ID
         branch_result = await db.execute(
             select(BranchInfoTable).where(
@@ -203,7 +203,7 @@ async def update_addon_stock(
     logger.info(f"Updating {len(addon_ids)} addons for restaurant {restaurant_id}")
 
     # Get async database session
-    async with get_db() as db:
+    async with AsyncSessionLocal() as db:
         # First, find the branch by PetPooja restaurant ID
         branch_result = await db.execute(
             select(BranchInfoTable).where(

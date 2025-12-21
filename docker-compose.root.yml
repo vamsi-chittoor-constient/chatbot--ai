@@ -95,6 +95,8 @@ services:
     restart: unless-stopped
     expose:
       - "8000"
+    ports:
+      - "8000:8000"  # Expose for testing
     env_file:
       - ./restaurant-chatbot/.env
     environment:
@@ -119,6 +121,8 @@ services:
       - ENVIRONMENT=production
       - DEBUG=false
       - LOG_LEVEL=INFO
+      # Disable authentication for testing
+      - AUTH_REQUIRED=false
     depends_on:
       postgres:
         condition: service_healthy
