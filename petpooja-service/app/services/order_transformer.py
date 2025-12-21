@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any
 from decimal import Decimal
+from app.core.config import settings
 from app.schemas.order import (
     SaveOrderRequest, OrderInfo, OrderInfoInner, Restaurant, RestaurantDetails,
     Customer, CustomerDetails, Order, OrderDetails, GSTDetail,
@@ -38,10 +39,10 @@ def transform_db_order_to_petpooja(order_data: Dict[str, Any]) -> SaveOrderReque
         if not external_order_id:
             order = order_data.get("order")
             if order and order.order_id:
-                external_order_id = f"A24-{str(order.order_id)[:8].upper()}"
+                external_order_id = f"{settings.ORDER_ID_PREFIX}{str(order.order_id)[:8].upper()}"
             else:
                 import uuid
-                external_order_id = f"A24-{str(uuid.uuid4())[:8].upper()}"
+                external_order_id = f"{settings.ORDER_ID_PREFIX}{str(uuid.uuid4())[:8].upper()}"
         logger.info(f"Transforming DB order {external_order_id} to PetPooja format")
 
         # Extract data from order_data dict
@@ -228,20 +229,20 @@ def transform_db_order_to_petpooja(order_data: Dict[str, Any]) -> SaveOrderReque
         # PetPooja requires preorder_date and preorder_time even for immediate orders
         now = datetime.utcnow()
         default_date = now.strftime("%Y-%m-%d")
-        default_time = (now + timedelta(minutes=30)).strftime("%H:%M:%S")
+        default_time = (now + timedelta(minutes=settings.DEFAULT_PREP_TIME_OFFSET_MINUTES)).strftime("%H:%M:%S")
 
         preorder_date = default_date
         preorder_time = default_time
         is_advanced_order = False
         is_urgent = False
-        min_prep_time = 20
+        min_prep_time = settings.MIN_PREP_TIME_MINUTES
 
         if scheduling_info:
             preorder_date = str(scheduling_info.preorder_date) if scheduling_info.preorder_date else default_date
             preorder_time = str(scheduling_info.preorder_time) if scheduling_info.preorder_time else default_time
             is_advanced_order = scheduling_info.is_preorder or False
             is_urgent = False  # Default
-            min_prep_time = 20  # Default
+            min_prep_time = settings.MIN_PREP_TIME_MINUTES  # From config
 
         # Extract instruction
         special_instructions = ""
@@ -337,7 +338,7 @@ def transform_db_order_to_petpooja(order_data: Dict[str, Any]) -> SaveOrderReque
                     enable_delivery=enable_delivery,
                     callback_url="",
                     urgent_order=is_urgent,
-                    urgent_time=30,
+                    urgent_time=settings.URGENT_ORDER_TIME_MINUTES,
                     table_no=table_no,
                     no_of_persons=no_of_persons,
                     min_prep_time=min_prep_time,
@@ -358,8 +359,8 @@ def transform_db_order_to_petpooja(order_data: Dict[str, Any]) -> SaveOrderReque
         # Build final SaveOrderRequest with udid and device_type at root level
         petpooja_order = SaveOrderRequest(
             orderinfo=order_info,
-            udid="a24-pipeline",
-            device_type="Web"
+            udid=settings.PETPOOJA_ORDER_UDID,
+            device_type=settings.PETPOOJA_ORDER_DEVICE_TYPE
         )
 
         logger.info(f"DB order {external_order_id} transformed to PetPooja format successfully")

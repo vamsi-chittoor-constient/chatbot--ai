@@ -44,6 +44,10 @@ class Settings(BaseSettings):
         "PETPOOJA_SANDBOX_DASHBOARD_URL",
         "https://partner.petpooja.com"
     )
+    PETPOOJA_SANDBOX_UPDATE_ORDER_URL: str = os.getenv(
+        "PETPOOJA_SANDBOX_UPDATE_ORDER_URL",
+        "https://qle1yy2ydc.execute-api.ap-southeast-1.amazonaws.com/V1/update_order_status"
+    )
     PETPOOJA_SANDBOX_APP_KEY: str = os.getenv("PETPOOJA_SANDBOX_APP_KEY", "")
     PETPOOJA_SANDBOX_APP_SECRET: str = os.getenv("PETPOOJA_SANDBOX_APP_SECRET", "")
     PETPOOJA_SANDBOX_ACCESS_TOKEN: str = os.getenv("PETPOOJA_SANDBOX_ACCESS_TOKEN", "")
@@ -78,28 +82,52 @@ class Settings(BaseSettings):
     API_LOG_LEVEL: str = os.getenv("API_LOG_LEVEL", "info")
 
     # Application Settings
-    APP_NAME: str = "A24 Restaurant Data Pipeline"
-    APP_VERSION: str = "1.0.0"
+    APP_NAME: str = os.getenv("APP_NAME", "A24 Restaurant Data Pipeline")
+    APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE: str = os.getenv("LOG_FILE", "logs/petpooja_microservice.log")
 
-    # Database Connection Pool Settings
+    # Database Connection Pool Settings (Sync)
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "10"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+    DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+    DB_STATEMENT_TIMEOUT: int = int(os.getenv("DB_STATEMENT_TIMEOUT", "30000"))
+    DB_EXECUTOR_MAX_WORKERS: int = int(os.getenv("DB_EXECUTOR_MAX_WORKERS", "2"))
+
+    # Database Connection Pool Settings (Async)
+    DB_ASYNC_POOL_SIZE: int = int(os.getenv("DB_ASYNC_POOL_SIZE", "20"))
+    DB_ASYNC_MAX_OVERFLOW: int = int(os.getenv("DB_ASYNC_MAX_OVERFLOW", "40"))
+    DB_ASYNC_POOL_TIMEOUT: int = int(os.getenv("DB_ASYNC_POOL_TIMEOUT", "30"))
+    DB_ASYNC_POOL_RECYCLE: int = int(os.getenv("DB_ASYNC_POOL_RECYCLE", "1800"))
 
     # API Client Settings
     HTTP_TIMEOUT: int = int(os.getenv("HTTP_TIMEOUT", "30"))
     HTTP_MAX_RETRIES: int = int(os.getenv("HTTP_MAX_RETRIES", "3"))
     HTTP_RETRY_DELAY: int = int(os.getenv("HTTP_RETRY_DELAY", "2"))
 
+    # HTTP Connection Pool Settings
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_KEEPALIVE_CONNECTIONS", "20"))
+    HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "100"))
+
+    # Credentials Cache Configuration
+    CREDENTIALS_CACHE_TTL_SECONDS: int = int(os.getenv("CREDENTIALS_CACHE_TTL_SECONDS", "300"))
+
     # Security Settings
     ENCRYPTION_KEY: Optional[str] = os.getenv("ENCRYPTION_KEY", None)
     ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "*")  # Comma-separated list
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+
+    # Order Processing Configuration
+    ORDER_ID_PREFIX: str = os.getenv("ORDER_ID_PREFIX", "A24-")
+    PETPOOJA_ORDER_UDID: str = os.getenv("PETPOOJA_ORDER_UDID", "a24-pipeline")
+    PETPOOJA_ORDER_DEVICE_TYPE: str = os.getenv("PETPOOJA_ORDER_DEVICE_TYPE", "Web")
+    DEFAULT_PREP_TIME_OFFSET_MINUTES: int = int(os.getenv("DEFAULT_PREP_TIME_OFFSET_MINUTES", "30"))
+    MIN_PREP_TIME_MINUTES: int = int(os.getenv("MIN_PREP_TIME_MINUTES", "20"))
+    URGENT_ORDER_TIME_MINUTES: int = int(os.getenv("URGENT_ORDER_TIME_MINUTES", "30"))
 
     @property
     def DATABASE_URL(self) -> str:

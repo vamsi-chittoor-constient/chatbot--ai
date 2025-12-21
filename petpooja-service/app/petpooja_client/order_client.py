@@ -57,8 +57,8 @@ class OrderClient:
             "app_secret": app_secret,
             "access_token": access_token,
             "orderinfo": order_data.get("orderinfo", {}),
-            "udid": order_data.get("udid", "a24-pipeline"),
-            "device_type": order_data.get("device_type", "Web")
+            "udid": order_data.get("udid", settings.PETPOOJA_ORDER_UDID),
+            "device_type": order_data.get("device_type", settings.PETPOOJA_ORDER_DEVICE_TYPE)
         }
 
         try:
@@ -103,9 +103,16 @@ class OrderClient:
             "status": status
         }
 
+        # Use sandbox update order URL if sandbox is enabled, otherwise use base URL
+        update_url = (
+            settings.PETPOOJA_SANDBOX_UPDATE_ORDER_URL
+            if settings.PETPOOJA_SANDBOX_ENABLED
+            else f"{self.base_url}/update_order_status"
+        )
+
         try:
             response = self.client.post(
-                "https://qle1yy2ydc.execute-api.ap-southeast-1.amazonaws.com/V1/update_order_status",
+                update_url,
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )

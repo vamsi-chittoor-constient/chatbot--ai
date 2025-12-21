@@ -29,10 +29,10 @@ async_database_url = settings.DATABASE_URL.replace(
 engine = create_async_engine(
     async_database_url,
     pool_pre_ping=True,
-    pool_size=20,  # Increased for async (can handle more)
-    max_overflow=40,  # Increased for async
-    pool_timeout=30,
-    pool_recycle=1800,  # Recycle connections after 30 minutes
+    pool_size=settings.DB_ASYNC_POOL_SIZE,  # Configured async pool size
+    max_overflow=settings.DB_ASYNC_MAX_OVERFLOW,  # Configured async overflow
+    pool_timeout=settings.DB_ASYNC_POOL_TIMEOUT,
+    pool_recycle=settings.DB_ASYNC_POOL_RECYCLE,  # Recycle connections after configured time
     echo=False,
     # Async-specific optimizations
     pool_use_lifo=True,  # LIFO for better connection reuse

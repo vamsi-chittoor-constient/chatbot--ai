@@ -27,9 +27,9 @@ class PetpoojaAPIError(Exception):
     pass
 
 
-# Credentials cache with TTL (5 minutes)
+# Credentials cache with TTL
 _credentials_cache: Dict[str, tuple] = {}  # {restaurant_id: (credentials_dict, expiry_time)}
-CACHE_TTL_SECONDS = 300  # 5 minutes
+CACHE_TTL_SECONDS = settings.CREDENTIALS_CACHE_TTL_SECONDS
 
 
 def _get_cached_credentials(restaurant_id: str) -> Optional[Dict[str, str]]:

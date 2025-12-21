@@ -33,7 +33,10 @@ class AsyncOrderClient:
         """Async context manager entry"""
         self._client = httpx.AsyncClient(
             timeout=self.timeout,
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+            limits=httpx.Limits(
+                max_keepalive_connections=settings.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                max_connections=settings.HTTPX_MAX_CONNECTIONS
+            )
         )
         return self
 
@@ -49,7 +52,10 @@ class AsyncOrderClient:
             # Create a persistent client for singleton usage
             self._client = httpx.AsyncClient(
                 timeout=self.timeout,
-                limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+                limits=httpx.Limits(
+                    max_keepalive_connections=settings.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                    max_connections=settings.HTTPX_MAX_CONNECTIONS
+                )
             )
         return self._client
 
@@ -79,8 +85,8 @@ class AsyncOrderClient:
             "app_secret": app_secret,
             "access_token": access_token,
             "orderinfo": order_data.get("orderinfo", {}),
-            "udid": order_data.get("udid", "a24-pipeline"),
-            "device_type": order_data.get("device_type", "Web")
+            "udid": order_data.get("udid", settings.PETPOOJA_ORDER_UDID),
+            "device_type": order_data.get("device_type", settings.PETPOOJA_ORDER_DEVICE_TYPE)
         }
 
         try:

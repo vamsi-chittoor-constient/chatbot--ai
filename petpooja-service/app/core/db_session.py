@@ -24,14 +24,14 @@ print(f"[DB] Connecting to: {_db_url_display}")
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800,  # Recycle connections after 30 minutes
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE,  # Recycle connections after configured time
     echo=False,
     # Performance optimizations
     connect_args={
-        "options": "-c statement_timeout=30000"  # 30 second query timeout
+        "options": f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT}"  # Query timeout in milliseconds
     } if "postgresql" in settings.DATABASE_URL else {}
 )
 
@@ -42,7 +42,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Thread pool for running blocking DB operations
-_db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db_init")
+_db_executor = ThreadPoolExecutor(max_workers=settings.DB_EXECUTOR_MAX_WORKERS, thread_name_prefix="db_init")
 
 
 def get_db() -> Generator[Session, None, None]:
