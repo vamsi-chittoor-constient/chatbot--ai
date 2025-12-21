@@ -1,0 +1,231 @@
+# =============================================================================
+# A24 Restaurant Platform - Root Orchestrator
+# =============================================================================
+# Manages both microservices: Chatbot + PetPooja Integration
+# Usage: docker compose -f docker-compose.root.yml up -d
+# =============================================================================
+
+version: '3.8'
+
+networks:
+  a24-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongodb-data:
+  app-logs:
+  petpooja-logs:
+
+services:
+  # ===========================================================================
+  # SHARED SERVICES (Used by both microservices)
+  # ===========================================================================
+
+  # PostgreSQL Database (Shared)
+  postgres:
+    image: postgres:15-alpine
+    container_name: a24-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=restaurant_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Load ONLY PetPooja schema (Single source of truth)
+      - ./petpooja-service/a24_finalschema_20251219_2.sql:/docker-entrypoint-initdb.d/01-petpooja-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d restaurant_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - a24-network
+
+  # Redis Cache (Shared)
+  redis:
+    image: redis:7-alpine
+    container_name: a24-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - a24-network
+
+  # MongoDB Analytics (Shared)
+  mongodb:
+    image: mongo:7
+    container_name: a24-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - a24-network
+
+  # ===========================================================================
+  # MICROSERVICE 1: Restaurant Chatbot (Main App)
+  # ===========================================================================
+
+  chatbot-app:
+    build:
+      context: ./restaurant-chatbot
+      dockerfile: docker/Dockerfile
+    container_name: a24-chatbot-app
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file:
+      - ./restaurant-chatbot/.env
+    environment:
+      # Database
+      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=restaurant_ai
+      - DB_USER=admin
+      - DB_PASSWORD=admin123
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # MongoDB
+      - MONGODB_CONNECTION_STRING=mongodb://mongodb:27017
+      - MONGODB_DATABASE_NAME=restaurant_ai_analytics
+      # PetPooja Integration (call this service)
+      - PETPOOJA_SERVICE_URL=http://petpooja-app:8001
+      - PETPOOJA_SERVICE_TOKEN=${MAIN_BACKEND_API_TOKEN}
+      # Application
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - a24-network
+    volumes:
+      - app-logs:/app/logs
+
+  # ===========================================================================
+  # MICROSERVICE 2: PetPooja Integration Service
+  # ===========================================================================
+
+  petpooja-app:
+    build:
+      context: ./petpooja-service
+      dockerfile: Dockerfile
+    container_name: a24-petpooja-app
+    restart: unless-stopped
+    expose:
+      - "8001"
+    ports:
+      - "8001:8001"  # Expose for direct testing
+    env_file:
+      - ./petpooja-service/.env
+    environment:
+      # Database (shared with chatbot)
+      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=restaurant_ai
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8001
+      - API_WORKERS=2
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      # PetPooja API (from .env file)
+      - PETPOOJA_SANDBOX_ENABLED=${PETPOOJA_SANDBOX_ENABLED}
+      - PETPOOJA_SANDBOX_BASE_URL=${PETPOOJA_SANDBOX_BASE_URL}
+      - PETPOOJA_SANDBOX_ORDER_URL=${PETPOOJA_SANDBOX_ORDER_URL}
+      - PETPOOJA_BASE_URL=${PETPOOJA_BASE_URL}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      # Security
+      - MAIN_BACKEND_API_TOKEN=${MAIN_BACKEND_API_TOKEN}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - a24-network
+    volumes:
+      - petpooja-logs:/app/logs
+
+  # ===========================================================================
+  # NGINX - Reverse Proxy (Single Entry Point)
+  # ===========================================================================
+
+  nginx:
+    build:
+      context: ./restaurant-chatbot
+      dockerfile: docker/Dockerfile.nginx
+    container_name: a24-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      chatbot-app:
+        condition: service_healthy
+      petpooja-app:
+        condition: service_healthy
+    networks:
+      - a24-network
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro  # Custom nginx config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# =============================================================================
+# Usage Commands:
+# =============================================================================
+# Start all services:    docker compose -f docker-compose.root.yml up -d
+# View logs:             docker compose -f docker-compose.root.yml logs -f
+# Stop all:              docker compose -f docker-compose.root.yml down
+# Rebuild:               docker compose -f docker-compose.root.yml up -d --build
+# Scale PetPooja:        docker compose -f docker-compose.root.yml up -d --scale petpooja-app=3
+# =============================================================================

@@ -1,0 +1,106 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Order Confirmation - {{ restaurant_name }}{% endblock %}
+
+{% block content %}
+<div class="greeting">
+    Hello {{ customer_name | default('Valued Customer') }}! 👋
+</div>
+
+<div class="message">
+    <p>Thank you for your order! We're preparing your delicious meal.</p>
+</div>
+
+<div class="info-box">
+    <h3>Order Details</h3>
+    <div class="info-row">
+        <span class="info-label">Order Number:</span>
+        <span class="info-value" style="font-weight: bold; color: #667eea;">{{ order_number }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Order Type:</span>
+        <span class="info-value">{{ order_type | title }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Order Time:</span>
+        <span class="info-value">{{ order_time }}</span>
+    </div>
+    {% if estimated_ready_time %}
+    <div class="info-row">
+        <span class="info-label">Estimated Ready Time:</span>
+        <span class="info-value">{{ estimated_ready_time }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<div class="info-box">
+    <h3>Your Items</h3>
+    {% for item in order_items %}
+    <div class="info-row">
+        <span class="info-label">{{ item.quantity }}x {{ item.name }}</span>
+        <span class="info-value">₹{{ item.total_price }}</span>
+    </div>
+    {% if item.special_instructions %}
+    <div style="font-size: 13px; color: #999999; padding-left: 20px; margin-top: 5px;">
+        Note: {{ item.special_instructions }}
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <div style="border-top: 2px solid #667eea; margin-top: 15px; padding-top: 15px;">
+        <div class="info-row">
+            <span class="info-label">Subtotal:</span>
+            <span class="info-value">₹{{ subtotal }}</span>
+        </div>
+        {% if tax_amount > 0 %}
+        <div class="info-row">
+            <span class="info-label">Tax:</span>
+            <span class="info-value">₹{{ tax_amount }}</span>
+        </div>
+        {% endif %}
+        {% if discount_amount > 0 %}
+        <div class="info-row" style="color: #22c55e;">
+            <span class="info-label">Discount:</span>
+            <span class="info-value">-₹{{ discount_amount }}</span>
+        </div>
+        {% endif %}
+        <div class="info-row" style="font-size: 18px; font-weight: bold;">
+            <span class="info-label">Total:</span>
+            <span class="info-value" style="color: #667eea;">₹{{ total_amount }}</span>
+        </div>
+    </div>
+</div>
+
+{% if payment_status %}
+<div class="info-box" style="background-color: {% if payment_status == 'completed' %}#f0fdf4{% else %}#fef3c7{% endif %};">
+    <h3>Payment Status</h3>
+    <div class="info-row">
+        <span class="info-label">Status:</span>
+        <span class="info-value" style="font-weight: bold; color: {% if payment_status == 'completed' %}#22c55e{% else %}#f59e0b{% endif %};">
+            {{ payment_status | title }}
+        </span>
+    </div>
+    {% if payment_method %}
+    <div class="info-row">
+        <span class="info-label">Payment Method:</span>
+        <span class="info-value">{{ payment_method | title }}</span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if track_order_url %}
+<div style="text-align: center;">
+    <a href="{{ track_order_url }}" class="button">Track Your Order</a>
+</div>
+{% endif %}
+
+<div class="message">
+    <p>We're preparing your order with care. You'll receive a notification when it's ready.</p>
+    <p>If you have any questions about your order, please contact us.</p>
+    <p style="margin-top: 20px;">
+        Thank you for choosing {{ restaurant_name }}!<br>
+        <strong>{{ restaurant_name }} Team</strong>
+    </p>
+</div>
+{% endblock %}

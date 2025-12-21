@@ -1,0 +1,361 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <linearGradient id="authHeader" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#c0392b"/>
+      <stop offset="100%" style="stop-color:#e74c3c"/>
+    </linearGradient>
+    <linearGradient id="stepGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3498db"/>
+      <stop offset="100%" style="stop-color:#2980b9"/>
+    </linearGradient>
+    <filter id="authShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="2" dy="3" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+    <marker id="flowArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#3498db"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1400" height="900" fill="#fafafa"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1400" height="60" fill="url(#authHeader)"/>
+  <text x="700" y="38" text-anchor="middle" fill="white" font-size="24" font-weight="bold">Authentication Flow - OTP Based Phone Verification</text>
+
+  <!-- Main Flow Container -->
+  <g transform="translate(50, 80)">
+    <!-- Phase 1: Initial Connection -->
+    <g>
+      <rect width="1300" height="180" rx="10" fill="white" stroke="#3498db" stroke-width="2" filter="url(#authShadow)"/>
+      <rect width="1300" height="35" rx="10" fill="#3498db"/>
+      <rect y="25" width="1300" height="10" fill="#3498db"/>
+      <text x="650" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Phase 1: WebSocket Connection &amp; Auth Check</text>
+
+      <!-- User -->
+      <g transform="translate(40, 55)">
+        <circle cx="30" cy="20" r="18" fill="#f39c12"/>
+        <rect x="15" y="42" width="30" height="22" rx="5" fill="#f39c12"/>
+        <text x="30" y="85" text-anchor="middle" font-size="10" fill="#666">User</text>
+      </g>
+
+      <!-- Arrow 1 -->
+      <path d="M90 90 L170 90" stroke="#3498db" stroke-width="2" marker-end="url(#flowArrow)"/>
+      <text x="130" y="80" text-anchor="middle" font-size="8" fill="#666">Connect</text>
+
+      <!-- Browser -->
+      <g transform="translate(180, 55)">
+        <rect width="140" height="80" rx="5" fill="white" stroke="#3498db" stroke-width="2"/>
+        <rect x="5" y="5" width="130" height="18" rx="3" fill="#ecf0f1"/>
+        <circle cx="15" cy="14" r="4" fill="#e74c3c"/>
+        <circle cx="28" cy="14" r="4" fill="#f1c40f"/>
+        <circle cx="41" cy="14" r="4" fill="#27ae60"/>
+        <text x="70" y="45" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">React App</text>
+        <text x="70" y="58" text-anchor="middle" font-size="8" fill="#666">useWebSocket()</text>
+        <text x="70" y="70" text-anchor="middle" font-size="7" fill="#999">device_id: localStorage</text>
+      </g>
+
+      <!-- Arrow 2 -->
+      <path d="M340 90 L420 90" stroke="#3498db" stroke-width="2" marker-end="url(#flowArrow)"/>
+      <text x="380" y="80" text-anchor="middle" font-size="8" fill="#666">WS Connect</text>
+
+      <!-- NGINX -->
+      <g transform="translate(430, 55)">
+        <rect width="100" height="80" rx="8" fill="#009639" filter="url(#authShadow)"/>
+        <text x="50" y="35" text-anchor="middle" fill="white" font-size="12" font-weight="bold">NGINX</text>
+        <text x="50" y="52" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">Upgrade:</text>
+        <text x="50" y="64" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">websocket</text>
+      </g>
+
+      <!-- Arrow 3 -->
+      <path d="M550 90 L630 90" stroke="#3498db" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- FastAPI -->
+      <g transform="translate(640, 50)">
+        <rect width="180" height="90" rx="8" fill="#009688" filter="url(#authShadow)"/>
+        <text x="90" y="25" text-anchor="middle" fill="white" font-size="11" font-weight="bold">FastAPI chat.py</text>
+        <text x="90" y="42" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">@router.websocket</text>
+        <text x="90" y="55" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">("/chat/{session_id}")</text>
+        <rect x="10" y="62" width="160" height="20" rx="3" fill="rgba(255,255,255,0.2)"/>
+        <text x="90" y="76" text-anchor="middle" fill="white" font-size="7">Check: AUTH_REQUIRED=true</text>
+      </g>
+
+      <!-- Arrow to decision -->
+      <path d="M840 95 L920 95" stroke="#3498db" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- Auth Check Decision -->
+      <g transform="translate(930, 60)">
+        <polygon points="60,0 120,35 60,70 0,35" fill="#fef9e7" stroke="#f39c12" stroke-width="2"/>
+        <text x="60" y="32" text-anchor="middle" font-size="9" font-weight="bold" fill="#d68910">Session</text>
+        <text x="60" y="45" text-anchor="middle" font-size="9" font-weight="bold" fill="#d68910">Auth?</text>
+      </g>
+
+      <!-- Redis check -->
+      <g transform="translate(1100, 60)">
+        <rect width="150" height="70" rx="8" fill="#dc382d" filter="url(#authShadow)"/>
+        <text x="75" y="25" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Redis</text>
+        <text x="75" y="42" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">session:{device_id}</text>
+        <text x="75" y="58" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="7">Check user_id exists</text>
+      </g>
+
+      <path d="M1050 95 L1090 95" stroke="#dc382d" stroke-width="1" stroke-dasharray="3,2"/>
+    </g>
+
+    <!-- Phase 2: OTP Request -->
+    <g transform="translate(0, 200)">
+      <rect width="1300" height="180" rx="10" fill="white" stroke="#e74c3c" stroke-width="2" filter="url(#authShadow)"/>
+      <rect width="1300" height="35" rx="10" fill="#e74c3c"/>
+      <rect y="25" width="1300" height="10" fill="#e74c3c"/>
+      <text x="650" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Phase 2: Phone Number Entry &amp; OTP Request</text>
+
+      <!-- Not authenticated -->
+      <g transform="translate(40, 55)">
+        <rect width="150" height="70" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+        <text x="75" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">AUTH_REQUIRED</text>
+        <text x="75" y="42" text-anchor="middle" font-size="8" fill="#666">Event sent to client</text>
+        <text x="75" y="55" text-anchor="middle" font-size="7" fill="#999">Shows phone input UI</text>
+      </g>
+
+      <!-- Arrow -->
+      <path d="M210 90 L280 90" stroke="#e74c3c" stroke-width="2" marker-end="url(#flowArrow)"/>
+      <text x="245" y="80" text-anchor="middle" font-size="8" fill="#666">Show Form</text>
+
+      <!-- Phone Input UI -->
+      <g transform="translate(290, 50)">
+        <rect width="160" height="80" rx="5" fill="white" stroke="#3498db" stroke-width="2"/>
+        <text x="80" y="20" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">Phone Entry</text>
+        <rect x="15" y="30" width="130" height="25" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+        <text x="80" y="47" text-anchor="middle" font-size="8" fill="#999">+91 98765 43210</text>
+        <rect x="35" y="60" width="90" height="15" rx="3" fill="#3498db"/>
+        <text x="80" y="71" text-anchor="middle" font-size="7" fill="white">Send OTP</text>
+      </g>
+
+      <!-- Arrow -->
+      <path d="M470 90 L540 90" stroke="#e74c3c" stroke-width="2" marker-end="url(#flowArrow)"/>
+      <text x="505" y="80" text-anchor="middle" font-size="8" fill="#666">Submit</text>
+
+      <!-- Identity Service -->
+      <g transform="translate(550, 45)">
+        <rect width="180" height="90" rx="8" fill="#e74c3c" filter="url(#authShadow)"/>
+        <text x="90" y="22" text-anchor="middle" fill="white" font-size="11" font-weight="bold">Identity Service</text>
+        <text x="90" y="38" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">send_otp(phone)</text>
+        <line x1="10" y1="45" x2="170" y2="45" stroke="rgba(255,255,255,0.3)"/>
+        <text x="90" y="60" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">1. Validate phone format</text>
+        <text x="90" y="72" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">2. Check rate limits</text>
+        <text x="90" y="84" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">3. Generate 6-digit OTP</text>
+      </g>
+
+      <!-- Arrow to DB -->
+      <path d="M750 90 L820 90" stroke="#e74c3c" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- OTP Storage -->
+      <g transform="translate(830, 45)">
+        <rect width="160" height="90" rx="8" fill="#336791" filter="url(#authShadow)"/>
+        <text x="80" y="22" text-anchor="middle" fill="white" font-size="10" font-weight="bold">PostgreSQL</text>
+        <text x="80" y="38" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">otp_verification</text>
+        <line x1="10" y1="45" x2="150" y2="45" stroke="rgba(255,255,255,0.3)"/>
+        <text x="10" y="60" font-size="7" fill="white" font-family="monospace">phone: +919876543210</text>
+        <text x="10" y="72" font-size="7" fill="white" font-family="monospace">otp_code: 123456</text>
+        <text x="10" y="84" font-size="7" fill="white" font-family="monospace">expires: +5 minutes</text>
+      </g>
+
+      <!-- SMS Provider (or Test Mode) -->
+      <g transform="translate(1030, 45)">
+        <rect width="160" height="90" rx="8" fill="#27ae60" filter="url(#authShadow)"/>
+        <text x="80" y="22" text-anchor="middle" fill="white" font-size="10" font-weight="bold">SMS/WhatsApp</text>
+        <text x="80" y="38" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">(or Test Mode)</text>
+        <line x1="10" y1="45" x2="150" y2="45" stroke="rgba(255,255,255,0.3)"/>
+        <text x="80" y="62" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">TEST_OTP_ENABLED=true</text>
+        <rect x="20" y="70" width="120" height="15" rx="3" fill="rgba(255,255,255,0.2)"/>
+        <text x="80" y="81" text-anchor="middle" fill="white" font-size="8" font-weight="bold">OTP: 123456</text>
+      </g>
+
+      <path d="M1010 90 L1020 90" stroke="#27ae60" stroke-width="1" stroke-dasharray="3,2"/>
+    </g>
+
+    <!-- Phase 3: OTP Verification -->
+    <g transform="translate(0, 400)">
+      <rect width="1300" height="180" rx="10" fill="white" stroke="#27ae60" stroke-width="2" filter="url(#authShadow)"/>
+      <rect width="1300" height="35" rx="10" fill="#27ae60"/>
+      <rect y="25" width="1300" height="10" fill="#27ae60"/>
+      <text x="650" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Phase 3: OTP Verification &amp; User Creation</text>
+
+      <!-- OTP Input -->
+      <g transform="translate(40, 50)">
+        <rect width="160" height="85" rx="5" fill="white" stroke="#27ae60" stroke-width="2"/>
+        <text x="80" y="20" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">OTP Entry</text>
+        <g transform="translate(15, 28)">
+          <rect width="20" height="25" rx="3" fill="#ecf0f1" stroke="#27ae60"/>
+          <text x="10" y="18" text-anchor="middle" font-size="12" fill="#333">1</text>
+          <rect x="25" width="20" height="25" rx="3" fill="#ecf0f1" stroke="#27ae60"/>
+          <text x="35" y="18" text-anchor="middle" font-size="12" fill="#333">2</text>
+          <rect x="50" width="20" height="25" rx="3" fill="#ecf0f1" stroke="#27ae60"/>
+          <text x="60" y="18" text-anchor="middle" font-size="12" fill="#333">3</text>
+          <rect x="75" width="20" height="25" rx="3" fill="#ecf0f1" stroke="#27ae60"/>
+          <text x="85" y="18" text-anchor="middle" font-size="12" fill="#333">4</text>
+          <rect x="100" width="20" height="25" rx="3" fill="#ecf0f1" stroke="#27ae60"/>
+          <text x="110" y="18" text-anchor="middle" font-size="12" fill="#333">5</text>
+          <rect x="125" width="20" height="25" rx="3" fill="#27ae60" stroke="#27ae60"/>
+          <text x="135" y="18" text-anchor="middle" font-size="12" fill="white">6</text>
+        </g>
+        <rect x="35" y="62" width="90" height="18" rx="3" fill="#27ae60"/>
+        <text x="80" y="75" text-anchor="middle" font-size="8" fill="white">Verify OTP</text>
+      </g>
+
+      <!-- Arrow -->
+      <path d="M220 95 L290 95" stroke="#27ae60" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- Verification Service -->
+      <g transform="translate(300, 45)">
+        <rect width="200" height="95" rx="8" fill="#27ae60" filter="url(#authShadow)"/>
+        <text x="100" y="20" text-anchor="middle" fill="white" font-size="11" font-weight="bold">Verify OTP</text>
+        <line x1="10" y1="28" x2="190" y2="28" stroke="rgba(255,255,255,0.3)"/>
+        <text x="100" y="42" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">1. Find OTP record by phone</text>
+        <text x="100" y="54" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">2. Check not expired</text>
+        <text x="100" y="66" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">3. Check attempts &lt; 3</text>
+        <text x="100" y="78" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">4. Compare OTP codes</text>
+        <text x="100" y="90" text-anchor="middle" fill="white" font-size="7">5. Mark as verified</text>
+      </g>
+
+      <!-- Arrow -->
+      <path d="M520 95 L590 95" stroke="#27ae60" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- User Creation/Lookup -->
+      <g transform="translate(600, 45)">
+        <rect width="180" height="95" rx="8" fill="#336791" filter="url(#authShadow)"/>
+        <text x="90" y="20" text-anchor="middle" fill="white" font-size="10" font-weight="bold">User Management</text>
+        <line x1="10" y1="28" x2="170" y2="28" stroke="rgba(255,255,255,0.3)"/>
+        <text x="90" y="42" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">Find user by phone</text>
+        <text x="90" y="56" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">OR</text>
+        <text x="90" y="70" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="7">Create new user</text>
+        <text x="10" y="88" font-size="6" fill="white" font-family="monospace">id: usr_abc123</text>
+      </g>
+
+      <!-- Arrow -->
+      <path d="M800 95 L870 95" stroke="#27ae60" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- Session Creation -->
+      <g transform="translate(880, 45)">
+        <rect width="170" height="95" rx="8" fill="#dc382d" filter="url(#authShadow)"/>
+        <text x="85" y="20" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Redis Session</text>
+        <line x1="10" y1="28" x2="160" y2="28" stroke="rgba(255,255,255,0.3)"/>
+        <text x="10" y="45" font-size="7" fill="white" font-family="monospace">SET session:{device_id}</text>
+        <text x="10" y="58" font-size="7" fill="white" font-family="monospace">{</text>
+        <text x="15" y="70" font-size="7" fill="white" font-family="monospace">user_id: "usr_abc123"</text>
+        <text x="15" y="82" font-size="7" fill="white" font-family="monospace">phone: "+91..."</text>
+        <text x="10" y="92" font-size="7" fill="white" font-family="monospace">} EX 86400</text>
+      </g>
+
+      <!-- Arrow -->
+      <path d="M1070 95 L1140 95" stroke="#27ae60" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- Success Response -->
+      <g transform="translate(1150, 55)">
+        <rect width="120" height="75" rx="5" fill="#e8f8f5" stroke="#27ae60" stroke-width="2"/>
+        <text x="60" y="22" text-anchor="middle" font-size="10" font-weight="bold" fill="#27ae60">AUTH_SUCCESS</text>
+        <text x="60" y="40" text-anchor="middle" font-size="8" fill="#666">User authenticated</text>
+        <text x="60" y="55" text-anchor="middle" font-size="7" fill="#999">Chat enabled</text>
+        <text x="60" y="68" text-anchor="middle" font-size="7" fill="#27ae60">Ready to order!</text>
+      </g>
+    </g>
+
+    <!-- Phase 4: Authenticated Session -->
+    <g transform="translate(0, 600)">
+      <rect width="1300" height="150" rx="10" fill="white" stroke="#9b59b6" stroke-width="2" filter="url(#authShadow)"/>
+      <rect width="1300" height="35" rx="10" fill="#9b59b6"/>
+      <rect y="25" width="1300" height="10" fill="#9b59b6"/>
+      <text x="650" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Phase 4: Authenticated Chat Session</text>
+
+      <!-- Authenticated User -->
+      <g transform="translate(40, 55)">
+        <circle cx="30" cy="20" r="18" fill="#27ae60"/>
+        <text x="30" y="25" text-anchor="middle" fill="white" font-size="14">✓</text>
+        <rect x="15" y="42" width="30" height="22" rx="5" fill="#27ae60"/>
+        <text x="30" y="85" text-anchor="middle" font-size="10" fill="#27ae60" font-weight="bold">Authenticated</text>
+      </g>
+
+      <!-- Chat Flow -->
+      <g transform="translate(120, 50)">
+        <rect width="250" height="80" rx="5" fill="#f5eef8" stroke="#9b59b6"/>
+        <text x="125" y="20" text-anchor="middle" font-size="10" font-weight="bold" fill="#8e44ad">Every Subsequent Message</text>
+        <text x="125" y="40" text-anchor="middle" font-size="8" fill="#666">1. WebSocket receives message</text>
+        <text x="125" y="55" text-anchor="middle" font-size="8" fill="#666">2. Check Redis session → Found!</text>
+        <text x="125" y="70" text-anchor="middle" font-size="8" fill="#666">3. Set user context → Process</text>
+      </g>
+
+      <path d="M390 90 L460 90" stroke="#9b59b6" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- Context -->
+      <g transform="translate(470, 50)">
+        <rect width="200" height="80" rx="5" fill="#e8f4f8" stroke="#3498db"/>
+        <text x="100" y="20" text-anchor="middle" font-size="10" font-weight="bold" fill="#2980b9">Session Context</text>
+        <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">set_session_context(</text>
+        <text x="20" y="52" font-size="8" fill="#333" font-family="monospace">user_id="usr_abc123"</text>
+        <text x="20" y="64" font-size="8" fill="#333" font-family="monospace">session_id="ses_xyz"</text>
+        <text x="10" y="76" font-size="8" fill="#333" font-family="monospace">)</text>
+      </g>
+
+      <path d="M690 90 L760 90" stroke="#9b59b6" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- LangGraph -->
+      <g transform="translate(770, 50)">
+        <rect width="150" height="80" rx="8" fill="#667eea" filter="url(#authShadow)"/>
+        <text x="75" y="25" text-anchor="middle" fill="white" font-size="11" font-weight="bold">LangGraph</text>
+        <text x="75" y="45" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">Process with</text>
+        <text x="75" y="58" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="8">user_id context</text>
+        <text x="75" y="72" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="7">User-specific tools</text>
+      </g>
+
+      <path d="M940 90 L1010 90" stroke="#9b59b6" stroke-width="2" marker-end="url(#flowArrow)"/>
+
+      <!-- Tools with User Context -->
+      <g transform="translate(1020, 50)">
+        <rect width="230" height="80" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+        <text x="115" y="20" text-anchor="middle" font-size="10" font-weight="bold" fill="#d68910">Tools with User Context</text>
+        <text x="115" y="38" text-anchor="middle" font-size="8" fill="#666">get_current_user_id() → "usr_abc123"</text>
+        <text x="115" y="52" text-anchor="middle" font-size="8" fill="#666">• View user's past orders</text>
+        <text x="115" y="65" text-anchor="middle" font-size="8" fill="#666">• Create orders for user</text>
+        <text x="115" y="78" text-anchor="middle" font-size="8" fill="#666">• Access user preferences</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Security Features Box -->
+  <g transform="translate(50, 780)">
+    <rect width="400" height="100" rx="8" fill="white" stroke="#e74c3c" filter="url(#authShadow)"/>
+    <text x="200" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#c0392b">Security Features</text>
+    <line x1="20" y1="35" x2="380" y2="35" stroke="#fdd"/>
+    <text x="20" y="55" font-size="9" fill="#333">• OTP expires in 5 minutes</text>
+    <text x="20" y="70" font-size="9" fill="#333">• Max 3 verification attempts per OTP</text>
+    <text x="20" y="85" font-size="9" fill="#333">• Rate limit: 5 OTPs per phone per day</text>
+    <text x="220" y="55" font-size="9" fill="#333">• Session lockout after failures</text>
+    <text x="220" y="70" font-size="9" fill="#333">• Device ID tracking</text>
+    <text x="220" y="85" font-size="9" fill="#333">• Session expires in 24 hours</text>
+  </g>
+
+  <!-- Rate Limiting Box -->
+  <g transform="translate(480, 780)">
+    <rect width="400" height="100" rx="8" fill="white" stroke="#f39c12" filter="url(#authShadow)"/>
+    <text x="200" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#d68910">Rate Limiting Tables</text>
+    <line x1="20" y1="35" x2="380" y2="35" stroke="#fef9e7"/>
+    <text x="20" y="55" font-size="9" fill="#333" font-family="monospace">otp_rate_limits</text>
+    <text x="20" y="70" font-size="9" fill="#666">• Per phone daily limit tracking</text>
+    <text x="20" y="85" font-size="9" fill="#666">• Prevents SMS abuse</text>
+    <text x="220" y="55" font-size="9" fill="#333" font-family="monospace">auth_sessions</text>
+    <text x="220" y="70" font-size="9" fill="#666">• Lockout mechanism</text>
+    <text x="220" y="85" font-size="9" fill="#666">• Phone change audit trail</text>
+  </g>
+
+  <!-- Test Mode Box -->
+  <g transform="translate(910, 780)">
+    <rect width="380" height="100" rx="8" fill="#e8f8f5" stroke="#27ae60" filter="url(#authShadow)"/>
+    <text x="190" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#1e8449">Test Mode (Development)</text>
+    <line x1="20" y1="35" x2="360" y2="35" stroke="#a9dfbf"/>
+    <text x="20" y="55" font-size="9" fill="#333">TEST_OTP_ENABLED=true</text>
+    <text x="20" y="70" font-size="9" fill="#333">TEST_OTP_CODE=123456</text>
+    <text x="20" y="88" font-size="9" fill="#27ae60" font-weight="bold">Use OTP: 123456 for any phone</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="700" y="895" text-anchor="middle" font-size="10" fill="#999">Restaurant AI - Authentication Flow | OTP-Based Phone Verification | December 2025</text>
+</svg>

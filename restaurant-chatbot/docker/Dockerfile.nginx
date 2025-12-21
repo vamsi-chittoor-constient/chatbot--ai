@@ -1,0 +1,43 @@
+# =============================================================================
+# Restaurant AI - Nginx + Frontend
+# =============================================================================
+# Multi-stage build: Build React app, then serve with Nginx
+# =============================================================================
+
+# Stage 1: Build React Frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+# Copy package files
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci --silent
+
+# Copy frontend source
+COPY frontend/ .
+
+# Build for production
+RUN npm run build
+
+# Stage 2: Nginx with built frontend
+FROM nginx:alpine
+
+# Install curl for healthcheck
+RUN apk add --no-cache curl
+
+# Copy nginx configuration
+COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
+
+# Copy built frontend from builder stage
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+
+# Expose port
+EXPOSE 80
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost/health || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

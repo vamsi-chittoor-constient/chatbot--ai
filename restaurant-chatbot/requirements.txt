@@ -1,0 +1,46 @@
+# =============================================================================
+# Restaurant AI - Python Dependencies
+# =============================================================================
+
+# Web Framework
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+asyncpg
+psycopg2-binary
+pgvector
+
+# Cache & Session
+redis
+aioredis
+
+# HTTP & WebSocket
+aiohttp
+websockets
+httpx
+
+# Configuration
+python-dotenv
+pydantic
+pydantic-settings
+
+# Logging
+structlog
+
+# AI/LLM
+openai
+langchain
+langchain-openai
+langchain-core
+langgraph
+crewai>=1.7.0
+crewai-tools
+
+# MongoDB
+pymongo
+motor
+
+# Utilities
+python-multipart

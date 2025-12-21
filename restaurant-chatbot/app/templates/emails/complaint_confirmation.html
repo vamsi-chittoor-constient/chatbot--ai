@@ -1,0 +1,57 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Complaint Received - {{ restaurant_name }}{% endblock %}
+
+{% block content %}
+<div class="greeting">
+    Hello {{ customer_name | default('Valued Customer') }}! 👋
+</div>
+
+<div class="message">
+    <p>Thank you for bringing this matter to our attention.</p>
+    <p>We've received your complaint and take your feedback very seriously. Here are the details of your complaint:</p>
+</div>
+
+<div class="info-box">
+    <h3>Complaint Details</h3>
+    <div class="info-row">
+        <span class="info-label">Reference Number:</span>
+        <span class="info-value" style="font-weight: bold; color: #667eea;">{{ complaint_id | default('N/A') }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Date Submitted:</span>
+        <span class="info-value">{{ submission_date | default('Today') }}</span>
+    </div>
+    {% if complaint_type %}
+    <div class="info-row">
+        <span class="info-label">Category:</span>
+        <span class="info-value">{{ complaint_type }}</span>
+    </div>
+    {% endif %}
+    {% if complaint_description %}
+    <div class="info-row">
+        <span class="info-label">Description:</span>
+        <span class="info-value">{{ complaint_description }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<div class="message">
+    <p><strong>What happens next:</strong></p>
+    <ul>
+        <li>Our management team will review your complaint within 24 hours</li>
+        <li>We will investigate the issue thoroughly</li>
+        <li>You will receive a follow-up response within 48 hours</li>
+        <li>We are committed to resolving this matter to your satisfaction</li>
+    </ul>
+</div>
+
+<div class="message">
+    <p>Your feedback helps us improve our service and ensure that every guest has an exceptional experience.</p>
+    <p>If you need to provide additional information or have urgent concerns, please contact us directly.</p>
+    <p style="margin-top: 20px;">
+        Sincerely,<br>
+        <strong>{{ restaurant_name }} Management Team</strong>
+    </p>
+</div>
+{% endblock %}

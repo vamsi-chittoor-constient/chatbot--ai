@@ -1,0 +1,434 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1200" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <linearGradient id="dbHeader" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#1e3c72"/>
+      <stop offset="100%" style="stop-color:#2a5298"/>
+    </linearGradient>
+    <linearGradient id="tableHeader" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#336791"/>
+      <stop offset="100%" style="stop-color:#1d4f6e"/>
+    </linearGradient>
+    <linearGradient id="userTable" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e74c3c"/>
+      <stop offset="100%" style="stop-color:#c0392b"/>
+    </linearGradient>
+    <linearGradient id="menuTable" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#27ae60"/>
+      <stop offset="100%" style="stop-color:#1e8449"/>
+    </linearGradient>
+    <linearGradient id="orderTable" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3498db"/>
+      <stop offset="100%" style="stop-color:#2980b9"/>
+    </linearGradient>
+    <linearGradient id="bookingTable" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#9b59b6"/>
+      <stop offset="100%" style="stop-color:#8e44ad"/>
+    </linearGradient>
+    <linearGradient id="configTable" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f39c12"/>
+      <stop offset="100%" style="stop-color:#d68910"/>
+    </linearGradient>
+    <filter id="tableShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="2" dy="3" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+    <marker id="fkArrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1500" height="1200" fill="#f5f7fa"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1500" height="60" fill="url(#dbHeader)"/>
+  <text x="750" y="38" text-anchor="middle" fill="white" font-size="24" font-weight="bold">Database Schema - PostgreSQL 15 (152 Tables)</text>
+
+  <!-- Legend -->
+  <g transform="translate(1250, 80)">
+    <rect width="230" height="130" rx="8" fill="white" stroke="#ddd" filter="url(#tableShadow)"/>
+    <text x="115" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Legend</text>
+    <line x1="10" y1="35" x2="220" y2="35" stroke="#ddd"/>
+    <rect x="15" y="45" width="15" height="12" fill="#e74c3c"/>
+    <text x="40" y="55" font-size="10" fill="#333">User/Auth Tables</text>
+    <rect x="15" y="65" width="15" height="12" fill="#27ae60"/>
+    <text x="40" y="75" font-size="10" fill="#333">Menu/Product Tables</text>
+    <rect x="15" y="85" width="15" height="12" fill="#3498db"/>
+    <text x="40" y="95" font-size="10" fill="#333">Order/Cart Tables</text>
+    <rect x="15" y="105" width="15" height="12" fill="#9b59b6"/>
+    <text x="40" y="115" font-size="10" fill="#333">Booking Tables</text>
+    <text x="15" y="128" font-size="9" fill="#666">PK = Primary Key | FK = Foreign Key</text>
+  </g>
+
+  <!-- USER DOMAIN -->
+  <g transform="translate(30, 80)">
+    <rect width="350" height="420" rx="10" fill="white" stroke="#e74c3c" stroke-width="2" filter="url(#tableShadow)"/>
+    <rect width="350" height="35" rx="10" fill="url(#userTable)"/>
+    <rect y="25" width="350" height="10" fill="url(#userTable)"/>
+    <text x="175" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">User Domain</text>
+
+    <!-- users table -->
+    <g transform="translate(15, 50)">
+      <rect width="320" height="130" rx="5" fill="#fff5f5" stroke="#e74c3c"/>
+      <rect width="320" height="22" rx="5" fill="#e74c3c"/>
+      <text x="160" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">users</text>
+      <text x="10" y="38" font-size="9" fill="#333" font-family="monospace">id          VARCHAR(20) PK</text>
+      <text x="10" y="52" font-size="9" fill="#333" font-family="monospace">phone_number VARCHAR(20) UNIQUE</text>
+      <text x="10" y="66" font-size="9" fill="#333" font-family="monospace">name        VARCHAR(100)</text>
+      <text x="10" y="80" font-size="9" fill="#333" font-family="monospace">email       VARCHAR(255)</text>
+      <text x="10" y="94" font-size="9" fill="#333" font-family="monospace">status      user_status ENUM</text>
+      <text x="10" y="108" font-size="9" fill="#333" font-family="monospace">created_at  TIMESTAMP</text>
+      <text x="10" y="122" font-size="9" fill="#333" font-family="monospace">last_login  TIMESTAMP</text>
+    </g>
+
+    <!-- auth_sessions table -->
+    <g transform="translate(15, 190)">
+      <rect width="320" height="105" rx="5" fill="#fff5f5" stroke="#e74c3c"/>
+      <rect width="320" height="22" rx="5" fill="#c0392b"/>
+      <text x="160" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">auth_sessions</text>
+      <text x="10" y="38" font-size="9" fill="#333" font-family="monospace">id           VARCHAR(20) PK</text>
+      <text x="10" y="52" font-size="9" fill="#333" font-family="monospace">user_id      VARCHAR(20) FK→users</text>
+      <text x="10" y="66" font-size="9" fill="#333" font-family="monospace">device_id    VARCHAR(255)</text>
+      <text x="10" y="80" font-size="9" fill="#333" font-family="monospace">locked_until TIMESTAMP</text>
+      <text x="10" y="94" font-size="9" fill="#333" font-family="monospace">otp_attempts INTEGER</text>
+    </g>
+
+    <!-- otp_verification table -->
+    <g transform="translate(15, 305)">
+      <rect width="320" height="105" rx="5" fill="#fff5f5" stroke="#e74c3c"/>
+      <rect width="320" height="22" rx="5" fill="#c0392b"/>
+      <text x="160" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">otp_verification</text>
+      <text x="10" y="38" font-size="9" fill="#333" font-family="monospace">id           VARCHAR(20) PK</text>
+      <text x="10" y="52" font-size="9" fill="#333" font-family="monospace">phone_number VARCHAR(20)</text>
+      <text x="10" y="66" font-size="9" fill="#333" font-family="monospace">otp_code     VARCHAR(10)</text>
+      <text x="10" y="80" font-size="9" fill="#333" font-family="monospace">expires_at   TIMESTAMP</text>
+      <text x="10" y="94" font-size="9" fill="#333" font-family="monospace">is_verified  BOOLEAN</text>
+    </g>
+  </g>
+
+  <!-- MENU DOMAIN -->
+  <g transform="translate(400, 80)">
+    <rect width="400" height="520" rx="10" fill="white" stroke="#27ae60" stroke-width="2" filter="url(#tableShadow)"/>
+    <rect width="400" height="35" rx="10" fill="url(#menuTable)"/>
+    <rect y="25" width="400" height="10" fill="url(#menuTable)"/>
+    <text x="200" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Menu Domain (365 Items)</text>
+
+    <!-- menu_item table -->
+    <g transform="translate(15, 50)">
+      <rect width="370" height="180" rx="5" fill="#f0fff4" stroke="#27ae60"/>
+      <rect width="370" height="22" rx="5" fill="#27ae60"/>
+      <text x="185" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">menu_item</text>
+      <text x="10" y="38" font-size="9" fill="#333" font-family="monospace">menu_item_id      UUID PK</text>
+      <text x="10" y="52" font-size="9" fill="#333" font-family="monospace">restaurant_id     UUID FK</text>
+      <text x="10" y="66" font-size="9" fill="#333" font-family="monospace">menu_item_name    VARCHAR(200)</text>
+      <text x="10" y="80" font-size="9" fill="#333" font-family="monospace">menu_item_price   NUMERIC(10,2)</text>
+      <text x="10" y="94" font-size="9" fill="#333" font-family="monospace">menu_item_status  VARCHAR(20)</text>
+      <text x="10" y="108" font-size="9" fill="#333" font-family="monospace">menu_item_spice   VARCHAR(20)</text>
+      <text x="10" y="122" font-size="9" fill="#333" font-family="monospace">menu_item_in_stock BOOLEAN</text>
+      <text x="10" y="136" font-size="9" fill="#333" font-family="monospace">menu_item_calories INTEGER</text>
+      <text x="10" y="150" font-size="9" fill="#333" font-family="monospace">menu_item_image   VARCHAR(500)</text>
+      <text x="10" y="164" font-size="9" fill="#333" font-family="monospace">is_recommended    BOOLEAN</text>
+      <text x="10" y="178" font-size="9" fill="#666" font-family="monospace">+ 24 more columns...</text>
+    </g>
+
+    <!-- menu_category table -->
+    <g transform="translate(15, 240)">
+      <rect width="175" height="90" rx="5" fill="#f0fff4" stroke="#27ae60"/>
+      <rect width="175" height="22" rx="5" fill="#1e8449"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">menu_category</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">id      UUID PK</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">name    VARCHAR</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">rank    INTEGER</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">is_active BOOLEAN</text>
+    </g>
+
+    <!-- cuisine table -->
+    <g transform="translate(205, 240)">
+      <rect width="175" height="90" rx="5" fill="#f0fff4" stroke="#27ae60"/>
+      <rect width="175" height="22" rx="5" fill="#1e8449"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">cuisine</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">id      UUID PK</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">name    VARCHAR</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">country VARCHAR</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">is_active BOOLEAN</text>
+    </g>
+
+    <!-- allergen table -->
+    <g transform="translate(15, 340)">
+      <rect width="175" height="75" rx="5" fill="#f0fff4" stroke="#27ae60"/>
+      <rect width="175" height="22" rx="5" fill="#1e8449"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">allergen</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">id   UUID PK</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">name VARCHAR</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">icon VARCHAR</text>
+    </g>
+
+    <!-- dietary_type table -->
+    <g transform="translate(205, 340)">
+      <rect width="175" height="75" rx="5" fill="#f0fff4" stroke="#27ae60"/>
+      <rect width="175" height="22" rx="5" fill="#1e8449"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">dietary_type</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">id   UUID PK</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">name VARCHAR</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">icon VARCHAR</text>
+    </g>
+
+    <!-- meal_type table -->
+    <g transform="translate(15, 425)">
+      <rect width="370" height="75" rx="5" fill="#f0fff4" stroke="#27ae60"/>
+      <rect width="370" height="22" rx="5" fill="#1e8449"/>
+      <text x="185" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">meal_type + meal_slot_timing</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">meal_type: Breakfast | Lunch | Dinner | All Day</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">opening_time, closing_time (TIME)</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">Used for time-based menu suggestions</text>
+    </g>
+  </g>
+
+  <!-- ORDER DOMAIN -->
+  <g transform="translate(820, 80)">
+    <rect width="400" height="420" rx="10" fill="white" stroke="#3498db" stroke-width="2" filter="url(#tableShadow)"/>
+    <rect width="400" height="35" rx="10" fill="url(#orderTable)"/>
+    <rect y="25" width="400" height="10" fill="url(#orderTable)"/>
+    <text x="200" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Order Domain</text>
+
+    <!-- orders table -->
+    <g transform="translate(15, 50)">
+      <rect width="370" height="155" rx="5" fill="#ebf5fb" stroke="#3498db"/>
+      <rect width="370" height="22" rx="5" fill="#3498db"/>
+      <text x="185" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">orders</text>
+      <text x="10" y="38" font-size="9" fill="#333" font-family="monospace">order_id       UUID PK</text>
+      <text x="10" y="52" font-size="9" fill="#333" font-family="monospace">user_id        VARCHAR FK→users</text>
+      <text x="10" y="66" font-size="9" fill="#333" font-family="monospace">session_id     VARCHAR</text>
+      <text x="10" y="80" font-size="9" fill="#333" font-family="monospace">order_number   VARCHAR UNIQUE</text>
+      <text x="10" y="94" font-size="9" fill="#333" font-family="monospace">order_type     VARCHAR (dine-in|takeaway)</text>
+      <text x="10" y="108" font-size="9" fill="#333" font-family="monospace">status         order_status ENUM</text>
+      <text x="10" y="122" font-size="9" fill="#333" font-family="monospace">total_amount   NUMERIC(10,2)</text>
+      <text x="10" y="136" font-size="9" fill="#333" font-family="monospace">payment_status payment_status ENUM</text>
+      <text x="10" y="150" font-size="9" fill="#666" font-family="monospace">+ taxes, discounts, timestamps...</text>
+    </g>
+
+    <!-- order_items table -->
+    <g transform="translate(15, 215)">
+      <rect width="175" height="105" rx="5" fill="#ebf5fb" stroke="#3498db"/>
+      <rect width="175" height="22" rx="5" fill="#2980b9"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">order_items</text>
+      <text x="10" y="38" font-size="8" fill="#333" font-family="monospace">id         UUID PK</text>
+      <text x="10" y="52" font-size="8" fill="#333" font-family="monospace">order_id   UUID FK</text>
+      <text x="10" y="66" font-size="8" fill="#333" font-family="monospace">item_id    UUID FK</text>
+      <text x="10" y="80" font-size="8" fill="#333" font-family="monospace">quantity   INTEGER</text>
+      <text x="10" y="94" font-size="8" fill="#333" font-family="monospace">unit_price NUMERIC</text>
+    </g>
+
+    <!-- payment_transactions table -->
+    <g transform="translate(205, 215)">
+      <rect width="175" height="105" rx="5" fill="#ebf5fb" stroke="#3498db"/>
+      <rect width="175" height="22" rx="5" fill="#2980b9"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">payment_txn</text>
+      <text x="10" y="38" font-size="8" fill="#333" font-family="monospace">id        UUID PK</text>
+      <text x="10" y="52" font-size="8" fill="#333" font-family="monospace">order_id  UUID FK</text>
+      <text x="10" y="66" font-size="8" fill="#333" font-family="monospace">amount    NUMERIC</text>
+      <text x="10" y="80" font-size="8" fill="#333" font-family="monospace">method    VARCHAR</text>
+      <text x="10" y="94" font-size="8" fill="#333" font-family="monospace">status    VARCHAR</text>
+    </g>
+
+    <!-- sessions table (Redis backed) -->
+    <g transform="translate(15, 330)">
+      <rect width="370" height="75" rx="5" fill="#fef9e7" stroke="#f39c12" stroke-dasharray="5,3"/>
+      <rect width="370" height="22" rx="5" fill="#f39c12"/>
+      <text x="185" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">cart (Redis)</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">Key: cart:{session_id}</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">Value: {items: [...], total: N, updated_at: ...}</text>
+      <text x="10" y="70" font-size="8" fill="#666" font-family="monospace">TTL: 24 hours | Used for shopping cart</text>
+    </g>
+  </g>
+
+  <!-- BOOKING DOMAIN -->
+  <g transform="translate(30, 520)">
+    <rect width="350" height="300" rx="10" fill="white" stroke="#9b59b6" stroke-width="2" filter="url(#tableShadow)"/>
+    <rect width="350" height="35" rx="10" fill="url(#bookingTable)"/>
+    <rect y="25" width="350" height="10" fill="url(#bookingTable)"/>
+    <text x="175" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Booking Domain</text>
+
+    <!-- bookings table -->
+    <g transform="translate(15, 50)">
+      <rect width="320" height="130" rx="5" fill="#f5eef8" stroke="#9b59b6"/>
+      <rect width="320" height="22" rx="5" fill="#9b59b6"/>
+      <text x="160" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">bookings</text>
+      <text x="10" y="38" font-size="9" fill="#333" font-family="monospace">booking_id    UUID PK</text>
+      <text x="10" y="52" font-size="9" fill="#333" font-family="monospace">user_id       VARCHAR FK→users</text>
+      <text x="10" y="66" font-size="9" fill="#333" font-family="monospace">table_id      UUID FK→tables</text>
+      <text x="10" y="80" font-size="9" fill="#333" font-family="monospace">booking_date  DATE</text>
+      <text x="10" y="94" font-size="9" fill="#333" font-family="monospace">time_slot     TIME</text>
+      <text x="10" y="108" font-size="9" fill="#333" font-family="monospace">guest_count   INTEGER</text>
+      <text x="10" y="122" font-size="9" fill="#333" font-family="monospace">status        booking_status</text>
+    </g>
+
+    <!-- tables table -->
+    <g transform="translate(15, 190)">
+      <rect width="155" height="95" rx="5" fill="#f5eef8" stroke="#9b59b6"/>
+      <rect width="155" height="22" rx="5" fill="#8e44ad"/>
+      <text x="77" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">tables</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">id       UUID PK</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">number   INTEGER</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">capacity INTEGER</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">location VARCHAR</text>
+    </g>
+
+    <!-- waitlist table -->
+    <g transform="translate(180, 190)">
+      <rect width="155" height="95" rx="5" fill="#f5eef8" stroke="#9b59b6"/>
+      <rect width="155" height="22" rx="5" fill="#8e44ad"/>
+      <text x="77" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">waitlist</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">id       UUID PK</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">user_id  FK</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">position INTEGER</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">status   VARCHAR</text>
+    </g>
+  </g>
+
+  <!-- CONFIG/FEEDBACK DOMAIN -->
+  <g transform="translate(400, 620)">
+    <rect width="400" height="300" rx="10" fill="white" stroke="#f39c12" stroke-width="2" filter="url(#tableShadow)"/>
+    <rect width="400" height="35" rx="10" fill="url(#configTable)"/>
+    <rect y="25" width="400" height="10" fill="url(#configTable)"/>
+    <text x="200" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Config &amp; Feedback Domain</text>
+
+    <!-- restaurant_table -->
+    <g transform="translate(15, 50)">
+      <rect width="175" height="105" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+      <rect width="175" height="22" rx="5" fill="#f39c12"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">restaurant</text>
+      <text x="10" y="38" font-size="8" fill="#333" font-family="monospace">id      UUID PK</text>
+      <text x="10" y="52" font-size="8" fill="#333" font-family="monospace">name    VARCHAR</text>
+      <text x="10" y="66" font-size="8" fill="#333" font-family="monospace">address TEXT</text>
+      <text x="10" y="80" font-size="8" fill="#333" font-family="monospace">phone   VARCHAR</text>
+      <text x="10" y="94" font-size="8" fill="#333" font-family="monospace">settings JSONB</text>
+    </g>
+
+    <!-- feedback table -->
+    <g transform="translate(205, 50)">
+      <rect width="175" height="105" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+      <rect width="175" height="22" rx="5" fill="#d68910"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">feedback</text>
+      <text x="10" y="38" font-size="8" fill="#333" font-family="monospace">id       UUID PK</text>
+      <text x="10" y="52" font-size="8" fill="#333" font-family="monospace">user_id  FK</text>
+      <text x="10" y="66" font-size="8" fill="#333" font-family="monospace">rating   INTEGER</text>
+      <text x="10" y="80" font-size="8" fill="#333" font-family="monospace">comment  TEXT</text>
+      <text x="10" y="94" font-size="8" fill="#333" font-family="monospace">type     VARCHAR</text>
+    </g>
+
+    <!-- complaints table -->
+    <g transform="translate(15, 165)">
+      <rect width="175" height="90" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+      <rect width="175" height="22" rx="5" fill="#d68910"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">complaints</text>
+      <text x="10" y="38" font-size="8" fill="#333" font-family="monospace">id       UUID PK</text>
+      <text x="10" y="52" font-size="8" fill="#333" font-family="monospace">user_id  FK</text>
+      <text x="10" y="66" font-size="8" fill="#333" font-family="monospace">issue    TEXT</text>
+      <text x="10" y="80" font-size="8" fill="#333" font-family="monospace">status   VARCHAR</text>
+    </g>
+
+    <!-- faq table -->
+    <g transform="translate(205, 165)">
+      <rect width="175" height="90" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+      <rect width="175" height="22" rx="5" fill="#d68910"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">faq</text>
+      <text x="10" y="38" font-size="8" fill="#333" font-family="monospace">id       UUID PK</text>
+      <text x="10" y="52" font-size="8" fill="#333" font-family="monospace">question TEXT</text>
+      <text x="10" y="66" font-size="8" fill="#333" font-family="monospace">answer   TEXT</text>
+      <text x="10" y="80" font-size="8" fill="#333" font-family="monospace">category VARCHAR</text>
+    </g>
+  </g>
+
+  <!-- ANALYTICS DOMAIN (MongoDB) -->
+  <g transform="translate(820, 520)">
+    <rect width="400" height="400" rx="10" fill="white" stroke="#4db33d" stroke-width="2" filter="url(#tableShadow)"/>
+    <rect width="400" height="35" rx="10" fill="#4db33d"/>
+    <rect y="25" width="400" height="10" fill="#4db33d"/>
+    <text x="200" y="25" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Analytics Domain (MongoDB)</text>
+
+    <!-- conversations collection -->
+    <g transform="translate(15, 50)">
+      <rect width="370" height="100" rx="5" fill="#f0fff4" stroke="#4db33d"/>
+      <rect width="370" height="22" rx="5" fill="#4db33d"/>
+      <text x="185" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">conversations</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">_id: ObjectId</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">session_id: String</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">user_id: String</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">messages: [{role, content, timestamp}]</text>
+      <text x="10" y="98" font-size="8" fill="#666" font-family="monospace">intents: [...], tool_calls: [...]</text>
+    </g>
+
+    <!-- agent_logs collection -->
+    <g transform="translate(15, 160)">
+      <rect width="175" height="90" rx="5" fill="#f0fff4" stroke="#4db33d"/>
+      <rect width="175" height="22" rx="5" fill="#3a8c2e"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">agent_logs</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">agent: String</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">action: String</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">duration_ms: Int</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">success: Boolean</text>
+    </g>
+
+    <!-- llm_usage collection -->
+    <g transform="translate(205, 160)">
+      <rect width="175" height="90" rx="5" fill="#f0fff4" stroke="#4db33d"/>
+      <rect width="175" height="22" rx="5" fill="#3a8c2e"/>
+      <text x="87" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">llm_usage</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">account: String</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">model: String</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">tokens_in: Int</text>
+      <text x="10" y="85" font-size="8" fill="#333" font-family="monospace">tokens_out: Int</text>
+    </g>
+
+    <!-- user_events collection -->
+    <g transform="translate(15, 260)">
+      <rect width="370" height="80" rx="5" fill="#f0fff4" stroke="#4db33d"/>
+      <rect width="370" height="22" rx="5" fill="#3a8c2e"/>
+      <text x="185" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">user_events (Analytics)</text>
+      <text x="10" y="40" font-size="8" fill="#333" font-family="monospace">event_type: menu_view | cart_add | order_placed</text>
+      <text x="10" y="55" font-size="8" fill="#333" font-family="monospace">user_id, session_id, timestamp</text>
+      <text x="10" y="70" font-size="8" fill="#333" font-family="monospace">metadata: {item_id, price, quantity, ...}</text>
+    </g>
+
+    <!-- Performance stats -->
+    <g transform="translate(15, 350)">
+      <rect width="370" height="35" rx="5" fill="#e8f8f5" stroke="#1abc9c"/>
+      <text x="185" y="22" text-anchor="middle" font-size="10" fill="#16a085">Indexed for: session_id, user_id, timestamp</text>
+    </g>
+  </g>
+
+  <!-- Relationship Lines -->
+  <g stroke="#666" stroke-width="1.5" fill="none">
+    <!-- users → orders -->
+    <path d="M380 300 Q500 300 820 250" marker-end="url(#fkArrow)" stroke-dasharray="4,2"/>
+    <text x="600" y="260" font-size="8" fill="#666">1:N</text>
+
+    <!-- users → bookings -->
+    <path d="M200 500 L200 520" marker-end="url(#fkArrow)" stroke-dasharray="4,2"/>
+    <text x="210" y="510" font-size="8" fill="#666">1:N</text>
+
+    <!-- menu_item → order_items -->
+    <path d="M800 280 L820 280" marker-end="url(#fkArrow)" stroke-dasharray="4,2"/>
+    <text x="808" y="275" font-size="8" fill="#666">1:N</text>
+
+    <!-- orders → order_items -->
+    <path d="M950 205 L950 215" marker-end="url(#fkArrow)" stroke-dasharray="4,2"/>
+  </g>
+
+  <!-- Stats Box -->
+  <g transform="translate(1250, 230)">
+    <rect width="230" height="180" rx="8" fill="white" stroke="#336791" filter="url(#tableShadow)"/>
+    <text x="115" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#336791">Database Stats</text>
+    <line x1="10" y1="35" x2="220" y2="35" stroke="#ddd"/>
+    <text x="20" y="55" font-size="10" fill="#333">Total Tables: 152</text>
+    <text x="20" y="75" font-size="10" fill="#333">Menu Items: 365</text>
+    <text x="20" y="95" font-size="10" fill="#333">Categories: 24</text>
+    <text x="20" y="115" font-size="10" fill="#333">Cuisines: 12</text>
+    <text x="20" y="135" font-size="10" fill="#333">Indexes: 89</text>
+    <text x="20" y="155" font-size="10" fill="#333">Connection Pool: 20</text>
+    <text x="20" y="172" font-size="9" fill="#27ae60">Driver: asyncpg</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="750" y="1180" text-anchor="middle" font-size="10" fill="#999">Restaurant AI - Database Schema | PostgreSQL 15 + MongoDB 7 + Redis 7 | December 2025</text>
+</svg>
