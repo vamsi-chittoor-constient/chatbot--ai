@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.core.config import config
 from app.api.middleware.logging import setup_logging
@@ -330,18 +331,15 @@ from app.api.routes import testing
 app.include_router(testing.router, prefix="/api/v1", tags=["testing"])
 # ============ END TESTING MODULE ============
 
-# Mount static files for monitoring dashboard
+# Mount static files for frontend assets
+app.mount("/assets", StaticFiles(directory="static/testing/assets"), name="assets")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-
-# Root endpoint
+# Root endpoint - Serve frontend
 @app.get("/")
 async def root():
-    return {
-        "message": f"{config.APP_NAME} v{config.APP_VERSION} is running",
-        "environment": config.ENVIRONMENT,
-        "docs_url": "/docs" if config.DEBUG else None
-    }
+    """Serve the chatbot frontend interface at root URL"""
+    return FileResponse("static/testing/index.html")
 
 # Print all routes on startup for debugging (moved to lifespan)
 # This function is now called within the lifespan context manager
