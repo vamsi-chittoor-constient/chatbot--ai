@@ -566,7 +566,7 @@ QUICK_ACTION_SETS = {
         {"label": "Take Away", "action": "take away", "icon": "takeaway", "variant": "primary"},
     ],
     "payment_method": [
-        {"label": "Pay Online (UPI)", "action": "pay online", "icon": "upi", "variant": "success"},
+        {"label": "Card Payment", "action": "I want to pay by card", "icon": "upi", "variant": "success"},
         {"label": "Cash on Delivery", "action": "cash on delivery", "icon": "cash", "variant": "primary"},
     ],
     "quantity": [
@@ -584,13 +584,31 @@ QUICK_ACTION_SETS = {
         {"label": "Yes", "action": "yes", "icon": "check", "variant": "success"},
         {"label": "No", "action": "no", "icon": "cancel", "variant": "secondary"},
     ],
+    "payment_completed": [
+        {"label": "Track Order", "action": "track my order", "icon": "orders", "variant": "primary"},
+        {"label": "View Receipt", "action": "show my receipt", "icon": "receipt", "variant": "secondary"},
+        {"label": "Order More", "action": "show menu", "icon": "menu", "variant": "secondary"},
+    ],
     "order_confirmed": [
         {"label": "Track Order", "action": "track my order", "icon": "orders", "variant": "primary"},
         {"label": "Order More", "action": "show menu", "icon": "menu", "variant": "secondary"},
     ],
     "menu_displayed": [
+        {"label": "What's Popular?", "action": "what's popular today", "icon": "star", "variant": "primary"},
         {"label": "View Cart", "action": "view cart", "icon": "cart", "variant": "secondary"},
-        {"label": "What's Popular?", "action": "what's popular", "icon": "star", "variant": "primary"},
+        {"label": "Book a Table", "action": "I want to book a table", "icon": "booking", "variant": "secondary"},
+    ],
+    "greeting_welcome": [
+        {"label": "Show Menu", "action": "show me the menu", "icon": "menu", "variant": "primary"},
+        {"label": "What's Popular?", "action": "what's popular today", "icon": "star", "variant": "primary"},
+        {"label": "Any Offers?", "action": "do you have any offers", "icon": "offers", "variant": "success"},
+        {"label": "Book a Table", "action": "I want to book a table", "icon": "booking", "variant": "secondary"},
+    ],
+    "explore_features": [
+        {"label": "Order Food", "action": "show me the menu", "icon": "menu", "variant": "primary"},
+        {"label": "Track My Order", "action": "track my order", "icon": "orders", "variant": "primary"},
+        {"label": "Book a Table", "action": "I want to book a table", "icon": "booking", "variant": "primary"},
+        {"label": "Check Offers", "action": "do you have any offers", "icon": "offers", "variant": "success"},
     ],
     "which_item": [
         # Dynamic - populated based on items mentioned in response
@@ -598,22 +616,34 @@ QUICK_ACTION_SETS = {
     "none": [],
 }
 
-QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant chatbot. Given the assistant's response, select which quick action buttons to show the user.
+QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant chatbot. Your job is to proactively guide users through the ordering journey by showing contextual action buttons.
+
+IMPORTANT: Always try to show quick actions that guide the user. Users may not know what the chatbot can do - be their driver!
 
 Available action sets:
-- added_to_cart: User just added item(s) to cart (response mentions "added to cart")
-- view_cart: Showing cart contents (response shows what's in the cart)
-- order_type: Asking dine-in or take-away (response asks about eating here or taking away)
-- payment_method: Asking how to pay (response asks about payment method)
-- quantity: Asking how many (response asks "how many" of something)
-- continue_ordering: General "anything else?" or offering to continue (response asks if user wants more)
-- yes_no: Simple yes/no question (response is a direct yes/no question)
-- order_confirmed: Order was placed successfully (response confirms order with ID)
-- menu_displayed: Menu was just shown (response says "menu is displayed" or "take a look at our menu" or "browse our menu")
-- which_item: Asking which specific item from multiple options (response lists options like "BBQ Chicken Pizza, Margherita, or Pepperoni")
-- none: No quick actions needed (greeting, informational response, etc.)
+- greeting_welcome: User just said hello/hi/hey or general greeting (response is welcoming) → Show main features
+- explore_features: User asks "what can you do" or "help" or general inquiry about capabilities → Show all main features
+- menu_displayed: Menu was just shown (response says "menu is displayed" or "here's our menu" or "browse our menu") → Guide to popular items and cart
+- added_to_cart: User just added item(s) to cart (response mentions "added to cart" or "added X to your cart") → Next steps: view cart, checkout, or add more
+- view_cart: Showing cart contents (response shows "your cart" or lists cart items with total) → Guide to checkout
+- order_type: Asking dine-in or take-away (response asks "dine in or take away" or "eating here or taking away") → Dine In / Take Away buttons
+- payment_method: Asking how to pay (response asks "how would you like to pay" or "payment method" or mentions payment options) → Card Payment / Cash on Delivery
+- payment_completed: Payment was successful (response says "payment successful" or "payment confirmed" or "order confirmed and paid") → Track order, view receipt
+- order_confirmed: Order was placed (response confirms order with "Order ID" or "order placed" but NO payment mentioned yet) → Track order
+- quantity: Asking how many (response asks "how many" of something) → Number buttons
+- which_item: Asking which specific item from multiple options (response lists 2+ options like "BBQ Chicken Pizza, Margherita, or Pepperoni") → Item buttons
+- continue_ordering: General "anything else?" or offering to continue (response asks "anything else" or "would you like more") → Show menu, cart, checkout
+- yes_no: Simple yes/no question (response is a direct yes/no question) → Yes / No buttons
+- none: Only for purely informational responses with no clear next action (restaurant hours, policies, etc.)
 
-If "which_item" is selected, also extract the item options mentioned in the response.
+CRITICAL:
+- If response asks about payment → ALWAYS use "payment_method"
+- If response welcomes user → use "greeting_welcome" to show main features
+- If menu shown → use "menu_displayed" to guide user
+- If item added to cart → use "added_to_cart" to guide to checkout
+- Default to showing helpful actions rather than "none" - guide the user!
+
+If "which_item" is selected, also extract the item options mentioned in the response (max 4 items).
 
 Response to analyze:
 "{response}"
@@ -1439,7 +1469,7 @@ def _create_checkout_tool_async_DISABLED(session_id: str):
             )
 
             order_type_display = "Take Away" if order_type_clean == "take_away" else "Dine In"
-            return f"Order placed! ID: {order_display_id}. Items: {', '.join(order_items)}. Total: Rs.{total:.0f} ({order_type_display})"
+            return f"Order created! ID: {order_display_id}. Items: {', '.join(order_items)}. Total: Rs.{total:.0f} ({order_type_display}). IMPORTANT: Order is created but not yet paid. You MUST now ask customer: 'How would you like to pay?' and offer options: 'Card Payment' or 'Cash on Delivery'. If they choose card, call initiate_payment(order_id='{order_display_id}')"
 
         except Exception as e:
             logger.error("checkout_error", error=str(e), session_id=session_id)
@@ -3266,6 +3296,22 @@ You have access to 55 tools to help customers. ALWAYS use the appropriate tool w
 4. When customer mentions allergens or dietary needs → USE the allergen/dietary tools
 5. When customer wants to book a table → USE the booking tools
 6. ALWAYS use tools to get accurate data - don't guess or make up information!
+
+**CRITICAL WORKFLOW - CHECKOUT TO PAYMENT:**
+After calling checkout():
+  1. Order is created but NOT paid yet - the order status is "pending payment"
+  2. YOU MUST immediately ask customer how they want to pay: "How would you like to pay?"
+  3. Offer payment options: "Card Payment" or "Cash on Delivery"
+  4. If customer chooses card payment → call initiate_payment(order_id) to start payment process
+  5. After initiate_payment(), guide customer to enter card details
+  6. DO NOT tell customer "order confirmed" until payment is complete
+  7. If customer chooses cash on delivery → order is confirmed immediately
+
+Complete card payment flow:
+  checkout() → ask payment method → initiate_payment() → submit_card_details() → verify_payment_otp() → "Payment successful! Order confirmed"
+
+Complete COD flow:
+  checkout() → ask payment method → "Cash on Delivery" → "Order confirmed! Pay cash when order arrives"
 
 Be warm and helpful!""",
         expected_output="A friendly, natural language response confirming the action taken",
