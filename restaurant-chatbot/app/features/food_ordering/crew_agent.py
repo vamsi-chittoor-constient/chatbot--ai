@@ -550,98 +550,425 @@ def _set_special_instructions_impl(item_name: str, instructions: str, session_id
 # ============================================================================
 
 # Available quick action sets that the agent can choose from
+# Comprehensive 43 action sets covering all 50+ tools through contextual flow
 QUICK_ACTION_SETS = {
-    "added_to_cart": [
-        {"label": "View Cart", "action": "view cart", "icon": "cart", "variant": "primary"},
-        {"label": "Checkout", "action": "checkout", "icon": "checkout", "variant": "success"},
-        {"label": "Add More", "action": "show menu", "icon": "menu", "variant": "secondary"},
-    ],
-    "view_cart": [
-        {"label": "Checkout", "action": "checkout", "icon": "checkout", "variant": "success"},
-        {"label": "Add More", "action": "show menu", "icon": "menu", "variant": "primary"},
-        {"label": "Clear Cart", "action": "clear cart", "icon": "cancel", "variant": "danger"},
-    ],
-    "order_type": [
-        {"label": "Dine In", "action": "dine in", "icon": "dineIn", "variant": "primary"},
-        {"label": "Take Away", "action": "take away", "icon": "takeaway", "variant": "primary"},
-    ],
-    "payment_method": [
-        {"label": "Card Payment", "action": "I want to pay by card", "icon": "upi", "variant": "success"},
-        {"label": "Cash on Delivery", "action": "cash on delivery", "icon": "cash", "variant": "primary"},
-    ],
-    "quantity": [
-        {"label": "1", "action": "1", "icon": "number", "variant": "primary"},
-        {"label": "2", "action": "2", "icon": "number", "variant": "primary"},
-        {"label": "3", "action": "3", "icon": "number", "variant": "primary"},
-        {"label": "Other", "action": "__OTHER__", "icon": "edit", "variant": "secondary"},
-    ],
-    "continue_ordering": [
-        {"label": "Show Menu", "action": "show menu", "icon": "menu", "variant": "primary"},
-        {"label": "View Cart", "action": "view cart", "icon": "cart", "variant": "secondary"},
-        {"label": "Checkout", "action": "checkout", "icon": "checkout", "variant": "success"},
-    ],
-    "yes_no": [
-        {"label": "Yes", "action": "yes", "icon": "check", "variant": "success"},
-        {"label": "No", "action": "no", "icon": "cancel", "variant": "secondary"},
-    ],
-    "payment_completed": [
-        {"label": "Track Order", "action": "track my order", "icon": "orders", "variant": "primary"},
-        {"label": "View Receipt", "action": "show my receipt", "icon": "receipt", "variant": "secondary"},
-        {"label": "Order More", "action": "show menu", "icon": "menu", "variant": "secondary"},
-    ],
-    "order_confirmed": [
-        {"label": "Track Order", "action": "track my order", "icon": "orders", "variant": "primary"},
-        {"label": "Order More", "action": "show menu", "icon": "menu", "variant": "secondary"},
-    ],
-    "menu_displayed": [
-        {"label": "What's Popular?", "action": "what's popular today", "icon": "star", "variant": "primary"},
-        {"label": "View Cart", "action": "view cart", "icon": "cart", "variant": "secondary"},
-        {"label": "Book a Table", "action": "I want to book a table", "icon": "booking", "variant": "secondary"},
-    ],
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ENTRY & WELCOME (3 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
     "greeting_welcome": [
-        {"label": "Show Menu", "action": "show me the menu", "icon": "menu", "variant": "primary"},
-        {"label": "What's Popular?", "action": "what's popular today", "icon": "star", "variant": "primary"},
-        {"label": "Any Offers?", "action": "do you have any offers", "icon": "offers", "variant": "success"},
-        {"label": "Book a Table", "action": "I want to book a table", "icon": "booking", "variant": "secondary"},
+        {"label": "🍔 Order Food", "action": "show me the menu"},
+        {"label": "⭐ What's Popular?", "action": "what's popular today"},
+        {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
+        {"label": "📅 Book a Table", "action": "book a table"},
+        {"label": "❓ Help & FAQs", "action": "help"},
     ],
+
     "explore_features": [
-        {"label": "Order Food", "action": "show me the menu", "icon": "menu", "variant": "primary"},
-        {"label": "Track My Order", "action": "track my order", "icon": "orders", "variant": "primary"},
-        {"label": "Book a Table", "action": "I want to book a table", "icon": "booking", "variant": "primary"},
-        {"label": "Check Offers", "action": "do you have any offers", "icon": "offers", "variant": "success"},
+        {"label": "🍔 Order Food", "action": "show me the menu"},
+        {"label": "📍 Track Order", "action": "track my order"},
+        {"label": "📅 Book Table", "action": "book a table"},
+        {"label": "🔍 Check Allergens", "action": "check my allergens"},
+        {"label": "🎁 Offers & Rewards", "action": "check offers and deals"},
+        {"label": "❓ Get Help", "action": "help and faqs"},
     ],
+
+    "first_time_user": [
+        {"label": "🍔 Browse Menu", "action": "show me the menu"},
+        {"label": "⭐ What's Popular?", "action": "show popular items"},
+        {"label": "🎁 Today's Specials", "action": "today's specials"},
+        {"label": "🔍 Dietary Options", "action": "dietary and allergen options"},
+        {"label": "❓ How It Works", "action": "how to order"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # MENU DISCOVERY & BROWSING (5 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "menu_displayed": [
+        {"label": "⭐ Popular Items", "action": "show popular items"},
+        {"label": "🍽️ Browse by Cuisine", "action": "show available cuisines"},
+        {"label": "🎁 Combo Deals", "action": "show combo deals"},
+        {"label": "🛒 View Cart", "action": "view cart"},
+        {"label": "📅 Book Table", "action": "book a table"},
+    ],
+
+    "menu_discovery": [
+        {"label": "⭐ Popular Items", "action": "show popular items"},
+        {"label": "🍽️ By Cuisine", "action": "browse by cuisine"},
+        {"label": "🎁 Combo Deals", "action": "combo deals and offers"},
+        {"label": "🌟 Today's Specials", "action": "today's specials"},
+        {"label": "🔍 Filter by Diet", "action": "filter by dietary needs"},
+        {"label": "🛒 View Cart", "action": "view cart"},
+    ],
+
+    "cuisine_browse": [
+        {"label": "🍕 Italian", "action": "show Italian dishes"},
+        {"label": "🍜 Asian", "action": "show Asian dishes"},
+        {"label": "🍔 American", "action": "show American dishes"},
+        {"label": "🥗 Healthy", "action": "show healthy options"},
+        {"label": "🔙 Back to Menu", "action": "show full menu"},
+    ],
+
+    "item_details_shown": [
+        {"label": "➕ Add to Cart", "action": "add this to cart"},
+        {"label": "📊 Nutrition Info", "action": "show nutrition information"},
+        {"label": "✅ Check Stock", "action": "check availability"},
+        {"label": "🔍 Allergen Info", "action": "check allergens"},
+        {"label": "❤️ Add to Favorites", "action": "add to favorites"},
+    ],
+
+    "deals_inquiry": [
+        {"label": "🎁 Combo Deals", "action": "show combo deals"},
+        {"label": "🌟 Today's Specials", "action": "today's specials"},
+        {"label": "💰 Apply Promo Code", "action": "I have a promo code"},
+        {"label": "🏆 Loyalty Rewards", "action": "check my rewards"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # CART & ORDERING (6 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "added_to_cart": [
+        {"label": "🛒 View Cart", "action": "view cart"},
+        {"label": "✅ Checkout", "action": "checkout"},
+        {"label": "➕ Add More", "action": "add more items"},
+        {"label": "❤️ Add to Favorites", "action": "add to favorites"},
+    ],
+
+    "added_to_cart_with_upsell": [
+        {"label": "🍟 Add Sides?", "action": "show sides and drinks"},
+        {"label": "🛒 View Cart", "action": "view cart"},
+        {"label": "✅ Checkout", "action": "checkout"},
+        {"label": "➕ Add More", "action": "show menu"},
+    ],
+
+    "view_cart": [
+        {"label": "✅ Checkout", "action": "checkout"},
+        {"label": "➕ Add More", "action": "show menu"},
+        {"label": "🎁 Apply Promo", "action": "apply promo code"},
+        {"label": "✏️ Add Instructions", "action": "add special instructions"},
+        {"label": "🗑️ Clear Cart", "action": "clear cart"},
+    ],
+
+    "view_cart_high_value": [
+        {"label": "✅ Checkout", "action": "checkout"},
+        {"label": "🎁 Apply Promo Code", "action": "I have a promo code"},
+        {"label": "➕ Add More", "action": "show menu"},
+        {"label": "🔍 Check Allergens", "action": "check allergens in cart"},
+    ],
+
+    "checkout_options": [
+        {"label": "✅ Order Now", "action": "checkout now"},
+        {"label": "📅 Schedule Later", "action": "schedule order for later"},
+        {"label": "🎁 Apply Promo", "action": "apply promo code"},
+        {"label": "🔙 Back to Cart", "action": "view cart"},
+    ],
+
+    "cart_empty_reminder": [
+        {"label": "🍔 Browse Menu", "action": "show menu"},
+        {"label": "⭐ Popular Items", "action": "show popular items"},
+        {"label": "📜 Recent Orders", "action": "show my order history"},
+        {"label": "🔄 Reorder Last", "action": "reorder my last order"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # CHECKOUT & PAYMENT (3 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "order_type": [
+        {"label": "🏠 Dine In", "action": "dine in"},
+        {"label": "📦 Take Away", "action": "take away"},
+    ],
+
+    "dine_in_selected": [
+        {"label": "📅 Book Table First", "action": "book a table"},
+        {"label": "✅ Continue Order", "action": "continue with dine in order"},
+    ],
+
+    "payment_method": [
+        {"label": "💳 Card Payment", "action": "I want to pay by card"},
+        {"label": "💵 Cash on Delivery", "action": "cash on delivery"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # POST-ORDER (4 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "order_confirmed": [
+        {"label": "📍 Track Order", "action": "track my order"},
+        {"label": "🧾 View Receipt", "action": "show receipt"},
+        {"label": "🍔 Order More", "action": "show menu"},
+    ],
+
+    "payment_completed": [
+        {"label": "📍 Track Order", "action": "track my order"},
+        {"label": "🧾 View Receipt", "action": "show receipt"},
+        {"label": "⭐ Rate Order", "action": "rate this order"},
+        {"label": "❤️ Add to Favorites", "action": "add items to favorites"},
+        {"label": "🔄 Reorder", "action": "reorder this"},
+    ],
+
+    "post_delivery": [
+        {"label": "⭐⭐⭐⭐⭐ Rate 5 Stars", "action": "rate 5 stars"},
+        {"label": "💬 Leave Feedback", "action": "submit feedback"},
+        {"label": "🔄 Reorder Same", "action": "reorder last order"},
+        {"label": "❤️ Save Favorites", "action": "add to favorites"},
+    ],
+
+    "order_tracking": [
+        {"label": "🔄 Refresh Status", "action": "refresh order status"},
+        {"label": "❌ Cancel Order", "action": "cancel this order"},
+        {"label": "📞 Contact Support", "action": "contact support"},
+        {"label": "🧾 View Receipt", "action": "show receipt"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # TABLE BOOKING (4 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "booking_inquiry": [
+        {"label": "📅 Book Table", "action": "book a table now"},
+        {"label": "🕐 Check Availability", "action": "check table availability"},
+        {"label": "📖 My Bookings", "action": "show my bookings"},
+        {"label": "❓ Booking Help", "action": "help with booking"},
+    ],
+
+    "availability_shown": [
+        {"label": "✅ Confirm Booking", "action": "book this table"},
+        {"label": "🔄 Check Other Times", "action": "show other time slots"},
+        {"label": "🏠 Back to Home", "action": "go back"},
+    ],
+
+    "booking_confirmed": [
+        {"label": "📖 View Bookings", "action": "show my bookings"},
+        {"label": "🍔 Pre-Order Food", "action": "order food for booking"},
+        {"label": "✏️ Modify Booking", "action": "modify booking"},
+        {"label": "🏠 Home", "action": "back to home"},
+    ],
+
+    "booking_management": [
+        {"label": "✏️ Modify Booking", "action": "modify my booking"},
+        {"label": "❌ Cancel Booking", "action": "cancel booking"},
+        {"label": "📅 Book Another", "action": "book another table"},
+        {"label": "🍔 Order Food", "action": "show menu"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # DIETARY & ALLERGENS (3 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "dietary_inquiry": [
+        {"label": "🔍 Check My Allergens", "action": "show my allergens"},
+        {"label": "➕ Add Allergen", "action": "add allergen"},
+        {"label": "💚 Dietary Preferences", "action": "show dietary preferences"},
+        {"label": "🥗 Veg Options", "action": "show vegetarian items"},
+        {"label": "📊 Nutrition Info", "action": "nutrition information"},
+    ],
+
+    "allergen_management": [
+        {"label": "➕ Add Allergen", "action": "add new allergen"},
+        {"label": "➖ Remove Allergen", "action": "remove allergen"},
+        {"label": "🔍 Filter Menu", "action": "filter menu by my allergens"},
+        {"label": "🏠 Back", "action": "go back"},
+    ],
+
+    "health_conscious": [
+        {"label": "🥗 Veg Options", "action": "show vegetarian options"},
+        {"label": "📊 Nutrition Info", "action": "show nutrition info"},
+        {"label": "💪 High Protein", "action": "show high protein items"},
+        {"label": "🌿 Vegan Options", "action": "show vegan items"},
+        {"label": "🍔 All Menu", "action": "show full menu"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # HELP & SUPPORT (3 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "help_inquiry": [
+        {"label": "❓ View FAQs", "action": "show faqs"},
+        {"label": "🕐 Operating Hours", "action": "what are your hours"},
+        {"label": "📜 Policies", "action": "show restaurant policies"},
+        {"label": "🚚 Delivery Info", "action": "delivery information"},
+        {"label": "📞 Contact Support", "action": "contact support"},
+    ],
+
+    "faq_categories": [
+        {"label": "📦 Order & Delivery", "action": "order and delivery faqs"},
+        {"label": "💳 Payment", "action": "payment faqs"},
+        {"label": "📅 Booking", "action": "booking faqs"},
+        {"label": "🔄 Returns", "action": "return and refund faqs"},
+        {"label": "🔙 Back", "action": "back to help"},
+    ],
+
+    "policy_shown": [
+        {"label": "🚚 Delivery Policy", "action": "delivery policy"},
+        {"label": "🔄 Refund Policy", "action": "refund policy"},
+        {"label": "📜 Terms of Service", "action": "terms of service"},
+        {"label": "🏠 Back", "action": "go back"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ACCOUNT & FAVORITES (3 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "my_account": [
+        {"label": "📜 Order History", "action": "show my order history"},
+        {"label": "❤️ My Favorites", "action": "show my favorites"},
+        {"label": "📖 My Bookings", "action": "show my bookings"},
+        {"label": "💬 My Feedback", "action": "show my feedback history"},
+        {"label": "⚙️ Preferences", "action": "show my preferences"},
+    ],
+
+    "my_favorites": [
+        {"label": "❤️ View Favorites", "action": "show my favorites"},
+        {"label": "🔄 Reorder Favorite", "action": "reorder from favorites"},
+        {"label": "➕ Add New Favorite", "action": "add to favorites"},
+        {"label": "🏠 Back", "action": "go back"},
+    ],
+
+    "order_history_shown": [
+        {"label": "🔄 Reorder", "action": "reorder from history"},
+        {"label": "🧾 View Receipt", "action": "show receipt"},
+        {"label": "⭐ Rate Past Order", "action": "rate past order"},
+        {"label": "🏠 Home", "action": "back to home"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # FEEDBACK & RATING (2 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "feedback_prompt": [
+        {"label": "⭐ Rate Order", "action": "rate my order"},
+        {"label": "💬 Leave Feedback", "action": "submit feedback"},
+        {"label": "👍 Everything Great!", "action": "rate 5 stars"},
+        {"label": "Later", "action": "maybe later"},
+    ],
+
+    "rating_submitted": [
+        {"label": "💬 Add Comments", "action": "add feedback comments"},
+        {"label": "🔄 Reorder Same", "action": "reorder this"},
+        {"label": "❤️ Add to Favorites", "action": "add to favorites"},
+        {"label": "🏠 Home", "action": "back to home"},
+    ],
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # UTILITY & FALLBACK (4 sets)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    "continue_ordering": [
+        {"label": "🍔 Show Menu", "action": "show menu"},
+        {"label": "🛒 View Cart", "action": "view cart"},
+        {"label": "✅ Checkout", "action": "checkout"},
+        {"label": "❓ Get Help", "action": "help"},
+    ],
+
+    "quantity": [
+        {"label": "1", "action": "1"},
+        {"label": "2", "action": "2"},
+        {"label": "3", "action": "3"},
+        {"label": "Other", "action": "__OTHER__"},
+    ],
+
+    "yes_no": [
+        {"label": "✅ Yes", "action": "yes"},
+        {"label": "❌ No", "action": "no"},
+    ],
+
     "which_item": [
         # Dynamic - populated based on items mentioned in response
     ],
+
     "none": [],
 }
 
 QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant chatbot. Your job is to proactively guide users through the ordering journey by showing contextual action buttons.
 
-IMPORTANT: Always try to show quick actions that guide the user. Users may not know what the chatbot can do - be their driver!
+🎯 CORE PRINCIPLE: Be the user's driver! Users don't know what the chatbot can do - show them the way at every step.
 
-Available action sets:
-- greeting_welcome: User just said hello/hi/hey or general greeting (response is welcoming) → Show main features
-- explore_features: User asks "what can you do" or "help" or general inquiry about capabilities → Show all main features
-- menu_displayed: Menu was just shown (response says "menu is displayed" or "here's our menu" or "browse our menu") → Guide to popular items and cart
-- added_to_cart: User just added item(s) to cart (response mentions "added to cart" or "added X to your cart") → Next steps: view cart, checkout, or add more
-- view_cart: Showing cart contents (response shows "your cart" or lists cart items with total) → Guide to checkout
-- order_type: Asking dine-in or take-away (response asks "dine in or take away" or "eating here or taking away") → Dine In / Take Away buttons
-- payment_method: Asking how to pay (response asks "how would you like to pay" or "payment method" or mentions payment options) → Card Payment / Cash on Delivery
-- payment_completed: Payment was successful (response says "payment successful" or "payment confirmed" or "order confirmed and paid") → Track order, view receipt
-- order_confirmed: Order was placed (response confirms order with "Order ID" or "order placed" but NO payment mentioned yet) → Track order
-- quantity: Asking how many (response asks "how many" of something) → Number buttons
-- which_item: Asking which specific item from multiple options (response lists 2+ options like "BBQ Chicken Pizza, Margherita, or Pepperoni") → Item buttons
-- continue_ordering: General "anything else?" or offering to continue (response asks "anything else" or "would you like more") → Show menu, cart, checkout
-- yes_no: Simple yes/no question (response is a direct yes/no question) → Yes / No buttons
-- none: Only for purely informational responses with no clear next action (restaurant hours, policies, etc.)
+📋 Available Action Sets (43 total):
 
-CRITICAL:
-- If response asks about payment → ALWAYS use "payment_method"
-- If response welcomes user → use "greeting_welcome" to show main features
-- If menu shown → use "menu_displayed" to guide user
-- If item added to cart → use "added_to_cart" to guide to checkout
-- Default to showing helpful actions rather than "none" - guide the user!
+━━━ ENTRY & WELCOME ━━━
+- greeting_welcome: User greets (hi/hello/hey) or response welcomes user → Show main features (Order, Popular, Deals, Book Table, Help)
+- explore_features: User asks "what can you do" or capabilities → Show all major features (Order, Track, Book, Allergens, Offers, Help)
+- first_time_user: New user with no history → Show onboarding options (Browse Menu, Popular, Specials, Dietary, How It Works)
+
+━━━ MENU DISCOVERY ━━━
+- menu_displayed: Menu shown (response says "here's our menu" or lists menu items) → Guide exploration (Popular, By Cuisine, Combos, Cart, Book Table)
+- menu_discovery: User exploring menu → Show discovery options (Popular, Cuisine, Combos, Specials, Filter by Diet)
+- cuisine_browse: Response shows cuisines or user asks about cuisine types → Show cuisine buttons (Italian, Asian, American, Healthy)
+- item_details_shown: Showing details of specific item → Action buttons (Add to Cart, Nutrition, Check Stock, Allergens, Favorites)
+- deals_inquiry: User asks about deals/offers/specials → Show promo options (Combos, Specials, Promo Code, Loyalty Rewards)
+
+━━━ CART & ORDERING ━━━
+- added_to_cart: Item added to cart (response: "added X to cart") → Next steps (View Cart, Checkout, Add More, Add to Favorites)
+- added_to_cart_with_upsell: Added main dish (burger/pizza/etc) → Suggest upsells (Add Sides?, View Cart, Checkout, Add More)
+- view_cart: Showing cart contents → Cart actions (Checkout, Add More, Apply Promo, Add Instructions, Clear Cart)
+- view_cart_high_value: Cart shown with total > Rs.500 → Highlight promo (Checkout, Apply Promo Code★, Add More, Check Allergens)
+- checkout_options: Before final checkout → Final options (Order Now, Schedule Later, Apply Promo, Back to Cart)
+- cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Popular, Recent Orders, Reorder Last)
+
+━━━ CHECKOUT & PAYMENT ━━━
+- order_type: Asking dine-in or takeaway → Binary choice (Dine In, Take Away)
+- dine_in_selected: User selected dine-in → Suggest booking (Book Table First, Continue Order)
+- payment_method: Asking payment method (response: "how would you like to pay") → Payment options (Card Payment, Cash on Delivery)
+
+━━━ POST-ORDER ━━━
+- order_confirmed: Order placed (response has "Order ID" but NO payment yet) → Post-order (Track Order, View Receipt, Order More)
+- payment_completed: Payment successful (response: "payment successful" or "paid") → Full post-order (Track, Receipt, Rate, Favorites, Reorder)
+- post_delivery: 30+ mins after delivery → Feedback prompt (Rate 5 Stars, Leave Feedback, Reorder Same, Save Favorites)
+- order_tracking: User tracking order → Tracking actions (Refresh Status, Cancel Order, Contact Support, View Receipt)
+
+━━━ TABLE BOOKING ━━━
+- booking_inquiry: User asks about booking or wants to book → Booking options (Book Table, Check Availability, My Bookings, Help)
+- availability_shown: Response shows available time slots → Booking action (Confirm Booking, Check Other Times, Back)
+- booking_confirmed: Booking confirmed (response: "booking confirmed") → Post-booking (View Bookings, Pre-Order Food, Modify, Home)
+- booking_management: Showing user's bookings → Manage bookings (Modify, Cancel, Book Another, Order Food)
+
+━━━ DIETARY & ALLERGENS ━━━
+- dietary_inquiry: User mentions diet/allergens/health concerns → Dietary options (Check Allergens, Add Allergen, Dietary Prefs, Veg, Nutrition)
+- allergen_management: Managing allergen preferences → Allergen actions (Add, Remove, Filter Menu, Back)
+- health_conscious: User filtering by health/diet → Health options (Veg, Nutrition Info, High Protein, Vegan, All Menu)
+
+━━━ HELP & SUPPORT ━━━
+- help_inquiry: User asks for help or has questions → Help options (FAQs, Operating Hours, Policies, Delivery Info, Contact Support)
+- faq_categories: Showing FAQ categories → FAQ topics (Order & Delivery, Payment, Booking, Returns, Back)
+- policy_shown: Showing policies → Policy types (Delivery Policy, Refund Policy, Terms, Back)
+
+━━━ ACCOUNT & FAVORITES ━━━
+- my_account: User asks about account/profile → Account options (Order History, Favorites, Bookings, Feedback, Preferences)
+- my_favorites: Showing favorites → Favorites actions (View, Reorder Favorite, Add New, Back)
+- order_history_shown: Showing past orders → History actions (Reorder, View Receipt, Rate Past Order, Home)
+
+━━━ FEEDBACK & RATING ━━━
+- feedback_prompt: After delivery, prompting feedback → Feedback options (Rate Order, Leave Feedback, Everything Great!, Later)
+- rating_submitted: User just rated order → Follow-up (Add Comments, Reorder Same, Add to Favorites, Home)
+
+━━━ UTILITY & FALLBACK ━━━
+- continue_ordering: General "anything else?" or continue prompt → General options (Show Menu, View Cart, Checkout, Get Help)
+- quantity: Asking "how many" → Number buttons (1, 2, 3, Other)
+- yes_no: Simple yes/no question → Binary choice (Yes, No)
+- which_item: Asking which specific item from 2+ options → Item buttons (dynamic)
+- none: ONLY for purely informational responses with NO next action (rare - default to helpful actions!)
+
+🎯 CRITICAL DECISION RULES:
+1. Payment question → ALWAYS "payment_method"
+2. Welcome/greeting → "greeting_welcome"
+3. Menu shown → "menu_displayed"
+4. Item added → "added_to_cart" OR "added_to_cart_with_upsell" (if burger/pizza/main dish)
+5. Cart shown + total > Rs.500 → "view_cart_high_value" (highlight promo!)
+6. Cart shown + total < Rs.500 → "view_cart"
+7. User asks capabilities → "explore_features"
+8. Dine-in selected → "dine_in_selected" (suggest booking!)
+9. Payment successful → "payment_completed" (NOT order_confirmed)
+10. Order placed but NOT paid → "order_confirmed"
+
+🚗 GUIDE PRINCIPLE:
+- Default to showing helpful actions rather than "none"
+- Think: "What would the user logically want to do next?"
+- Proactively expose features users don't know exist
+- Use context to show 5-6 relevant buttons per response
 
 If "which_item" is selected, also extract the item options mentioned in the response (max 4 items).
 
