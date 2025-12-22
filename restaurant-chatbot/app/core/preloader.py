@@ -151,8 +151,11 @@ class MenuPreloader:
         if not self._menu_cache:
             return []
 
-        # Get available items
-        available_items = [item for item in self._menu_cache if item.get("is_available", True)]
+        # Get available items with valid prices (exclude zero-price items)
+        available_items = [
+            item for item in self._menu_cache
+            if item.get("is_available", True) and item.get("price", 0) > 0
+        ]
 
         # Apply search filter if query provided
         if query and query.lower() not in ["", "all", "show all", "everything"]:
@@ -194,10 +197,11 @@ class MenuPreloader:
         if not self._menu_cache:
             return []
 
-        # Filter items appropriate for this meal period
+        # Filter items appropriate for this meal period (exclude zero-price items)
         suggestions = [
             item for item in self._menu_cache
-            if item.get("is_available", True) and (
+            if item.get("is_available", True) and
+               item.get("price", 0) > 0 and (
                 meal_period in item.get("meal_types", ["All Day"]) or
                 "All Day" in item.get("meal_types", [])
             )
@@ -219,6 +223,10 @@ class MenuPreloader:
         name_singular = name_lower.rstrip('s') if name_lower.endswith('s') else name_lower
 
         for item in self._menu_cache:
+            # Skip zero-price items
+            if item.get("price", 0) <= 0:
+                continue
+
             item_name = item.get("name", "").lower()
             if (name_lower in item_name or
                 name_singular in item_name or
