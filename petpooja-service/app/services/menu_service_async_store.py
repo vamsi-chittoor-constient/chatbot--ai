@@ -552,7 +552,11 @@ async def store_menu_async(
             if existing_item:
                 existing_item.menu_item_name = item.get("itemname", "")
                 existing_item.menu_item_description = item.get("itemdescription", "")
-                existing_item.menu_item_price = safe_float(item.get("price"))
+                # Debug: Log raw price value from PetPooja
+                raw_price = item.get("price")
+                if raw_price is None or raw_price == "" or raw_price == "0" or raw_price == 0:
+                    logger.warning(f"Item '{item.get('itemname')}' (ID: {petpooja_item_id}) has empty/zero price: {repr(raw_price)}")
+                existing_item.menu_item_price = safe_float(raw_price)
                 existing_item.menu_item_status = convert_status(item.get("active", "1"))
                 existing_item.menu_item_rank = safe_int(item.get("itemrank"))
                 existing_item.menu_item_allow_variation = item.get("itemallowvariation") == "1"
@@ -574,6 +578,11 @@ async def store_menu_async(
                 menu_item_id = existing_item.menu_item_id
                 counts["updated"] += 1
             else:
+                # Debug: Log raw price value from PetPooja for new items
+                raw_price = item.get("price")
+                if raw_price is None or raw_price == "" or raw_price == "0" or raw_price == 0:
+                    logger.warning(f"NEW Item '{item.get('itemname')}' (ID: {petpooja_item_id}) has empty/zero price: {repr(raw_price)}")
+
                 menu_item_id = uuid.uuid4()
                 db.add(MenuItem(
                     menu_item_id=menu_item_id,
@@ -581,7 +590,7 @@ async def store_menu_async(
                     menu_sub_category_id=sub_category_id,
                     menu_item_name=item.get("itemname", ""),
                     menu_item_description=item.get("itemdescription", ""),
-                    menu_item_price=safe_float(item.get("price")),
+                    menu_item_price=safe_float(raw_price),
                     menu_item_status=convert_status(item.get("active", "1")),
                     menu_item_rank=safe_int(item.get("itemrank")),
                     menu_item_allow_variation=item.get("itemallowvariation") == "1",
