@@ -3072,7 +3072,7 @@ def create_food_ordering_crew(session_id: str, customer_id: Optional[str] = None
         model="gpt-4o-mini",
         temperature=0.1,  # Lower = faster, more deterministic
         api_key=api_key,
-        max_tokens=1500,  # Increased for function calling with 55 tools (was 256, too low)
+        max_tokens=2048,  # CRITICAL FIX: Increased to accommodate 55 tool schemas and responses
     )
 
     # Tools - using factory functions for session-aware tools
@@ -3146,7 +3146,7 @@ Be warm, helpful, and efficient. Use tool outputs to provide accurate informatio
         llm=llm,
         tools=all_tools,
         # Best practices from docs.crewai.com
-        verbose=False,  # Reduce noise in production
+        verbose=True,  # DEBUG: Temporarily enabled to see tool invocations
         allow_delegation=False,
         respect_context_window=True,  # Handle long conversations gracefully
         cache=True,  # Cache tool results for repeated queries
@@ -3276,7 +3276,7 @@ Be warm and helpful!""",
         agents=[agent],
         tasks=[task],
         process=Process.sequential,
-        verbose=False,  # Reduce noise in production
+        verbose=True,  # DEBUG: Temporarily enabled to see execution flow
     )
 
     return crew

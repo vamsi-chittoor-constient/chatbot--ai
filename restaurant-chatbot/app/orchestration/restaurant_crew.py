@@ -103,7 +103,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         model="gpt-4o",
         temperature=0.1,
         api_key=api_key,
-        max_tokens=512,  # Increased for delegation scenarios
+        max_tokens=2048,  # CRITICAL FIX: Increased from 512 to accommodate 55 tool schemas (~7000 tokens needed)
     )
 
     # ========================================================================

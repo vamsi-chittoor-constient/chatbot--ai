@@ -22,12 +22,12 @@ llm_manager = get_llm_manager()
 api_key = llm_manager.get_next_api_key()
 os.environ["OPENAI_API_KEY"] = api_key
 
-# Create LLM
+# Create LLM with sufficient tokens for tool calling
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0,
     api_key=api_key,
-    max_tokens=1500,
+    max_tokens=2048,  # Increased to match production config
 )
 
 # Create agent with tool
