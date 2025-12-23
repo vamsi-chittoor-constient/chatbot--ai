@@ -363,7 +363,7 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
 
     cart_data = get_cart_sync(session_id)
     if not cart_data or not cart_data.get("items"):
-        return "Your cart is empty. Add items before checkout."
+        return "[EMPTY CART] Your cart is looking a bit empty! 😊 Let me help you add some delicious items before we proceed to checkout. What would you like to order?"
 
     # Validate order_type
     order_type_lower = order_type.lower().strip() if order_type else ""
@@ -1207,10 +1207,140 @@ def create_search_menu_tool(session_id: str):
 
         if not items:
             # Preloader should always have data, but log if empty
-            logger.warning("menu_preloader_empty", query=query)
+            logger.warning("menu_preloader_empty", query=query, items_type=type(items), items_value=items)
             # Return helpful message instead of DB fallback
             if query:
-                return f"No items found matching '{query}'. Try browsing the full menu."
+                # Try to find similar items and show as MENU CARD
+                from app.core.preloader import get_menu_preloader
+                preloader = get_menu_preloader()
+                all_items = preloader.menu if preloader.is_loaded else []
+
+                # Find items that might be similar (contain any word from query)
+                query_words = query.lower().split()
+                logger.info(f"searching_for_similar_items", query=query, query_words=query_words, total_items_to_search=len(all_items))
+                similar_items = []
+                for menu_item in all_items:  # Check all items
+                    item_name = menu_item.get('name', '').lower()
+                    if any(word in item_name for word in query_words if len(word) > 2):
+                        similar_items.append(menu_item)
+                    if len(similar_items) >= 10:  # Limit to 10 suggestions
+                        break
+                logger.info(f"similar_items_found", query=query, count=len(similar_items))
+
+                if similar_items:
+                    # CRITICAL: Emit MENU_DATA card with similar items (user journey!)
+                    try:
+                        from app.core.agui_events import emit_menu_data
+                        from app.core.redis import get_cart_sync
+                        from app.core.preloader import get_current_meal_period
+
+                        current_meal = get_current_meal_period()
+                        cart_data = get_cart_sync(session_id)
+                        cart_items = cart_data.get("items", []) if cart_data else []
+                        cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+                        # Build structured similar items for menu card
+                        structured_similar = []
+                        for item in similar_items:
+                            item_name = item.get("name", "")
+                            if item_name.lower() not in cart_item_names:
+                                structured_similar.append({
+                                    "name": item_name,
+                                    "price": item.get("price", 0),
+                                    "category": _infer_category(item_name),
+                                    "description": item.get("description", ""),
+                                    "item_id": str(item.get("id", "")),
+                                    "meal_types": item.get("meal_types", ["All Day"]),
+                                })
+
+                        if structured_similar:
+                            emit_menu_data(session_id, structured_similar, current_meal_period=current_meal)
+                            logger.info(f"similar_items_menu_emitted", query=query, count=len(structured_similar))
+                            return (f"[SIMILAR ITEMS MENU CARD DISPLAYED] We don't have '{query}' available, "
+                                   f"but I've shown {len(structured_similar)} similar items in the menu card. "
+                                   f"Please check if any of these interest you! "
+                                   f"(DO NOT show full menu - user is browsing similar items)")
+                        else:
+                            # All similar items already in cart
+                            return (f"We don't have '{query}' available. The similar items I found are already in your cart. "
+                                   f"Would you like to browse other categories?")
+                    except Exception as e:
+                        logger.error(f"similar_items_menu_emit_failed", error=str(e))
+                        # Fallback to text
+                        suggestions = [f"{item.get('name')} (Rs.{item.get('price')})" for item in similar_items[:5]]
+                        return (f"We don't have '{query}' available. However, we have these similar items: "
+                               f"{', '.join(suggestions)}. Which one would you like?")
+                else:
+                    # No similar items found - suggest alternative categories
+                    # Define category fallback hierarchy based on common user intents
+                    category_alternatives = {
+                        "pizza": ["Burgers", "Sandwiches", "Main Course"],
+                        "pasta": ["Main Course", "Burgers"],
+                        "salad": ["Appetizers", "Main Course"],
+                        "soup": ["Appetizers", "Main Course"],
+                        "dessert": ["Beverages", "Main Course"],
+                        "breakfast": ["Main Course", "Appetizers"],
+                    }
+
+                    # Try to find alternative category based on query
+                    suggested_category = None
+                    for keyword, alternatives in category_alternatives.items():
+                        if keyword in query.lower():
+                            suggested_category = alternatives[0] if alternatives else None
+                            break
+
+                    # If no specific mapping, default to Burgers (most popular)
+                    if not suggested_category:
+                        suggested_category = "Burgers"
+
+                    # Get items from suggested category
+                    category_items = [item for item in all_items
+                                    if _infer_category(item.get('name', '')) == suggested_category][:8]
+
+                    if not category_items:
+                        # Try "Main Course" as final fallback
+                        category_items = [item for item in all_items
+                                        if _infer_category(item.get('name', '')) == "Main Course"][:8]
+                        suggested_category = "Main Course"
+
+                    if category_items:
+                        # Emit MENU_DATA with alternative category items
+                        try:
+                            from app.core.agui_events import emit_menu_data
+                            from app.core.redis import get_cart_sync
+                            from app.core.preloader import get_current_meal_period
+
+                            current_meal = get_current_meal_period()
+                            cart_data = get_cart_sync(session_id)
+                            cart_items = cart_data.get("items", []) if cart_data else []
+                            cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+                            structured_alternatives = []
+                            for item in category_items:
+                                item_name = item.get("name", "")
+                                if item_name.lower() not in cart_item_names:
+                                    structured_alternatives.append({
+                                        "name": item_name,
+                                        "price": item.get("price", 0),
+                                        "category": _infer_category(item_name),
+                                        "description": item.get("description", ""),
+                                        "item_id": str(item.get("id", "")),
+                                        "meal_types": item.get("meal_types", ["All Day"]),
+                                    })
+
+                            if structured_alternatives:
+                                emit_menu_data(session_id, structured_alternatives, current_meal_period=current_meal)
+                                logger.info(f"alternative_category_menu_emitted", query=query,
+                                          category=suggested_category, count=len(structured_alternatives))
+                                return (f"[ALTERNATIVE CATEGORY MENU DISPLAYED] We don't have '{query}' available. "
+                                       f"How about trying our {suggested_category}? I've shown some options in the menu card. "
+                                       f"If you'd prefer something else, just let me know or I can show you the full menu!")
+                        except Exception as e:
+                            logger.error(f"alternative_category_emit_failed", error=str(e))
+
+                    # Final fallback if everything fails
+                    return (f"We don't have '{query}' available at the moment. "
+                           f"Would you like me to show you what's on the menu?")
             return "Menu is loading. Please try again in a moment."
 
         logger.debug("menu_from_preloader", query=query, count=len(items))
@@ -1222,6 +1352,15 @@ def create_search_menu_tool(session_id: str):
             # Store item names in display order
             displayed_items = [item.get('name') for item in items[:15]]
             graph.set_displayed_menu(displayed_items)
+
+            # CRITICAL: If this is a specific item search (not full menu), track as last_mentioned_item
+            # This preserves context for multi-turn conversations like "add burger" → "how many?" → "2"
+            if query and items:  # Non-empty query with results
+                first_item_name = items[0].get('name')
+                if first_item_name:
+                    graph.update_last_mentioned(first_item_name)
+                    logger.debug("entity_graph_item_tracked", session_id=session_id, item=first_item_name)
+
             logger.debug("entity_graph_menu_tracked", session_id=session_id, count=len(displayed_items))
         except Exception as e:
             logger.debug("entity_graph_update_failed", error=str(e))
@@ -1266,7 +1405,61 @@ def create_search_menu_tool(session_id: str):
             except Exception as e:
                 logger.debug("menu_data_emit_failed", error=str(e))
 
-        # Return item list for searches (no MenuCard shown)
+        # Handle search results - if multiple items (ambiguous), show filtered menu
+        if query and len(items) > 1:
+            # Multiple matches - show filtered menu for clarification
+            logger.info(f"ambiguous_query_detected", query=query, matches=len(items))
+            try:
+                from app.core.agui_events import emit_menu_data
+                from app.core.redis import get_cart_sync
+                from app.core.preloader import get_current_meal_period
+
+                current_meal = get_current_meal_period()
+                cart_data = get_cart_sync(session_id)
+                cart_items = cart_data.get("items", []) if cart_data else []
+                cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+                # Build filtered menu items
+                structured_items = []
+                for item in items[:15]:  # Limit to top 15 matches
+                    item_name = item.get("name", "")
+                    if item_name.lower() not in cart_item_names:
+                        structured_items.append({
+                            "name": item_name,
+                            "price": item.get("price", 0),
+                            "category": _infer_category(item_name),
+                            "description": item.get("description", ""),
+                            "item_id": str(item.get("id", "")),
+                            "meal_types": item.get("meal_types", ["All Day"]),
+                        })
+
+                logger.info(f"filtered_menu_built", total_matches=len(items), structured_count=len(structured_items))
+
+                if structured_items:
+                    logger.info(f"emitting_filtered_menu", session_id=session_id, count=len(structured_items))
+                    emit_menu_data(session_id, structured_items, current_meal_period=current_meal)
+                    logger.info(f"filtered_menu_emitted_successfully", count=len(structured_items))
+                    return (f"[FILTERED MENU CARD DISPLAYED] I found {len(items)} items matching '{query}'. "
+                           f"Please check the menu card for all options and let me know which one you'd like! "
+                           f"(DO NOT list items in text - menu card is showing them)")
+                else:
+                    # All items already in cart
+                    logger.info(f"filtered_items_all_in_cart", query=query)
+                    menu_items = [f"{item.get('name')} (Rs.{item.get('price')})" for item in items[:5]]
+                    return f"I found these items matching '{query}': {', '.join(menu_items)}. Which one would you like?"
+            except Exception as e:
+                logger.error(f"filtered_menu_emit_failed", error=str(e), query=query)
+                # Fallback to text list
+                menu_items = [f"{item.get('name')} (Rs.{item.get('price')})" for item in items[:5]]
+                return f"I found these items matching '{query}': {', '.join(menu_items)}. Which one would you like?"
+
+        # Single item match or no query - return simple text
+        if query and len(items) == 1:
+            # Exact match - single item found
+            item = items[0]
+            return f"We have {item.get('name')} available for Rs.{item.get('price')}."
+
+        # Fallback for edge cases
         menu_items = [f"{item.get('name')} (Rs.{item.get('price')})" for item in items[:15]]
         return f"Menu items: {', '.join(menu_items)}" + (f" (+{len(items)-15} more)" if len(items) > 15 else "")
 
@@ -1304,6 +1497,13 @@ def create_add_to_cart_tool(session_id: str):
         from app.core.preloader import get_menu_preloader
 
         try:
+            # VALIDATION: Quantity must be positive and reasonable
+            if quantity <= 0:
+                return f"[INVALID QUANTITY] I can't add {quantity} items. Please specify a positive number (e.g., 1, 2, 3)."
+
+            if quantity > 50:
+                return f"[INVALID QUANTITY] That's a lot! Our maximum order quantity per item is 50. If you need more, please contact us directly."
+
             item_name = item.strip()
 
             # Find the item (uses preloader - sync)
@@ -2417,8 +2617,12 @@ def create_update_quantity_tool(session_id: str):
         from app.core.redis import get_cart_sync, set_cart_sync
 
         try:
-            if new_quantity < 1:
-                return "Quantity must be at least 1. Use remove_from_cart to remove items."
+            # VALIDATION: Quantity must be positive and reasonable
+            if new_quantity <= 0:
+                return f"[INVALID QUANTITY] I can't update to {new_quantity} items. Quantity must be at least 1. Use 'remove from cart' to remove items."
+
+            if new_quantity > 50:
+                return f"[INVALID QUANTITY] That's a lot! Our maximum order quantity per item is 50. If you need more, please contact us directly."
 
             item_name_clean = item_name.strip().lower()
 
@@ -2491,6 +2695,14 @@ def create_set_special_instructions_tool(session_id: str):
         from app.core.redis import get_cart_sync, set_cart_sync
 
         try:
+            # VALIDATION: Instructions length
+            instructions_clean = instructions.strip()
+            if not instructions_clean:
+                return "[INVALID INSTRUCTIONS] Please provide specific instructions (e.g., 'no onions', 'extra spicy')."
+
+            if len(instructions_clean) > 200:
+                return "[INVALID INSTRUCTIONS] Instructions are too long (max 200 characters). Please keep them brief and specific."
+
             item_name_clean = item_name.strip().lower()
 
             # Get cart (sync Redis)
@@ -2498,7 +2710,7 @@ def create_set_special_instructions_tool(session_id: str):
             items = cart_data.get("items", [])
 
             if not items:
-                return "Cart is empty. Add items first before adding special instructions."
+                return "[EMPTY CART] Your cart is empty. Please add items first before adding special instructions."
 
             # Find and update item
             for item in items:
