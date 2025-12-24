@@ -38,7 +38,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 40  # v40: Quick reply agent uses GPT-4o-mini (faster, cheaper)
+_CREW_VERSION = 42  # v42: Context preservation fix - search_menu tracks last_mentioned_item + stronger ReAct prompts
 
 
 def clean_crew_response(raw_response: str) -> str:
@@ -136,6 +136,13 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         goal="Help customers browse menu, manage their cart, and place orders when they're ready",
         backstory="""You are Kavya, a warm and intuitive food ordering specialist at the restaurant.
 
+🎯 CRITICAL: YOU MUST USE TOOLS - DO NOT HALLUCINATE!
+- NEVER respond as if you've shown the menu without calling search_menu()
+- NEVER say "I've added X to cart" without calling add_to_cart()
+- NEVER describe cart contents without calling view_cart()
+- ALWAYS call the required tool BEFORE responding to the customer
+- When customer mentions an item WITHOUT quantity: call search_menu(query=item) to verify it exists & save context BEFORE asking "how many?"
+
 You excel at understanding what customers mean, not just what they say:
 - You pay attention to the flow of conversation - what YOU just said shapes what their response means
 - You distinguish between someone declining a suggestion vs. wanting to remove something
@@ -160,6 +167,8 @@ When customer asks about booking a table, reservations, or availability:
         cache=False,  # Disable - prevents "reusing same input" loop on view_cart
         max_iter=15,  # Increased for delegation scenarios
         max_retry_limit=2,
+        reasoning=True,  # ✅ Enable enhanced reasoning for better tool usage decisions
+        memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
     # ========================================================================
@@ -181,6 +190,12 @@ When customer asks about booking a table, reservations, or availability:
         role="Booking Specialist",
         goal="Help customers make table reservations, check availability, and manage bookings",
         backstory="""You are a friendly booking specialist at the restaurant.
+
+🎯 CRITICAL: YOU MUST USE TOOLS - DO NOT HALLUCINATE!
+- ALWAYS call check_table_availability() before saying tables are available
+- ALWAYS call make_reservation() tool when creating a booking
+- NEVER say "I've booked a table" without actually calling the tool
+
 You help customers check table availability, make reservations, view their bookings,
 and cancel reservations. Be warm and efficient.
 
@@ -193,6 +208,8 @@ When customer asks about food, menu, or ordering, delegate to Kavya the Food Ord
         cache=False,  # Disable - prevents "reusing same input" loop
         max_iter=15,  # Increased for delegation scenarios
         max_retry_limit=2,
+        reasoning=True,  # ✅ Enable enhanced reasoning for better tool usage decisions
+        memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
     # ========================================================================
@@ -204,6 +221,73 @@ Semantic context: {semantic_context}
 Conversation history: {context}
 
 You are Kavya, a warm and intuitive restaurant assistant.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 CRITICAL: MANDATORY TOOL USAGE - REACT PROCESS 🚨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+YOU MUST FOLLOW THIS PROCESS FOR EVERY MESSAGE:
+
+**STEP 1 - ANALYZE INTENT:**
+What does the customer want? Match to required tool:
+
+- "show menu" / "what's available" / "browse menu" → MUST call search_menu()
+- "popular" / "best sellers" / "what's good" → MUST call search_menu(category="popular")
+- "add [item]" / "I want [item]":
+  * WITH quantity ("2 burgers") → MUST call add_to_cart(item, quantity)
+  * WITHOUT quantity ("add burger") → MUST call search_menu(query=item) FIRST to verify item exists & update context, THEN ask "How many?"
+- "view cart" / "what's in my cart" / "show cart" → MUST call view_cart()
+- "remove [item]" → MUST call remove_from_cart()
+- "checkout" / "place order" / "pay" → MUST call checkout()
+- "book table" / "reservation" → MUST delegate to Booking Specialist
+- "clear cart" → MUST call clear_cart()
+- "[number]" in response to YOUR quantity question → MUST call add_to_cart() with the item you just asked about
+
+**STEP 2 - CALL REQUIRED TOOL(S):**
+⚠️ YOU MUST CALL THE TOOL - DO NOT SKIP THIS STEP!
+⚠️ NEVER respond as if you performed an action without actually calling the tool
+⚠️ The tool call is MANDATORY - failure to call tools breaks the entire system
+
+**STEP 3 - USE TOOL OUTPUT:**
+Base your response on ACTUAL tool output, not assumptions or memory.
+If tool returns data, present it to the customer.
+If tool fails, apologize and suggest alternatives.
+
+**EXAMPLE 1 - CORRECT BEHAVIOR (Show Menu):**
+```
+Customer: "show menu"
+→ STEP 1: Intent = browse menu → Tool = search_menu()
+→ STEP 2: Call search_menu() ✓
+→ STEP 3: Tool returns: [list of menu items]
+→ Response: "Here's our menu: [actual items from tool]"
+```
+
+**EXAMPLE 2 - CORRECT BEHAVIOR (Add Item Without Quantity):**
+```
+Customer: "add chicken burger"
+→ STEP 1: Intent = add item (no quantity specified) → Tool = search_menu(query="chicken burger")
+→ STEP 2: Call search_menu(query="chicken burger") ✓  ← CRITICAL: Must call to verify item & update context!
+→ STEP 3: Tool returns: [Chicken Fillet Burger - Rs.180]
+→ Response: "How many Chicken Fillet Burgers would you like?" ← Now context is saved!
+
+Customer: "2"
+→ STEP 1: Intent = quantity for previous item → Tool = add_to_cart("Chicken Fillet Burger", 2)
+→ STEP 2: Call add_to_cart("Chicken Fillet Burger", 2) ✓
+→ STEP 3: Tool returns: "Added 2x Chicken Fillet Burger"
+→ Response: "I've added 2 Chicken Fillet Burgers to your cart!"
+```
+
+**EXAMPLE 3 - INCORRECT BEHAVIOR (NEVER DO THIS):**
+```
+Customer: "add chicken burger"
+→ Response: "How many would you like?" ✗  ← NO TOOL CALLED! Context not saved!
+→ Tool called: NONE ✗ ← THIS IS HALLUCINATION!
+
+Customer: "2"
+→ Response: "Added 2 Add Caramel" ✗  ← Wrong item because context was lost!
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 HOW TO THINK ABOUT EACH MESSAGE:
 
@@ -289,11 +373,21 @@ TOOLS: search_menu, add_to_cart, view_cart, remove_from_cart, checkout (has orde
     # ========================================================================
     # CREATE CREW WITH SEQUENTIAL PROCESS (delegation enabled between agents)
     # ========================================================================
+    # LLM for planning - using gpt-4o-mini for cost-effectiveness
+    planning_llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        api_key=api_key,
+    )
+
     crew = Crew(
         agents=[food_ordering_agent, booking_agent],
         tasks=[customer_request_task],
         process=Process.sequential,  # Sequential but with delegation
         verbose=True,  # Enable for proper result extraction
+        planning=True,  # ✅ Enable task planning - creates step-by-step plans that force tool usage
+        planning_llm=planning_llm,  # ✅ Use gpt-4o-mini for planning (cheap, fast)
+        memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
     return crew
