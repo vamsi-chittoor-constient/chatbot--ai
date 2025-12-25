@@ -123,6 +123,13 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_reorder_tool,
     )
 
+    # Import complaint tools
+    from app.features.feedback.tools.complaint_tools import (
+        create_complaint,
+        get_user_complaints,
+        get_complaint_details
+    )
+
     # Create sync tools only
     search_menu = create_search_menu_tool(session_id)
     add_to_cart = create_add_to_cart_tool(session_id)
@@ -160,7 +167,7 @@ When customer asks about booking a table, reservations, or availability:
 - Coworker: "Booking Specialist"
 - Provide the customer's request details (date, time, party size) in the task""",
         llm=llm,
-        tools=[search_menu, add_to_cart, view_cart, remove_from_cart, checkout, clear_cart],
+        tools=[search_menu, add_to_cart, view_cart, remove_from_cart, checkout, clear_cart, create_complaint, get_user_complaints],
         verbose=True,  # Required for proper result extraction
         allow_delegation=True,  # Can delegate to booking agent
         respect_context_window=True,
