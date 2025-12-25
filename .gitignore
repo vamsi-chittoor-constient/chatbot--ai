@@ -68,3 +68,28 @@ Thumbs.db
 *.bak
 *.backup
 a24_finalschema_20251219_2.sql.bak
+
+# Temporary documentation files (not for version control)
+# Exclude all markdown files except essential ones
+*.md
+!README.md
+!INTEGRATION_GUIDE.md
+!restaurant-chatbot/**/*.md
+!petpooja-service/**/*.md
+
+# Temporary test files
+test_*.py
+verify_*.py
+chat_with_bot.py
+
+# Test output files
+*_results.txt
+*_output.txt
+*_logs.txt
+*.json.bak
+
+# Reference code (external)
+latest code new/
+
+# Claude Code local settings
+.claude/settings.local.json
