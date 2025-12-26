@@ -98,9 +98,9 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
     api_key = llm_manager.get_next_api_key()
     os.environ["OPENAI_API_KEY"] = api_key
 
-    # LLM for agents - using GPT-4o for better reasoning on nuanced context
+    # LLM for agents - using GPT-4o-mini for fast responses (3-5s vs 30-50s)
     llm = ChatOpenAI(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         temperature=0.1,
         api_key=api_key,
         max_tokens=2048,  # CRITICAL FIX: Increased from 512 to accommodate 55 tool schemas (~7000 tokens needed)
@@ -183,9 +183,9 @@ When customer complains about food quality, service, wait time, or other issues:
         allow_delegation=True,  # Can delegate to booking agent
         respect_context_window=True,
         cache=False,  # Disable - prevents "reusing same input" loop on view_cart
-        max_iter=15,  # Increased for delegation scenarios
+        max_iter=8,  # Reduced for faster responses (prevent long iterations)
         max_retry_limit=2,
-        reasoning=True,  # ✅ Enable enhanced reasoning for better tool usage decisions
+        reasoning=False,  # Disabled for speed - simple tool usage doesn't need extra reasoning
         memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
@@ -224,9 +224,9 @@ When customer asks about food, menu, or ordering, delegate to Kavya the Food Ord
         allow_delegation=True,  # Can delegate to food ordering agent
         respect_context_window=True,
         cache=False,  # Disable - prevents "reusing same input" loop
-        max_iter=15,  # Increased for delegation scenarios
+        max_iter=8,  # Reduced for faster responses
         max_retry_limit=2,
-        reasoning=True,  # ✅ Enable enhanced reasoning for better tool usage decisions
+        reasoning=False,  # Disabled for speed
         memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
@@ -416,8 +416,7 @@ TOOLS: search_menu, add_to_cart, view_cart, remove_from_cart, checkout (has orde
         tasks=[customer_request_task],
         process=Process.sequential,  # Sequential but with delegation
         verbose=True,  # Enable for proper result extraction
-        planning=True,  # ✅ Enable task planning - creates step-by-step plans that force tool usage
-        planning_llm=planning_llm,  # ✅ Use gpt-4o-mini for planning (cheap, fast)
+        planning=False,  # Disabled for speed - agents execute directly without planning phase
         memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
