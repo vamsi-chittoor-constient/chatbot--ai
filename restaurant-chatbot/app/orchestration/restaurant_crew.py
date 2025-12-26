@@ -123,8 +123,12 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_reorder_tool,
     )
 
-    # TODO: Add complaint tools (need session-aware sync wrappers)
-    # from app.features.feedback.tools.complaint_tools import create_complaint
+    # Import complaint tools (session-aware sync wrappers)
+    from app.features.feedback.crew_complaint_tools import (
+        create_complaint_tool,
+        create_get_complaints_tool,
+        create_complaint_status_tool,
+    )
 
     # Create sync tools only
     search_menu = create_search_menu_tool(session_id)
@@ -133,6 +137,11 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
     remove_from_cart = create_remove_from_cart_tool(session_id)
     checkout = create_checkout_tool(session_id)
     clear_cart = create_clear_cart_tool(session_id)
+
+    # Create complaint tools
+    create_complaint = create_complaint_tool(session_id)
+    get_complaints = create_get_complaints_tool(session_id)
+    check_complaint_status = create_complaint_status_tool(session_id)
 
     food_ordering_agent = Agent(
         role="Kavya - Food Ordering Specialist",
@@ -156,14 +165,20 @@ You're helpful and conversational:
 - Suggest complementary items naturally when appropriate
 - Let customers explore - show options when they're curious, don't assume
 - Keep responses concise and natural
+- When customers complain, show empathy and log the issue immediately
 
 IMPORTANT - For table reservations/bookings:
 When customer asks about booking a table, reservations, or availability:
 - Use the 'Delegate work to coworker' tool
 - Coworker: "Booking Specialist"
-- Provide the customer's request details (date, time, party size) in the task""",
+- Provide the customer's request details (date, time, party size) in the task
+
+IMPORTANT - For complaints:
+When customer complains about food quality, service, wait time, or other issues:
+- Use the create_complaint tool to log the issue
+- Show empathy and offer resolution (replacement/refund)""",
         llm=llm,
-        tools=[search_menu, add_to_cart, view_cart, remove_from_cart, checkout, clear_cart],
+        tools=[search_menu, add_to_cart, view_cart, remove_from_cart, checkout, clear_cart, create_complaint, get_complaints, check_complaint_status],
         verbose=True,  # Required for proper result extraction
         allow_delegation=True,  # Can delegate to booking agent
         respect_context_window=True,
@@ -368,7 +383,20 @@ HOW TO THINK ABOUT EACH MESSAGE:
    - Use the reorder_last_order tool - it adds all items from their last order to cart
    - Confirm what was added and ask if they want to checkout or modify
 
-TOOLS: search_menu, add_to_cart, view_cart, remove_from_cart, checkout (has order_type param), cancel_order, clear_cart, update_quantity, set_special_instructions, get_item_details, reorder_last_order""",
+10. **Handling Complaints - IMPORTANT**
+   When customer complains about food quality, service, wait time, billing, or other issues:
+   - MUST call create_complaint tool with appropriate details
+   - Categories: food_quality, service, cleanliness, wait_time, billing, other
+   - Priority: low, medium, high, critical (assess from sentiment)
+   - Show empathy and offer resolution (replacement/refund)
+   - Example complaints:
+     * "The burger was cold" → create_complaint(category="food_quality", priority="high")
+     * "Service was slow" → create_complaint(category="service", priority="medium")
+     * "Wrong bill amount" → create_complaint(category="billing", priority="high")
+   - When customer asks to see their complaints: use get_user_complaints tool
+   - When customer asks about complaint status: use check_complaint_status tool
+
+TOOLS: search_menu, add_to_cart, view_cart, remove_from_cart, checkout (has order_type param), cancel_order, clear_cart, update_quantity, set_special_instructions, get_item_details, reorder_last_order, create_complaint, get_user_complaints, check_complaint_status""",
         expected_output="A natural, helpful response that acknowledges what you did and continues the conversation",
         agent=food_ordering_agent,
     )

@@ -25,11 +25,9 @@ class Complaint(Base):
     __tablename__ = "complaints"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(20), ForeignKey("users.id"))
-    order_id: Mapped[Optional[str]] = mapped_column(String(20), ForeignKey("orders.id"),
-                                                   nullable=True)
-    booking_id: Mapped[Optional[str]] = mapped_column(String(20), ForeignKey("bookings.id"),
-                                                     nullable=True)
+    user_id: Mapped[str] = mapped_column(String(20))  # Removed ForeignKey for now
+    order_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Removed ForeignKey
+    booking_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Removed ForeignKey
     category: Mapped[str] = mapped_column(String(100), nullable=False)
     ticket_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)

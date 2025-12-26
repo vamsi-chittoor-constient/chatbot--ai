@@ -121,8 +121,10 @@ services:
       - ENVIRONMENT=production
       - DEBUG=false
       - LOG_LEVEL=INFO
-      # Disable authentication for testing
-      - AUTH_REQUIRED=false
+      # Enable authentication (phone + OTP flow)
+      - AUTH_REQUIRED=true
+      # Enable PetPooja kitchen sync (sandbox mode)
+      - ENABLE_PETPOOJA_SYNC=true
     depends_on:
       postgres:
         condition: service_healthy
