@@ -1,0 +1,66 @@
+data: {"type": "RUN_STARTED", "timestamp": "2025-12-27T05:41:46.268674", "run_id": "1c87930d", "thread_id": "connectivity_check"}
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T05:41:46.271139", "activity_type": "thinking", "message": "Let me help you with that..."}
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T05:41:46.293355", "activity_type": "thinking", "message": "Setting things up..."}
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T05:41:46.714828", "activity_type": "processing", "message": "Processing your request..."}
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+

@@ -1,0 +1,96 @@
+data: {"type": "RUN_STARTED", "timestamp": "2025-12-27T06:17:27.349253", "run_id": "112056bc", "thread_id": "menu_search_test"}
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T06:17:27.349303", "activity_type": "thinking", "message": "Let me help you with that..."}
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T06:17:27.350543", "activity_type": "thinking", "message": "Setting things up..."}
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T06:17:27.436588", "activity_type": "processing", "message": "Processing your request..."}
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T06:17:36.063231", "activity_type": "searching", "message": "Looking through our menu..."}
+
+data: {"type": "MENU_DATA", "timestamp": "2025-12-27T06:17:36.067950", "items": [{"name": "Big Baik Sandwich", "price": 209.0, "category": "Main Course", "description": "Chicken fillet in a bun with coleslaw,lettuce, pickles and our special cocktail sauce. This sandwich is made with care to make sure that each and every bite is packed with Mmmm", "item_id": "1cb3ee00-21da-4209-9729-6413b04bce4c", "meal_types": ["All Day"]}, {"name": "Big Baik Spicy Sandwich", "price": 209.0, "category": "Main Course", "description": "Chicken fillet in a bun  with coleslaw,lettuce, pickles and our  spicy cocktail sauce. This sandwich is made with care to make sure that each and every bite is packed with Mmmm", "item_id": "fb6b9785-0924-4307-8621-8b9198af42ab", "meal_types": ["All Day"]}, {"name": "Chicken Fillet Burger", "price": 189.0, "category": "Burgers", "description": "Chicken fillet steak in a bun with  pickles,lettuce  ,our signature garlic sauce and some frie. Crispy  chicken fillet burger , topped with tangy sliced pickles ,lettuce and Albaik International's signature garlic sauce, placed between a freshly baked bun", "item_id": "e61f7ab9-cc27-462d-ace5-f1b5ac013929", "meal_types": ["All Day"]}, {"name": "Chicken Fillet Burger Combo", "price": 269.0, "category": "Burgers", "description": "2 Chicken Fillet burgers, fries and choice of  soft drink. 2 Crispy chicken fillet burgers, topped with tangy sliced pickles ,lettuce and Albaik International's signature garlic sauce, placed between a freshly baked bun  served with a portion of fries and a soft drink", "item_id": "2c994151-ad22-471a-a584-933166bd18d5", "meal_types": ["All Day"]}, {"name": "Chicken Fillet Nugget Snack", "price": 319.0, "category": "Main Course", "description": "chicken fillet  nuggets come with a sauce of your choice (nugget/garlic sauce). Bite-sized pieces of tender all breast chicken fillets, marinated in our unique & signature blend, breaded and seasoned to perfection, then deep-fried until deliciously tender, crispy with a golden crust", "item_id": "7b636f57-5f2d-48de-8d3d-b1804fac005e", "meal_types": ["All Day"]}, {"name": "Chicken Fillet Sandwich", "price": 209.0, "category": "Main Course", "description": "Chicken fillet wrapped in Arabic bread with our signature garlic sauce, lettuce ,pickles and fries inside. Prepared with care ensuring each and every bite is packed with Mmmm", "item_id": "4400fe8f-7381-4c00-bc5c-db3339d49e0a", "meal_types": ["All Day"]}, {"name": "Chicken Fillet Sandwich Combo", "price": 289.0, "category": "Main Course", "description": "Chicken fillet sandwich, fries and choice of soft drink. Prepared with care ensuring each and every bite is packed with Mmmm", "item_id": "86c4fb4c-6d08-414b-a12d-67f4517421b7", "meal_types": ["All Day"]}, {"name": "Chicken Fry", "price": 120.0, "category": "Main Course", "description": "", "item_id": "721f5a53-678e-4487-810a-b342f8bf7499", "meal_types": ["All Day"]}, {"name": "Chicken Istooooo", "price": 91.0, "category": "Main Course", "description": "", "item_id": "755b0304-ab33-4221-a87d-8c591b47cdf0", "meal_types": ["All Day"]}, {"name": "Chicken Kosha With Polau", "price": 300.0, "category": "Main Course", "description": "", "item_id": "3fda41e7-be26-484d-82e7-a26914a318b8", "meal_types": ["All Day"]}, {"name": "Chicken Loppypop", "price": 120.0, "category": "Main Course", "description": "", "item_id": "2a075796-d296-4b03-ab04-f6de4016af25", "meal_types": ["All Day"]}, {"name": "Chicken Ukkad", "price": 160.0, "category": "Main Course", "description": "", "item_id": "8b7d8843-3a70-44fc-992f-15204e56329c", "meal_types": ["All Day"]}, {"name": "Double Baik", "price": 259.0, "category": "Main Course", "description": "2 Pcs of Chicken fillet steak & cheese stacked in a bun with  pickles , lettuce ,our special sauce and some frie. Two of Albaik International's juicy chicken fillets topped with double the cheesy goodness and our signature cocktail sauce & garlic sauce  in our new unique bread. Experience an Mmmm with every bite", "item_id": "37ba36be-f7a1-4260-a85f-9cdbe180f9a9", "meal_types": ["All Day"]}, {"name": "Double Chicken Burger Combo", "price": 439.0, "category": "Burgers", "description": "Chicken fillet in a bun  with coleslaw,lettuce, pickles and our  spicy cocktail sauce. This sandwich is made with care to make sure that each and every bite is packed with Mmmm", "item_id": "662b3a6a-df07-4eae-b4ac-6893b2585eae", "meal_types": ["All Day"]}], "categories": ["Burgers", "Main Course"], "current_meal_period": "Lunch"}
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+data: {"type": "ACTIVITY_START", "timestamp": "2025-12-27T06:17:45.489954", "activity_type": "searching", "message": "Looking through our menu..."}
+
+: keepalive
+
+: keepalive
+
+data: {"type": "ACTIVITY_END", "timestamp": "2025-12-27T06:17:48.459963"}
+
+data: {"type": "TEXT_MESSAGE_START", "timestamp": "2025-12-27T06:17:48.460543", "message_id": "803a6646", "role": "assistant"}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460602", "message_id": "803a6646", "delta": "We "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460631", "message_id": "803a6646", "delta": "have "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460651", "message_id": "803a6646", "delta": "a "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460667", "message_id": "803a6646", "delta": "Double "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460681", "message_id": "803a6646", "delta": "Chicken "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460695", "message_id": "803a6646", "delta": "Burger "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460709", "message_id": "803a6646", "delta": "Combo "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460727", "message_id": "803a6646", "delta": "available "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460743", "message_id": "803a6646", "delta": "for "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460758", "message_id": "803a6646", "delta": "Rs.439. "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460772", "message_id": "803a6646", "delta": "How "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460788", "message_id": "803a6646", "delta": "many "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460804", "message_id": "803a6646", "delta": "would "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460819", "message_id": "803a6646", "delta": "you "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460834", "message_id": "803a6646", "delta": "like "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460849", "message_id": "803a6646", "delta": "to "}
+
+data: {"type": "TEXT_MESSAGE_CONTENT", "timestamp": "2025-12-27T06:17:48.460865", "message_id": "803a6646", "delta": "order?"}
+
+data: {"type": "TEXT_MESSAGE_END", "timestamp": "2025-12-27T06:17:48.460884", "message_id": "803a6646"}
+
+data: {"type": "QUICK_REPLIES", "timestamp": "2025-12-27T06:17:50.483829", "replies": [{"label": "1", "action": "1"}, {"label": "2", "action": "2"}, {"label": "3", "action": "3"}, {"label": "Other", "action": "__OTHER__"}]}
+
+data: {"type": "RUN_FINISHED", "timestamp": "2025-12-27T06:17:50.483924", "run_id": "112056bc", "result": "We have a Double Chicken Burger Combo available for Rs.439. How many would you like to order?"}
+

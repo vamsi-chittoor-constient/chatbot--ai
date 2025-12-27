@@ -11,10 +11,11 @@ logger = structlog.get_logger(__name__)
 
 def create_search_menu_tool(session_id: str):
     @tool("search_menu")
-    def search_menu(query: str = "") -> str:
+    def search_menu(query: Optional[str] = None) -> str:
         """Search the restaurant menu for food items."""
         from app.features.food_ordering.crew_agent import _search_menu_impl
-        return _search_menu_impl(query, session_id)
+        # Convert None to empty string for backward compatibility
+        return _search_menu_impl(query or "", session_id)
     return search_menu
 
 def create_add_to_cart_tool(session_id: str):
@@ -27,7 +28,7 @@ def create_add_to_cart_tool(session_id: str):
 
 def create_view_cart_tool(session_id: str):
     @tool("view_cart")
-    def view_cart(_nonce: str = "") -> str:
+    def view_cart() -> str:
         """View the current contents of the customer's shopping cart."""
         from app.features.food_ordering.crew_agent import _view_cart_impl
         return _view_cart_impl(session_id)
@@ -35,10 +36,10 @@ def create_view_cart_tool(session_id: str):
 
 def create_checkout_tool(session_id: str):
     @tool("checkout")
-    def checkout(order_type: str = "") -> str:
+    def checkout(order_type: Optional[str] = None) -> str:
         """Complete the order and place it."""
         from app.features.food_ordering.crew_agent import _checkout_impl
-        return _checkout_impl(order_type, session_id)
+        return _checkout_impl(order_type or "", session_id)
     return checkout
 
 def create_food_ordering_crew_fixed(session_id: str) -> Crew:

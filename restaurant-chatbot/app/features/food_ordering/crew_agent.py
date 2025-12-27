@@ -1184,7 +1184,7 @@ def create_search_menu_tool(session_id: str):
     """Factory to create search_menu tool with session context."""
 
     @tool("search_menu")
-    def search_menu(query: str = "") -> str:
+    def search_menu(query: Optional[str] = None) -> str:
         """
         Search the restaurant menu for food items.
 
@@ -1198,6 +1198,9 @@ def create_search_menu_tool(session_id: str):
         Returns:
             List of menu items with names and prices.
         """
+        # Convert None to empty string for backward compatibility
+        query = query or ""
+
         # Emit activity for frontend (async)
         from app.core.agui_events import emit_tool_activity
         emit_tool_activity(session_id, "search_menu")
@@ -1575,14 +1578,11 @@ def create_view_cart_tool(session_id: str):
     """Factory to create view_cart tool with session context."""
 
     @tool("view_cart")
-    def view_cart(_nonce: str = "") -> str:
+    def view_cart() -> str:
         """
         View the current contents of the customer's shopping cart.
 
         Use this to show what items have been added and the total price.
-
-        Args:
-            _nonce: Optional unique identifier (ignored, used for cache busting)
 
         Returns:
             List of cart items with quantities and total price.
@@ -1724,7 +1724,7 @@ def create_checkout_tool(session_id: str):
     """Factory to create checkout tool with session context."""
 
     @tool("checkout")
-    def checkout(order_type: str = "") -> str:
+    def checkout(order_type: Optional[str] = None) -> str:
         """
         Complete the order and place it.
 
@@ -1740,7 +1740,7 @@ def create_checkout_tool(session_id: str):
             If order_type not specified, returns error asking to specify.
         """
         # Use the sync implementation
-        return _checkout_impl(order_type, session_id)
+        return _checkout_impl(order_type or "", session_id)
 
     return checkout
 
