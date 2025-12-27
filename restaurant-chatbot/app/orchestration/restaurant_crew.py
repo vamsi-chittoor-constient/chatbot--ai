@@ -98,9 +98,10 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
     api_key = llm_manager.get_next_api_key()
     os.environ["OPENAI_API_KEY"] = api_key
 
-    # LLM for agents - using GPT-4o-mini for fast responses (3-5s vs 30-50s)
+    # LLM for agents - temporarily using GPT-4o for better tool calling reliability
+    # (gpt-4o-mini was having issues with Optional parameter schemas)
     llm = ChatOpenAI(
-        model="gpt-4o-mini",
+        model="gpt-4o",  # Using gpt-4o for reliable tool calling
         temperature=0.1,
         api_key=api_key,
         max_tokens=2048,  # CRITICAL FIX: Increased from 512 to accommodate 55 tool schemas (~7000 tokens needed)
