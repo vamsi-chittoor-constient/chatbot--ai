@@ -777,6 +777,10 @@ async def process_with_agui_streaming(
             logger.debug("quick_reply_emit_failed", error=str(e))
             # Fallback will be used by frontend
 
+        # Ensure activity indicator is cleared before finishing
+        # (redundant safety - already called at line 758, but ensures it's sent after streaming)
+        emitter.emit_activity_end()
+
         # Emit run finished
         emitter.emit_run_finished(response)
 

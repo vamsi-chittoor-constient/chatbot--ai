@@ -139,12 +139,16 @@ function aguiReducer(state, action) {
       }
 
     case 'FORM_REQUEST':
+      // Mark auth forms as ephemeral so they don't persist in chat history
+      const isAuthForm = ['phone_auth', 'login_otp', 'name_collection'].includes(action.payload.form_type)
+
       return {
         ...state,
         messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'form',
+          ephemeral: isAuthForm,  // Mark auth forms as ephemeral
           data: {
             formType: action.payload.form_type,
             fields: action.payload.fields,
@@ -163,9 +167,17 @@ function aguiReducer(state, action) {
       const formTypesToDismiss = action.payload.form_types || [action.payload.form_type]
       return {
         ...state,
-        messages: state.messages.filter(msg =>
-          msg.type !== 'form' || !formTypesToDismiss.includes(msg.data?.formType)
-        ),
+        messages: state.messages.filter(msg => {
+          // Remove forms that match the dismiss types
+          if (msg.type === 'form' && formTypesToDismiss.includes(msg.data?.formType)) {
+            return false
+          }
+          // Also remove any ephemeral forms (safety cleanup for auth forms)
+          if (msg.type === 'form' && msg.ephemeral) {
+            return false
+          }
+          return true
+        }),
       }
 
     case 'CLEAR_QUICK_REPLIES':
