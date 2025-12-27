@@ -38,11 +38,11 @@ const getMealPeriodByTime = () => {
 }
 
 export const MenuCard = ({ data, onAddToCart }) => {
-  const { items = [], currentMealPeriod } = data
+  const { items = [], currentMealPeriod, showMealFilters = true } = data
   const [selectedItems, setSelectedItems] = useState({})
   const [expandedCategories, setExpandedCategories] = useState(new Set())
-  // Auto-detect meal period based on time if not provided
-  const [activeMealTab, setActiveMealTab] = useState(currentMealPeriod || getMealPeriodByTime())
+  // Auto-detect meal period based on time if not provided (only if meal filters are shown)
+  const [activeMealTab, setActiveMealTab] = useState(showMealFilters ? (currentMealPeriod || getMealPeriodByTime()) : 'all')
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE)
 
   // Filter items by meal period
@@ -149,30 +149,32 @@ export const MenuCard = ({ data, onAddToCart }) => {
         </p>
       </div>
 
-      {/* Meal Period Tabs */}
-      <div className="flex border-b border-chat-border bg-chat-tertiary px-2 py-1.5 gap-1 overflow-x-auto">
-        {mealPeriodTabs.map(tab => {
-          const Icon = tab.icon
-          const isActive = activeMealTab === tab.id
-          return (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveMealTab(tab.id)
-                setVisibleCount(ITEMS_PER_PAGE)
-              }}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
-                isActive
-                  ? `${tab.color} text-white shadow-sm`
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
-              }`}
-            >
-              <Icon size={14} />
-              {tab.label}
-            </button>
-          )
-        })}
-      </div>
+      {/* Meal Period Tabs - Only show if showMealFilters is true */}
+      {showMealFilters && (
+        <div className="flex border-b border-chat-border bg-chat-tertiary px-2 py-1.5 gap-1 overflow-x-auto">
+          {mealPeriodTabs.map(tab => {
+            const Icon = tab.icon
+            const isActive = activeMealTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveMealTab(tab.id)
+                  setVisibleCount(ITEMS_PER_PAGE)
+                }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
+                  isActive
+                    ? `${tab.color} text-white shadow-sm`
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                }`}
+              >
+                <Icon size={14} />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Categories */}
       <div className="max-h-80 overflow-y-auto">

@@ -201,6 +201,7 @@ class MenuDataEvent(AGUIEvent):
     items: List[Dict[str, Any]] = field(default_factory=list)
     categories: List[str] = field(default_factory=list)
     current_meal_period: str = ""  # Breakfast, Lunch, Dinner, or All Day
+    show_meal_filters: bool = True  # Show breakfast/lunch/dinner tabs (False for filtered views)
 
 
 @dataclass
@@ -571,7 +572,7 @@ class AGUIEventEmitter:
                     session_id=self.session_id, items_count=len(items), total=total)
 
     def emit_menu_data(self, items: List[Dict[str, Any]], categories: List[str] = None,
-                       current_meal_period: str = ""):
+                       current_meal_period: str = "", show_meal_filters: bool = True):
         """
         Emit menu data for rich UI display - IMMEDIATE (not scheduled).
 
@@ -585,7 +586,8 @@ class AGUIEventEmitter:
         self._emit(MenuDataEvent(
             items=items,
             categories=categories,
-            current_meal_period=current_meal_period
+            current_meal_period=current_meal_period,
+            show_meal_filters=show_meal_filters
         ))
         logger.debug("menu_data_emitted_immediate",
                     session_id=self.session_id, items_count=len(items))
@@ -1097,7 +1099,7 @@ async def emit_cart_data_async(session_id: str, items: List[Dict[str, Any]], tot
 
 
 async def emit_menu_data_async(session_id: str, items: List[Dict[str, Any]],
-                               categories: List[str] = None, current_meal_period: str = ""):
+                               categories: List[str] = None, current_meal_period: str = "", show_meal_filters: bool = True):
     """
     Emit menu data for rich UI display from async context.
 
@@ -1106,6 +1108,7 @@ async def emit_menu_data_async(session_id: str, items: List[Dict[str, Any]],
         items: List of menu items
         categories: List of categories
         current_meal_period: Current meal period
+        show_meal_filters: Whether to show breakfast/lunch/dinner tabs (False for filtered views)
     """
     try:
         if categories is None:
@@ -1115,7 +1118,8 @@ async def emit_menu_data_async(session_id: str, items: List[Dict[str, Any]],
         event = MenuDataEvent(
             items=items,
             categories=categories,
-            current_meal_period=current_meal_period
+            current_meal_period=current_meal_period,
+            show_meal_filters=show_meal_filters
         )
         queue = get_event_queue(session_id)
         await queue.put(event)
@@ -1296,7 +1300,7 @@ def emit_order_data(session_id: str, order_id: str, items: List[Dict[str, Any]],
         logger.debug("order_data_emit_failed", error=str(e))
 
 
-def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: List[str] = None, current_meal_period: str = ""):
+def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: List[str] = None, current_meal_period: str = "", show_meal_filters: bool = True):
     """
     Emit menu data for rich UI display from sync context.
 
@@ -1309,6 +1313,7 @@ def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: Lis
         items: List of menu items with name, price, category, meal_types
         categories: List of unique categories
         current_meal_period: Current meal period (Breakfast, Lunch, Dinner) for default tab
+        show_meal_filters: Whether to show breakfast/lunch/dinner tabs (False for filtered views)
     """
     try:
         # Extract unique categories if not provided
@@ -1319,7 +1324,8 @@ def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: Lis
         event = MenuDataEvent(
             items=items,
             categories=categories,
-            current_meal_period=current_meal_period
+            current_meal_period=current_meal_period,
+            show_meal_filters=show_meal_filters
         )
 
         # Use thread-safe put for cross-thread operation

@@ -545,6 +545,197 @@ def _set_special_instructions_impl(item_name: str, instructions: str, session_id
     return f"'{item_name}' not found in your cart."
 
 
+def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
+    """Sync implementation of get_order_receipt for crew pool."""
+    from app.core.agui_events import emit_tool_activity
+    from app.core.redis import get_sync_redis_client
+    from app.core.db_pool import SyncDBConnection
+
+    emit_tool_activity(session_id, "get_order_receipt")
+
+    try:
+        redis_client = get_sync_redis_client()
+        order_display_id = order_id.strip().upper() if order_id else None
+
+        # If no order_id provided, get most recent
+        if not order_display_id:
+            history_key = f"order_history:{session_id}"
+            recent_orders = redis_client.lrange(history_key, 0, 0)
+            if not recent_orders:
+                return "No recent orders found."
+            order_display_id = recent_orders[0].decode() if isinstance(recent_orders[0], bytes) else recent_orders[0]
+
+        # Get order from PostgreSQL
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                # Get order details
+                cur.execute("""
+                    SELECT o.order_id, o.order_display_id, o.total_amount,
+                           o.created_at, ost.order_status_name as status,
+                           ott.order_type_name as order_type,
+                           rc.restaurant_name
+                    FROM orders o
+                    LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
+                    LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
+                    LEFT JOIN restaurant_config rc ON o.restaurant_id = rc.id
+                    WHERE o.order_display_id = %s
+                """, (order_display_id,))
+                order = cur.fetchone()
+
+                if not order:
+                    return f"Order {order_display_id} not found."
+
+                order_id_db, display_id, total, created_at, status, order_type, restaurant_name = order
+
+                # Get order items
+                cur.execute("""
+                    SELECT item_name, quantity, unit_price, line_total,
+                           cooking_instructions, spice_level
+                    FROM order_item WHERE order_id = %s
+                """, (order_id_db,))
+                items = cur.fetchall()
+
+                # Get order totals
+                cur.execute("""
+                    SELECT items_total, tax_total, discount_total, final_amount
+                    FROM order_total WHERE order_id = %s
+                """, (order_id_db,))
+                totals = cur.fetchone()
+
+        # Format receipt
+        date_str = created_at.strftime('%B %d, %Y at %I:%M %p') if hasattr(created_at, 'strftime') else str(created_at)
+        restaurant_name = restaurant_name or "Restaurant"
+
+        receipt_lines = [
+            "=" * 40,
+            f"{restaurant_name}".center(40),
+            "=" * 40,
+            f"Order: {display_id}",
+            f"Date: {date_str}",
+            f"Type: {order_type or 'Dine In'}",
+            f"Status: {status}",
+            "-" * 40,
+            "ITEMS:",
+        ]
+
+        for item_name, qty, price, line_total, instructions, spice_level in items:
+            receipt_lines.append(f"  {item_name} x{qty} @ Rs.{price} = Rs.{line_total}")
+            if instructions:
+                receipt_lines.append(f"    Instructions: {instructions}")
+            if spice_level:
+                receipt_lines.append(f"    Spice Level: {spice_level}")
+
+        if totals:
+            items_total, tax_total, discount_total, final_amount = totals
+            receipt_lines.extend([
+                "-" * 40,
+                f"Subtotal: Rs.{items_total or 0:.2f}",
+                f"Tax: Rs.{tax_total or 0:.2f}",
+                f"Discount: -Rs.{discount_total or 0:.2f}" if discount_total else "",
+                "=" * 40,
+                f"TOTAL: Rs.{final_amount or total:.2f}",
+                "=" * 40,
+            ])
+
+        return "\n".join(filter(None, receipt_lines))
+
+    except Exception as e:
+        logger.error("get_order_receipt_failed", error=str(e))
+        return f"Error retrieving receipt: {str(e)}"
+
+
+def _get_order_status_impl(order_id: str, session_id: str) -> str:
+    """Sync implementation of get_order_status for crew pool."""
+    from app.core.agui_events import emit_tool_activity
+    from app.core.redis import get_sync_redis_client
+    from app.core.db_pool import SyncDBConnection
+
+    emit_tool_activity(session_id, "get_order_status")
+
+    try:
+        redis_client = get_sync_redis_client()
+        order_display_id = order_id.strip().upper() if order_id else None
+
+        # If no order_id provided, get most recent
+        if not order_display_id:
+            history_key = f"order_history:{session_id}"
+            recent_orders = redis_client.lrange(history_key, 0, 0)
+            if not recent_orders:
+                return "No recent orders found."
+            order_display_id = recent_orders[0].decode() if isinstance(recent_orders[0], bytes) else recent_orders[0]
+
+        # Get order status from PostgreSQL
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT o.order_display_id, ost.order_status_name,
+                           ott.order_type_name, o.created_at, o.total_amount
+                    FROM orders o
+                    LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
+                    LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
+                    WHERE o.order_display_id = %s
+                """, (order_display_id,))
+                order = cur.fetchone()
+
+        if not order:
+            return f"Order {order_display_id} not found."
+
+        display_id, status, order_type, created_at, total = order
+        date_str = created_at.strftime('%I:%M %p') if hasattr(created_at, 'strftime') else str(created_at)
+
+        return f"Order {display_id} ({order_type}) - Status: {status}\nPlaced at: {date_str}\nTotal: Rs.{total}"
+
+    except Exception as e:
+        logger.error("get_order_status_failed", error=str(e))
+        return f"Error checking order status: {str(e)}"
+
+
+def _get_order_history_impl(session_id: str) -> str:
+    """Sync implementation of get_order_history for crew pool."""
+    from app.core.agui_events import emit_tool_activity
+    from app.core.redis import get_sync_redis_client
+    from app.core.db_pool import SyncDBConnection
+
+    emit_tool_activity(session_id, "get_order_history")
+
+    try:
+        redis_client = get_sync_redis_client()
+        history_key = f"order_history:{session_id}"
+        order_ids = redis_client.lrange(history_key, 0, 9)  # Last 10 orders
+
+        if not order_ids:
+            return "You haven't placed any orders yet."
+
+        # Get orders from PostgreSQL
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                placeholders = ','.join(['%s'] * len(order_ids))
+                cur.execute(f"""
+                    SELECT o.order_display_id, ost.order_status_name,
+                           ott.order_type_name, o.created_at, o.total_amount
+                    FROM orders o
+                    LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
+                    LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
+                    WHERE o.order_display_id IN ({placeholders})
+                    ORDER BY o.created_at DESC
+                """, tuple(oid.decode() if isinstance(oid, bytes) else oid for oid in order_ids))
+                orders = cur.fetchall()
+
+        if not orders:
+            return "No orders found in history."
+
+        history_lines = ["Your Recent Orders:"]
+        for display_id, status, order_type, created_at, total in orders:
+            date_str = created_at.strftime('%b %d, %I:%M %p') if hasattr(created_at, 'strftime') else str(created_at)
+            history_lines.append(f"  {display_id} - {status} ({order_type}) - Rs.{total} - {date_str}")
+
+        return "\n".join(history_lines)
+
+    except Exception as e:
+        logger.error("get_order_history_failed", error=str(e))
+        return f"Error retrieving order history: {str(e)}"
+
+
 # ============================================================================
 # QUICK REPLY AGENT - LLM-based intelligent quick action selection
 # ============================================================================
@@ -588,7 +779,6 @@ QUICK_ACTION_SETS = {
     "menu_displayed": [
         {"label": "⭐ Popular Items", "action": "show popular items"},
         {"label": "🍽️ Browse by Cuisine", "action": "show available cuisines"},
-        {"label": "🎁 Combo Deals", "action": "show combo deals"},
         {"label": "🛒 View Cart", "action": "view cart"},
         {"label": "📅 Book Table", "action": "book a table"},
     ],
@@ -596,9 +786,6 @@ QUICK_ACTION_SETS = {
     "menu_discovery": [
         {"label": "⭐ Popular Items", "action": "show popular items"},
         {"label": "🍽️ By Cuisine", "action": "browse by cuisine"},
-        {"label": "🎁 Combo Deals", "action": "combo deals and offers"},
-        {"label": "🌟 Today's Specials", "action": "today's specials"},
-        {"label": "🔍 Filter by Diet", "action": "filter by dietary needs"},
         {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
@@ -606,24 +793,18 @@ QUICK_ACTION_SETS = {
         {"label": "🍕 Italian", "action": "show Italian dishes"},
         {"label": "🍜 Asian", "action": "show Asian dishes"},
         {"label": "🍔 American", "action": "show American dishes"},
-        {"label": "🥗 Healthy", "action": "show healthy options"},
+        {"label": "🥗 Indian", "action": "show Indian dishes"},
         {"label": "🔙 Back to Menu", "action": "show full menu"},
     ],
 
     "item_details_shown": [
         {"label": "➕ Add to Cart", "action": "add this to cart"},
-        {"label": "📊 Nutrition Info", "action": "show nutrition information"},
-        {"label": "✅ Check Stock", "action": "check availability"},
-        {"label": "🔍 Allergen Info", "action": "check allergens"},
-        {"label": "❤️ Add to Favorites", "action": "add to favorites"},
+        {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
     "deals_inquiry": [
-        {"label": "🎁 Combo Deals", "action": "show combo deals"},
-        {"label": "🌟 Today's Specials", "action": "today's specials"},
-        {"label": "💰 Apply Promo Code", "action": "I have a promo code"},
-        {"label": "🏆 Loyalty Rewards", "action": "check my rewards"},
         {"label": "🍔 Browse Menu", "action": "show menu"},
+        {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -647,28 +828,23 @@ QUICK_ACTION_SETS = {
     "view_cart": [
         {"label": "✅ Checkout", "action": "checkout"},
         {"label": "➕ Add More", "action": "show menu"},
-        {"label": "🎁 Apply Promo", "action": "apply promo code"},
         {"label": "✏️ Add Instructions", "action": "add special instructions"},
         {"label": "🗑️ Clear Cart", "action": "clear cart"},
     ],
 
     "view_cart_high_value": [
         {"label": "✅ Checkout", "action": "checkout"},
-        {"label": "🎁 Apply Promo Code", "action": "I have a promo code"},
         {"label": "➕ Add More", "action": "show menu"},
-        {"label": "🔍 Check Allergens", "action": "check allergens in cart"},
+        {"label": "✏️ Add Instructions", "action": "add special instructions"},
     ],
 
     "checkout_options": [
         {"label": "✅ Order Now", "action": "checkout now"},
-        {"label": "📅 Schedule Later", "action": "schedule order for later"},
-        {"label": "🎁 Apply Promo", "action": "apply promo code"},
         {"label": "🔙 Back to Cart", "action": "view cart"},
     ],
 
     "cart_empty_reminder": [
         {"label": "🍔 Browse Menu", "action": "show menu"},
-        {"label": "⭐ Popular Items", "action": "show popular items"},
         {"label": "📜 Recent Orders", "action": "show my order history"},
         {"label": "🔄 Reorder Last", "action": "reorder my last order"},
     ],
@@ -2188,7 +2364,7 @@ def create_get_order_status_tool(session_id: str):
     """Factory to create get_order_status tool with session context."""
 
     @tool("get_order_status")
-    async def get_order_status(order_id: str = "") -> str:
+    def get_order_status(order_id: str = "") -> str:
         """
         Get the current status of an order.
 
@@ -2201,89 +2377,7 @@ def create_get_order_status_tool(session_id: str):
         Returns:
             Current order status with details.
         """
-        from app.core.redis import get_redis_client
-        import json
-
-        try:
-            redis_client = get_redis_client()
-            order_display_id = order_id.strip().upper() if order_id else None
-
-            # If no order_id provided, get most recent from history (async Redis)
-            if not order_display_id:
-                history_key = f"order_history:{session_id}"
-                recent_orders = await redis_client.lrange(history_key, 0, 0)
-                if not recent_orders:
-                    return "No recent orders found. Have you placed an order yet?"
-                order_display_id = recent_orders[0].decode() if isinstance(recent_orders[0], bytes) else recent_orders[0]
-
-            # Query PostgreSQL for order status (async with asyncpg)
-            try:
-                from app.core.db_pool import AsyncDBConnection
-
-                async with AsyncDBConnection() as conn:
-                    order_row = await conn.fetchrow("""
-                        SELECT o.order_id, o.order_display_id, o.total_amount,
-                               o.created_at, ost.order_status_code as status,
-                               ost.order_status_name as status_name,
-                               ott.order_type_name as order_type
-                        FROM orders o
-                        LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
-                        LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
-                        WHERE o.order_display_id = $1
-                    """, order_display_id)
-
-                    if order_row:
-                        status = order_row['status_name'] or order_row['status']
-                        order_type = order_row['order_type'] or 'Order'
-                        total = float(order_row['total_amount'] or 0)
-
-                        # Get order items
-                        items = await conn.fetch("""
-                            SELECT item_name, quantity, item_status
-                            FROM order_item WHERE order_id = $1
-                        """, order_row['order_id'])
-
-                        items_str = ", ".join([f"{i['item_name']} x{i['quantity']}" for i in items])
-
-                        # Status-specific messages
-                        status_messages = {
-                            'pending': "Your order is pending confirmation.",
-                            'confirmed': "Your order has been confirmed and will be prepared shortly.",
-                            'preparing': "Your order is being prepared in the kitchen!",
-                            'ready': "Your order is ready for pickup/serving!",
-                            'completed': "Your order has been completed. Enjoy!",
-                            'cancelled': "This order was cancelled."
-                        }
-                        status_msg = status_messages.get(order_row['status'], f"Status: {status}")
-
-                        return (
-                            f"Order {order_display_id} ({order_type})\n"
-                            f"Status: {status} - {status_msg}\n"
-                            f"Items: {items_str}\n"
-                            f"Total: Rs.{total:.0f}"
-                        )
-
-            except Exception as pg_error:
-                logger.warning("postgresql_order_status_failed", error=str(pg_error))
-
-            # Fallback to Redis (async)
-            order_key = f"order:{session_id}:{order_display_id}"
-            order_data = await redis_client.get(order_key)
-
-            if order_data:
-                order = json.loads(order_data)
-                status = order.get("status", "unknown")
-                items = order.get("items", [])
-                items_str = ", ".join([f"{i['name']} x{i['quantity']}" for i in items])
-                total = order.get("total", 0)
-
-                return f"Order {order_display_id}: {status.title()}. Items: {items_str}. Total: Rs.{total:.0f}"
-
-            return f"Order {order_display_id} not found."
-
-        except Exception as e:
-            logger.error("get_order_status_error", error=str(e), session_id=session_id)
-            return f"Error checking order status: {str(e)}"
+        return _get_order_status_impl(order_id, session_id)
 
     return get_order_status
 
@@ -2292,57 +2386,16 @@ def create_get_order_history_tool(session_id: str):
     """Factory to create get_order_history tool with session context."""
 
     @tool("get_order_history")
-    async def get_order_history(limit: int = 5) -> str:
+    def get_order_history() -> str:
         """
         Get the customer's recent order history.
 
         Use this when customer asks about past orders or wants to reorder.
 
-        Args:
-            limit: Maximum number of orders to return (default 5).
-
         Returns:
             List of recent orders with status and totals.
         """
-        try:
-            from app.core.db_pool import AsyncDBConnection
-
-            async with AsyncDBConnection() as conn:
-                orders = await conn.fetch("""
-                    SELECT o.order_id, o.order_display_id, o.total_amount,
-                           o.created_at, ost.order_status_code as status,
-                           ott.order_type_name as order_type
-                    FROM orders o
-                    LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
-                    LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
-                    WHERE o.device_id = $1
-                    ORDER BY o.created_at DESC
-                    LIMIT $2
-                """, session_id, limit)
-
-                if not orders:
-                    return "No order history found for this session."
-
-                order_list = []
-                for order in orders:
-                    # Get items for each order
-                    items = await conn.fetch("""
-                        SELECT item_name, quantity FROM order_item WHERE order_id = $1 LIMIT 3
-                    """, order['order_id'])
-                    items_str = ", ".join([f"{i['item_name']}" for i in items])
-
-                    created_at = order['created_at']
-                    date_str = created_at.strftime('%b %d, %I:%M %p') if hasattr(created_at, 'strftime') else str(created_at)
-
-                    order_list.append(
-                        f"{order['order_display_id']}: {items_str} - Rs.{order['total_amount']:.0f} ({order['status']}) - {date_str}"
-                    )
-
-                return f"Your recent orders:\n" + "\n".join(order_list)
-
-        except Exception as e:
-            logger.error("get_order_history_error", error=str(e), session_id=session_id)
-            return f"Error getting order history: {str(e)}"
+        return _get_order_history_impl(session_id)
 
     return get_order_history
 
@@ -2432,7 +2485,7 @@ def create_get_order_receipt_tool(session_id: str):
     """Factory to create get_order_receipt tool with session context."""
 
     @tool("get_order_receipt")
-    async def get_order_receipt(order_id: str = "") -> str:
+    def get_order_receipt(order_id: str = "") -> str:
         """
         Generate a detailed receipt for an order.
 
@@ -2445,111 +2498,7 @@ def create_get_order_receipt_tool(session_id: str):
         Returns:
             Formatted receipt with all order details.
         """
-        from app.core.redis import get_redis_client
-        from app.core.db_pool import AsyncDBConnection
-
-        try:
-            redis_client = get_redis_client()
-            order_display_id = order_id.strip().upper() if order_id else None
-
-            # If no order_id provided, get most recent (async Redis)
-            if not order_display_id:
-                history_key = f"order_history:{session_id}"
-                recent_orders = await redis_client.lrange(history_key, 0, 0)
-                if not recent_orders:
-                    return "No recent orders found."
-                order_display_id = recent_orders[0].decode() if isinstance(recent_orders[0], bytes) else recent_orders[0]
-
-            # Get order from PostgreSQL (async with asyncpg)
-            async with AsyncDBConnection() as conn:
-                # Get order details
-                order = await conn.fetchrow("""
-                    SELECT o.order_id, o.order_display_id, o.total_amount,
-                           o.created_at, ost.order_status_name as status,
-                           ott.order_type_name as order_type,
-                           rc.restaurant_name
-                    FROM orders o
-                    LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
-                    LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
-                    LEFT JOIN restaurant_config rc ON o.restaurant_id = rc.id
-                    WHERE o.order_display_id = $1
-                """, order_display_id)
-
-                if not order:
-                    return f"Order {order_display_id} not found."
-
-                # Get order items
-                items = await conn.fetch("""
-                    SELECT item_name, quantity, unit_price, line_total,
-                           cooking_instructions, spice_level
-                    FROM order_item WHERE order_id = $1
-                """, order['order_id'])
-
-                # Get order totals
-                totals = await conn.fetchrow("""
-                    SELECT items_total, tax_total, discount_total, final_amount
-                    FROM order_total WHERE order_id = $1
-                """, order['order_id'])
-
-            # Format receipt
-            created_at = order['created_at']
-            date_str = created_at.strftime('%B %d, %Y at %I:%M %p') if hasattr(created_at, 'strftime') else str(created_at)
-            restaurant_name = order['restaurant_name'] or "Restaurant"
-
-            receipt_lines = [
-                "=" * 40,
-                f"{restaurant_name}".center(40),
-                "=" * 40,
-                f"Order: {order_display_id}",
-                f"Date: {date_str}",
-                f"Type: {order['order_type'] or 'Dine In'}",
-                f"Status: {order['status']}",
-                "-" * 40,
-                "ITEMS:",
-            ]
-
-            for item in items:
-                qty = item['quantity']
-                name = item['item_name']
-                price = item['unit_price']
-                total = item['line_total']
-                receipt_lines.append(f"  {qty}x {name}")
-                receipt_lines.append(f"     @ Rs.{price:.0f} = Rs.{total:.0f}")
-                if item.get('cooking_instructions'):
-                    receipt_lines.append(f"     Note: {item['cooking_instructions']}")
-
-            receipt_lines.append("-" * 40)
-
-            if totals:
-                receipt_lines.append(f"Subtotal: Rs.{totals['items_total']:.0f}")
-                if totals.get('tax_total'):
-                    receipt_lines.append(f"Tax: Rs.{totals['tax_total']:.0f}")
-                if totals.get('discount_total'):
-                    receipt_lines.append(f"Discount: -Rs.{totals['discount_total']:.0f}")
-                receipt_lines.append("-" * 40)
-                receipt_lines.append(f"TOTAL: Rs.{totals['final_amount']:.0f}")
-            else:
-                receipt_lines.append(f"TOTAL: Rs.{order['total_amount']:.0f}")
-
-            receipt_lines.extend([
-                "=" * 40,
-                "Thank you for your order!",
-                "=" * 40,
-            ])
-
-            receipt_text = "\n".join(receipt_lines)
-
-            logger.info(
-                "receipt_generated",
-                session_id=session_id,
-                order_display_id=order_display_id
-            )
-
-            return receipt_text
-
-        except Exception as e:
-            logger.error("get_order_receipt_error", error=str(e), session_id=session_id)
-            return f"Error generating receipt: {str(e)}"
+        return _get_order_receipt_impl(order_id, session_id)
 
     return get_order_receipt
 
@@ -2910,6 +2859,184 @@ def create_reorder_tool(session_id: str):
             return f"Sorry, I couldn't reorder your last order. Would you like to browse the menu instead?"
 
     return reorder_last_order
+
+
+# ============================================================================
+# MENU FILTERING TOOLS (Cuisine & Popular Items)
+# ============================================================================
+
+def create_filter_by_cuisine_tool(session_id: str):
+    """Factory to create filter_by_cuisine tool with session context."""
+
+    @tool("filter_by_cuisine")
+    def filter_by_cuisine(cuisine: Optional[str] = None) -> str:
+        """
+        Filter menu items by cuisine type.
+
+        Use this when customer asks for specific cuisine like:
+        - "show Italian dishes"
+        - "browse by cuisine"
+        - "what Asian food do you have"
+
+        Args:
+            cuisine: Cuisine type to filter by (e.g., "Italian", "Asian", "Indian", "American").
+                    Leave empty to show all available cuisines.
+
+        Returns:
+            List of menu items from that cuisine or available cuisine types.
+        """
+        from app.core.agui_events import emit_tool_activity, emit_menu_data
+        from app.core.preloader import get_menu_preloader, get_current_meal_period
+        from app.core.redis import get_cart_sync
+
+        emit_tool_activity(session_id, "filter_by_cuisine")
+
+        try:
+            # If no cuisine specified, show available cuisines
+            if not cuisine:
+                preloader = get_menu_preloader()
+                if not preloader.is_loaded:
+                    return "Menu is loading. Please try again in a moment."
+
+                # Get all unique cuisines from the menu
+                all_cuisines = set()
+                for item in preloader.menu:
+                    item_cuisines = item.get("cuisines", [])
+                    if isinstance(item_cuisines, list):
+                        all_cuisines.update(item_cuisines)
+
+                if not all_cuisines:
+                    return "We have a variety of cuisines available. Would you like to see the full menu?"
+
+                cuisines_list = ", ".join(sorted(all_cuisines))
+                return f"We have the following cuisines available: {cuisines_list}. Which cuisine would you like to explore?"
+
+            # Filter menu by specified cuisine
+            cuisine_lower = cuisine.lower()
+            preloader = get_menu_preloader()
+            if not preloader.is_loaded:
+                return "Menu is loading. Please try again in a moment."
+
+            # Filter items by cuisine
+            filtered_items = []
+            for item in preloader.menu:
+                item_cuisines = item.get("cuisines", [])
+                if isinstance(item_cuisines, list):
+                    if any(cuisine_lower in c.lower() for c in item_cuisines):
+                        filtered_items.append(item)
+
+            if not filtered_items:
+                return f"We don't have {cuisine} dishes currently available. Would you like to try another cuisine or see our full menu?"
+
+            # Get current cart to mark items already in cart
+            cart_data = get_cart_sync(session_id)
+            cart_items = cart_data.get("items", []) if cart_data else []
+            cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+            # Build structured menu data
+            current_meal = get_current_meal_period()
+            structured_items = []
+            for item in filtered_items[:20]:  # Limit to 20 items
+                item_name = item.get("name", "")
+                if item_name.lower() not in cart_item_names:
+                    structured_items.append({
+                        "name": item_name,
+                        "price": item.get("price", 0),
+                        "category": _infer_category(item_name),
+                        "description": item.get("description", ""),
+                        "item_id": str(item.get("id", "")),
+                        "meal_types": item.get("meal_types", ["All Day"]),
+                    })
+
+            # Emit menu card with filtered items (no meal period tabs for filtered view)
+            if structured_items:
+                emit_menu_data(session_id, structured_items, current_meal_period=current_meal, show_meal_filters=False)
+                return f"[MENU CARD DISPLAYED] Here are our {cuisine} dishes! I've shown {len(structured_items)} items. Which one would you like to try?"
+            else:
+                return f"All {cuisine} items are already in your cart! Would you like to browse other cuisines?"
+
+        except Exception as e:
+            logger.error("filter_by_cuisine_error", error=str(e), session_id=session_id)
+            return f"Sorry, I had trouble filtering by {cuisine}. Would you like to see the full menu instead?"
+
+    return filter_by_cuisine
+
+
+def create_show_popular_items_tool(session_id: str):
+    """Factory to create show_popular_items tool with session context."""
+
+    @tool("show_popular_items")
+    def show_popular_items() -> str:
+        """
+        Show popular/recommended menu items.
+
+        Use this when customer asks for:
+        - "show popular items"
+        - "what's recommended"
+        - "best sellers"
+        - "what's good here"
+
+        Returns:
+            List of popular/recommended menu items.
+        """
+        from app.core.agui_events import emit_tool_activity, emit_menu_data
+        from app.core.preloader import get_menu_preloader, get_current_meal_period
+        from app.core.redis import get_cart_sync
+
+        emit_tool_activity(session_id, "show_popular_items")
+
+        try:
+            preloader = get_menu_preloader()
+            if not preloader.is_loaded:
+                return "Menu is loading. Please try again in a moment."
+
+            # Filter for recommended items or highest ranked items
+            popular_items = []
+            for item in preloader.menu:
+                is_recommended = item.get("is_recommended", False)
+                rank = item.get("rank", 0)
+                if is_recommended or rank > 0:
+                    popular_items.append(item)
+
+            # Sort by rank (highest first)
+            popular_items.sort(key=lambda x: x.get("rank", 0), reverse=True)
+
+            # If no recommended items, show top items by default
+            if not popular_items:
+                popular_items = preloader.menu[:10]  # Top 10 items
+
+            # Get current cart
+            cart_data = get_cart_sync(session_id)
+            cart_items = cart_data.get("items", []) if cart_data else []
+            cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+            # Build structured menu data
+            current_meal = get_current_meal_period()
+            structured_items = []
+            for item in popular_items[:15]:  # Limit to 15 items
+                item_name = item.get("name", "")
+                if item_name.lower() not in cart_item_names:
+                    structured_items.append({
+                        "name": item_name,
+                        "price": item.get("price", 0),
+                        "category": _infer_category(item_name),
+                        "description": item.get("description", ""),
+                        "item_id": str(item.get("id", "")),
+                        "meal_types": item.get("meal_types", ["All Day"]),
+                    })
+
+            # Emit menu card with popular items (no meal period tabs for filtered view)
+            if structured_items:
+                emit_menu_data(session_id, structured_items, current_meal_period=current_meal, show_meal_filters=False)
+                return f"[MENU CARD DISPLAYED] Here are our popular items! I've shown {len(structured_items)} customer favorites. What would you like to try?"
+            else:
+                return "All our popular items are already in your cart! Would you like to explore other menu options?"
+
+        except Exception as e:
+            logger.error("show_popular_items_error", error=str(e), session_id=session_id)
+            return "Sorry, I had trouble loading popular items. Would you like to see the full menu instead?"
+
+    return show_popular_items
 
 
 # ============================================================================
