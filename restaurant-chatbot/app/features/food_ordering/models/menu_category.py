@@ -32,22 +32,23 @@ class MenuCategory(Base):
         primary_key=True,
         server_default=func.gen_random_uuid()
     )
-    restaurant_id: Mapped[UUID] = mapped_column(
+    restaurant_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
         ForeignKey("restaurant_table.restaurant_id", ondelete="CASCADE"),
-        nullable=False
+        nullable=True
     )
-    menu_section_id: Mapped[UUID] = mapped_column(
+    menu_parent_category_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
-        ForeignKey("menu_sections.menu_section_id", ondelete="CASCADE"),
-        nullable=False
+        ForeignKey("menu_categories.menu_category_id", ondelete="CASCADE"),
+        nullable=True
     )
-    menu_category_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    menu_category_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     menu_category_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    menu_category_status: Mapped[str] = mapped_column(String(20), nullable=False, default='active')
-    menu_category_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    menu_category_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default='active')
+    menu_category_rank: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
     menu_category_timings: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     menu_category_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ext_petpooja_group_category_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Audit Fields
     created_at: Mapped[datetime] = mapped_column(
@@ -68,7 +69,19 @@ class MenuCategory(Base):
 
     # Relationships
     # restaurant: Mapped["Restaurant"] = relationship("Restaurant", back_populates="menu_categories")
-    section: Mapped["MenuSection"] = relationship("MenuSection", back_populates="categories")
+    # Self-referencing relationship for parent category
+    parent_category: Mapped[Optional["MenuCategory"]] = relationship(
+        "MenuCategory",
+        remote_side=[menu_category_id],
+        back_populates="child_categories",
+        foreign_keys=[menu_parent_category_id]
+    )
+    child_categories: Mapped[List["MenuCategory"]] = relationship(
+        "MenuCategory",
+        back_populates="parent_category",
+        cascade="all, delete-orphan",
+        foreign_keys=[menu_parent_category_id]
+    )
     sub_categories: Mapped[List["MenuSubCategory"]] = relationship(
         "MenuSubCategory",
         back_populates="category",
@@ -85,7 +98,7 @@ class MenuCategory(Base):
             name='check_category_status'
         ),
         Index('idx_menu_categories_restaurant', 'restaurant_id', postgresql_where=text('is_deleted = false')),
-        Index('idx_menu_categories_section', 'menu_section_id', postgresql_where=text('is_deleted = false')),
+        Index('idx_menu_categories_parent', 'menu_parent_category_id', postgresql_where=text('is_deleted = false')),
         Index('idx_menu_categories_status', 'menu_category_status', postgresql_where=text('is_deleted = false')),
         Index('idx_menu_categories_rank', 'menu_category_rank', postgresql_where=text('is_deleted = false')),
         {'extend_existing': True}

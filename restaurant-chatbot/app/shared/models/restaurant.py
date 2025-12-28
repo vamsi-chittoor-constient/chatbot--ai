@@ -24,27 +24,28 @@ class Restaurant(Base):
     """
     Restaurant configuration information.
     Matches actual restaurant_config table structure in database.
-    Supports multi-branch restaurant chains.
     """
     __tablename__ = "restaurant_config"
 
-    id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    restaurant_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Chain/brand identifier
-    branch_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Unique branch identifier
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Branch-specific display name
-    branch_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # Short branch code (MUM, DEL, etc.)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    phone: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    api_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    business_hours: Mapped[dict] = mapped_column(JSON, nullable=False)
-    policies: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    settings: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Restaurant-specific settings (meal times, etc.)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False),
+    website: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    timezone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, server_default="'Asia/Kolkata'")
+    currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, server_default="'INR'")
+    tax_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True, server_default="0")
+    service_charge_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True, server_default="0")
+    opening_time: Mapped[Optional[Time]] = mapped_column(Time, nullable=True)
+    closing_time: Mapped[Optional[Time]] = mapped_column(Time, nullable=True)
+    is_open: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, server_default="true")
+    settings: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True),
                                                           server_default=func.now(), nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False),
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True),
                                                           server_default=func.now(),
                                                           onupdate=func.now(), nullable=True)
 

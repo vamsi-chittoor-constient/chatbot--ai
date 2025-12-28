@@ -155,16 +155,17 @@ class MenuCacheService:
 
             hierarchy = []
 
+            # Get all categories (not filtered by section since FK doesn't exist in current schema)
+            categories_stmt = (
+                select(MenuCategory)
+                .where(MenuCategory.restaurant_id == restaurant_id)
+                .where(MenuCategory.is_deleted == False)
+                .order_by(MenuCategory.menu_category_rank)
+            )
+            categories_result = await session.execute(categories_stmt)
+            all_categories = categories_result.scalars().all()
+
             for section in sections:
-                # Get categories for this section
-                categories_stmt = (
-                    select(MenuCategory)
-                    .where(MenuCategory.menu_section_id == section.menu_section_id)
-                    .where(MenuCategory.is_deleted == False)
-                    .order_by(MenuCategory.menu_category_rank)
-                )
-                categories_result = await session.execute(categories_stmt)
-                categories = categories_result.scalars().all()
 
                 section_data = {
                     "id": str(section.menu_section_id),
@@ -173,7 +174,7 @@ class MenuCacheService:
                     "categories": []
                 }
 
-                for category in categories:
+                for category in all_categories:
                     # Get subcategories for this category
                     subcategories_stmt = (
                         select(MenuSubCategory)

@@ -31,16 +31,17 @@ class MenuSection(Base):
         primary_key=True,
         server_default=func.gen_random_uuid()
     )
-    restaurant_id: Mapped[UUID] = mapped_column(
+    restaurant_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
         ForeignKey("restaurant_table.restaurant_id", ondelete="CASCADE"),
-        nullable=False
+        nullable=True
     )
-    section_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    section_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    section_status: Mapped[str] = mapped_column(String(20), nullable=False, default='active')
-    section_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    section_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    menu_section_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    menu_section_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    menu_section_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default='active')
+    menu_section_rank: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
+    menu_section_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ext_petpooja_parent_categories_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Audit Fields
     created_at: Mapped[datetime] = mapped_column(
@@ -61,25 +62,26 @@ class MenuSection(Base):
 
     # Relationships
     # restaurant: Mapped["Restaurant"] = relationship("Restaurant", back_populates="menu_sections")
-    categories: Mapped[List["MenuCategory"]] = relationship(
-        "MenuCategory",
-        back_populates="section",
-        cascade="all, delete-orphan"
-    )
+    # NOTE: No FK link from menu_categories to menu_sections exists in current DB schema
+    # categories: Mapped[List["MenuCategory"]] = relationship(
+    #     "MenuCategory",
+    #     back_populates="section",
+    #     cascade="all, delete-orphan"
+    # )
 
     __table_args__ = (
         CheckConstraint(
-            "section_status IN ('active', 'inactive')",
+            "menu_section_status IN ('active', 'inactive')",
             name='check_section_status'
         ),
         Index('idx_menu_sections_restaurant', 'restaurant_id', postgresql_where=text('is_deleted = false')),
-        Index('idx_menu_sections_status', 'section_status', postgresql_where=text('is_deleted = false')),
-        Index('idx_menu_sections_rank', 'section_rank', postgresql_where=text('is_deleted = false')),
+        Index('idx_menu_sections_status', 'menu_section_status', postgresql_where=text('is_deleted = false')),
+        Index('idx_menu_sections_rank', 'menu_section_rank', postgresql_where=text('is_deleted = false')),
         {'extend_existing': True}
     )
 
     def __repr__(self) -> str:
-        return f"<MenuSection(id='{self.menu_section_id}', name='{self.section_name}')>"
+        return f"<MenuSection(id='{self.menu_section_id}', name='{self.menu_section_name}')>"
 
 
 __all__ = ["MenuSection"]
