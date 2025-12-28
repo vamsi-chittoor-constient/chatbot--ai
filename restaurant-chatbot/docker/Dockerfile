@@ -20,6 +20,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
+# Pre-download ChromaDB embedding model to avoid first-request delays
+RUN python -c "import chromadb; from chromadb.utils import embedding_functions; ef = embedding_functions.DefaultEmbeddingFunction(); ef(['test'])" || true
+
 # -----------------------------------------------------------------------------
 # Production Stage
 # -----------------------------------------------------------------------------
@@ -41,6 +44,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /root/.cache /home/appuser/.cache
+RUN chown -R appuser:appuser /home/appuser/.cache
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
