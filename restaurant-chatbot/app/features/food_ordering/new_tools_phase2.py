@@ -184,41 +184,89 @@ def create_advanced_menu_tools(session_id: str, customer_id: Optional[str] = Non
         """
         try:
             from app.core.db_pool import AsyncDBConnection
-            from app.core.agui_events import emit_tool_activity_async
+            from app.core.agui_events import emit_tool_activity_async, emit_menu_data_async
+            from app.core.preloader import get_menu_preloader
 
             await emit_tool_activity_async(session_id, "search_by_cuisine")
 
+            # Map user-friendly cuisine names to actual database cuisine names
+            cuisine_mapping = {
+                'italian': ['Continental'],
+                'american': ['Continental'],
+                'continental': ['Continental'],
+                'asian': ['Chinese / Indo-Chinese'],
+                'chinese': ['Chinese / Indo-Chinese'],
+                'indo-chinese': ['Chinese / Indo-Chinese'],
+                'indo chinese': ['Chinese / Indo-Chinese'],
+                'indian': ['South Indian', 'North Indian'],
+                'south indian': ['South Indian'],
+                'north indian': ['North Indian'],
+                'street food': ['Street Food / Chaat'],
+                'chaat': ['Street Food / Chaat']
+            }
+
+            # Get mapped cuisine names
+            cuisine_lower = cuisine_type.lower().strip()
+            db_cuisine_names = cuisine_mapping.get(cuisine_lower, [cuisine_type])
+
             async with AsyncDBConnection() as db:
-                # Query menu items by cuisine
-                query = """
+                # Build query with IN clause for multiple cuisines
+                placeholders = ','.join(['%s'] * len(db_cuisine_names))
+                query = f"""
                     SELECT DISTINCT
+                        mi.menu_item_id,
                         mi.menu_item_name,
                         mi.menu_item_price,
                         mi.menu_item_description,
-                        c.cuisine_name
+                        c.cuisine_name,
+                        mc.menu_category_name
                     FROM menu_item mi
                     JOIN menu_item_cuisine_mapping micm ON mi.menu_item_id = micm.menu_item_id
                     JOIN cuisines c ON micm.cuisine_id = c.cuisine_id
+                    LEFT JOIN menu_item_category_mapping mcm ON mi.menu_item_id = mcm.menu_item_id AND mcm.is_primary = TRUE
+                    LEFT JOIN menu_categories mc ON mcm.menu_category_id = mc.menu_category_id
                     WHERE mi.menu_item_is_active = TRUE
                       AND mi.is_deleted = FALSE
                       AND c.is_deleted = FALSE
-                      AND LOWER(c.cuisine_name) = LOWER(%s)
+                      AND c.cuisine_name IN ({placeholders})
                     ORDER BY mi.menu_item_price
-                    LIMIT 20
                 """
-                results = await db.fetch_all(query, (cuisine_type,))
+                results = await db.fetch_all(query, tuple(db_cuisine_names))
 
                 if not results:
                     return f"I couldn't find {cuisine_type} cuisine items. Would you like to see our available cuisines?"
 
-                # Format response
+                # Use preloader to get full item details with meal types
+                preloader = get_menu_preloader()
+                item_ids = [str(row['menu_item_id']) for row in results]
+
+                # Get full item details from preloader
+                all_items = preloader.menu
+                filtered_items = [
+                    item for item in all_items
+                    if item.get('id') in item_ids
+                ]
+
+                # Emit rich menu data event for frontend to display
+                if filtered_items:
+                    await emit_menu_data_async(
+                        session_id,
+                        filtered_items,
+                        current_meal_period="",
+                        show_meal_filters=False  # Hide meal filters for cuisine-specific view
+                    )
+                    return f"[MENU CARD DISPLAYED - {len(filtered_items)} {cuisine_type} items shown in visual menu. Browse the menu card and let me know what you'd like!]"
+
+                # Fallback: Format text response if preloader fails
                 items_list = []
-                for row in results:
+                for row in results[:20]:
                     desc = f" - {row['menu_item_description'][:50]}..." if row['menu_item_description'] else ""
                     items_list.append(f"- {row['menu_item_name']} (Rs.{row['menu_item_price']}){desc}")
 
                 response = f"**{cuisine_type.title()} Cuisine:**\n\n" + "\n".join(items_list)
-                response += f"\n\nFound {len(results)} {cuisine_type} items."
+                if len(results) > 20:
+                    response += f"\n\n...and {len(results) - 20} more items."
+                response += f"\n\nFound {len(results)} {cuisine_type} items total."
                 return response
 
         except Exception as e:

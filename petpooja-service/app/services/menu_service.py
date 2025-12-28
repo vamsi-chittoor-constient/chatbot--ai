@@ -536,7 +536,7 @@ def _store_menu_with_db(menu_data: Dict[str, Any], restaurant_id: str, db, inter
                 continue
             processed_ids["items"].append(petpooja_item_id)
 
-            petpooja_category_id = safe_int(item.get("categoryid"))
+            petpooja_category_id = safe_int(item.get("item_categoryid"))
             sub_category = db.query(MenuSubCategories).filter(
                 MenuSubCategories.ext_petpooja_categories_id == petpooja_category_id,
                 MenuSubCategories.restaurant_id == db_restaurant_id

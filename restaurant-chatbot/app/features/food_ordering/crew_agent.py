@@ -161,8 +161,9 @@ def _get_menu_from_preloader(query: str = "", use_meal_filter: bool = True, stri
         if preloader.is_loaded:
             # Get current meal period for smart filtering
             meal_period = get_current_meal_period() if use_meal_filter else None
-            # For full menu browsing (empty query), use strict filter to only show current meal items
-            use_strict = strict_filter or (not query)
+            # Disable strict filtering since most items don't have meal types assigned yet
+            # When meal data is populated, re-enable: use_strict = strict_filter or (not query)
+            use_strict = strict_filter
             return preloader.search(query, meal_period=meal_period, strict_meal_filter=use_strict)
     except Exception as e:
         logger.debug("preloader_not_available", error=str(e))
@@ -271,7 +272,7 @@ def _search_menu_impl(query: str, session_id: str) -> str:
                         "category": _infer_category(item_name),
                         "description": item.get("description", ""),
                         "item_id": str(item.get("id", "")),
-                        "meal_types": item.get("meal_types", ["All Day"]),
+                        "meal_types": item.get("meal_types") or ["All Day"],
                     })
 
                 if structured_items:
@@ -460,7 +461,7 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
 
     order_type_clean = "take_away" if is_take_away else "dine_in"
 
-    # Create order
+    # Prepare order summary and ask for payment
     try:
         items = cart_data.get("items", [])
         total = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
@@ -468,59 +469,37 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         # Generate order display ID
         order_display_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
-        # Persist to MongoDB (sync - works reliably)
-        try:
-            from pymongo import MongoClient
-            import os
+        # Store order as pending_payment in Redis (temporary)
+        from app.core.redis import redis_client
+        import json
+        pending_order_key = f"pending_order:{session_id}"
+        pending_order = {
+            "order_id": order_display_id,
+            "session_id": session_id,
+            "items": items,
+            "total": total,
+            "order_type": order_type_clean,
+            "status": "pending_payment",
+            "created_at": datetime.now().isoformat()
+        }
+        redis_client.setex(pending_order_key, 3600, json.dumps(pending_order))  # Expire in 1 hour
+        logger.info("pending_order_created", session_id=session_id, order_id=order_display_id)
 
-            mongo_url = os.getenv("MONGODB_CONNECTION_STRING", "mongodb://localhost:27017")
-            mongo_db = os.getenv("MONGODB_DATABASE_NAME", "restaurant_ai_analytics")
-
-            client = MongoClient(mongo_url, serverSelectionTimeoutMS=2000)
-            db = client[mongo_db]
-
-            order_items_data = []
-            for item in items:
-                order_items_data.append({
-                    "name": item.get("name", "Item"),
-                    "quantity": item.get("quantity", 1),
-                    "price": item.get("price", 0),
-                    "item_total": item.get("price", 0) * item.get("quantity", 1)
-                })
-
-            order_doc = {
-                "order_id": order_display_id,
-                "session_id": session_id,
-                "items": order_items_data,
-                "total": total,
-                "order_type": order_type_clean,
-                "status": "confirmed",
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat()
-            }
-
-            db.orders.insert_one(order_doc)
-            client.close()
-            logger.info("order_persisted_to_mongodb", session_id=session_id, order_id=order_display_id)
-
-        except Exception as mongo_error:
-            logger.warning("mongodb_order_persist_failed", error=str(mongo_error))
-
-        # Clear cart after successful order (use empty cart)
-        set_cart_sync(session_id, {"items": [], "total": 0})
-
-        # Emit order data for UI
-        emit_order_data(
-            session_id=session_id,
-            order_id=order_display_id,
-            items=order_items_data if 'order_items_data' in dir() else items,
-            total=total,
-            status="confirmed",
-            order_type=order_type_clean
-        )
+        # Emit payment quick replies
+        emit_quick_replies(session_id, [
+            {"label": "💳 Pay with Card", "action": "pay with card", "icon": "payment", "variant": "primary"},
+            {"label": "💵 Cash on Delivery", "action": "cash on delivery", "icon": "cash", "variant": "secondary"},
+        ])
 
         order_type_display = "dine-in" if order_type_clean == "dine_in" else "take-away"
-        return f"Order #{order_display_id} placed successfully for {order_type_display}! Total: Rs.{total}. Enjoy your meal!"
+        items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
+        if len(items) > 3:
+            items_summary += f" and {len(items) - 3} more"
+
+        return (f"Great! Your {order_type_display} order is ready:\n\n"
+                f"📋 Order: {items_summary}\n"
+                f"💰 Total: Rs.{total}\n\n"
+                f"How would you like to pay?")
 
     except Exception as e:
         logger.error("checkout_failed", error=str(e), exc_info=True)
@@ -830,7 +809,7 @@ QUICK_ACTION_SETS = {
 
     "greeting_welcome": [
         {"label": "🍔 Order Food", "action": "show me the menu"},
-        {"label": "⭐ What's Popular?", "action": "what's popular today"},
+        {"label": "🛒 View Cart", "action": "view my cart"},
         {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
         {"label": "📅 Book a Table", "action": "book a table"},
         {"label": "❓ Help & FAQs", "action": "help"},
@@ -847,7 +826,7 @@ QUICK_ACTION_SETS = {
 
     "first_time_user": [
         {"label": "🍔 Browse Menu", "action": "show me the menu"},
-        {"label": "⭐ What's Popular?", "action": "show popular items"},
+        {"label": "🔍 Search Items", "action": "search for items"},
         {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🔍 Dietary Options", "action": "dietary and allergen options"},
         {"label": "❓ How It Works", "action": "how to order"},
@@ -858,24 +837,22 @@ QUICK_ACTION_SETS = {
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     "menu_displayed": [
-        {"label": "⭐ Popular Items", "action": "show popular items"},
-        {"label": "🍽️ Browse by Cuisine", "action": "show available cuisines"},
+        {"label": "🔍 Search Items", "action": "search for specific items"},
+        {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🛒 View Cart", "action": "view cart"},
         {"label": "📅 Book Table", "action": "book a table"},
     ],
 
     "menu_discovery": [
-        {"label": "⭐ Popular Items", "action": "show popular items"},
-        {"label": "🍽️ By Cuisine", "action": "browse by cuisine"},
+        {"label": "🔍 Search Items", "action": "search for items"},
+        {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
     "cuisine_browse": [
-        {"label": "🍕 Italian", "action": "show Italian dishes"},
-        {"label": "🍜 Asian", "action": "show Asian dishes"},
-        {"label": "🍔 American", "action": "show American dishes"},
-        {"label": "🥗 Indian", "action": "show Indian dishes"},
+        {"label": "🔍 Search Items", "action": "search for items"},
         {"label": "🔙 Back to Menu", "action": "show full menu"},
+        {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
     "item_details_shown": [
@@ -1147,14 +1124,14 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 📋 Available Action Sets (43 total):
 
 ━━━ ENTRY & WELCOME ━━━
-- greeting_welcome: User greets (hi/hello/hey) or response welcomes user → Show main features (Order, Popular, Deals, Book Table, Help)
+- greeting_welcome: User greets (hi/hello/hey) or response welcomes user → Show main features (Order, View Cart, Deals, Book Table, Help)
 - explore_features: User asks "what can you do" or capabilities → Show all major features (Order, Track, Book, Allergens, Offers, Help)
-- first_time_user: New user with no history → Show onboarding options (Browse Menu, Popular, Specials, Dietary, How It Works)
+- first_time_user: New user with no history → Show onboarding options (Browse Menu, Search, Specials, Dietary, How It Works)
 
 ━━━ MENU DISCOVERY ━━━
-- menu_displayed: Menu shown (response says "here's our menu" or lists menu items) → Guide exploration (Popular, By Cuisine, Combos, Cart, Book Table)
-- menu_discovery: User exploring menu → Show discovery options (Popular, Cuisine, Combos, Specials, Filter by Diet)
-- cuisine_browse: Response shows cuisines or user asks about cuisine types → Show cuisine buttons (Italian, Asian, American, Healthy)
+- menu_displayed: Menu shown (response says "here's our menu" or lists menu items) → Guide exploration (Search, Specials, Cart, Book Table)
+- menu_discovery: User exploring menu → Show discovery options (Search, Specials, Cart)
+- cuisine_browse: Response shows cuisines or user asks about cuisine types → Show Continental cuisine option (only available cuisine)
 - item_details_shown: Showing details of specific item → Action buttons (Add to Cart, Nutrition, Check Stock, Allergens, Favorites)
 - deals_inquiry: User asks about deals/offers/specials → Show promo options (Combos, Specials, Promo Code, Loyalty Rewards)
 
@@ -1164,7 +1141,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - view_cart: Showing cart contents → Cart actions (Checkout, Add More, Apply Promo, Add Instructions, Clear Cart)
 - view_cart_high_value: Cart shown with total > Rs.500 → Highlight promo (Checkout, Apply Promo Code★, Add More, Check Allergens)
 - checkout_options: Before final checkout → Final options (Order Now, Schedule Later, Apply Promo, Back to Cart)
-- cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Popular, Recent Orders, Reorder Last)
+- cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Search Items, Recent Orders, Reorder Last)
 
 ━━━ CHECKOUT & PAYMENT ━━━
 - order_type: Asking dine-in or takeaway → Binary choice (Dine In, Take Away)
@@ -1521,7 +1498,7 @@ def create_search_menu_tool(session_id: str):
                                     "category": _infer_category(item_name),
                                     "description": item.get("description", ""),
                                     "item_id": str(item.get("id", "")),
-                                    "meal_types": item.get("meal_types", ["All Day"]),
+                                    "meal_types": item.get("meal_types") or ["All Day"],
                                 })
 
                         if structured_similar:
@@ -1596,7 +1573,7 @@ def create_search_menu_tool(session_id: str):
                                         "category": _infer_category(item_name),
                                         "description": item.get("description", ""),
                                         "item_id": str(item.get("id", "")),
-                                        "meal_types": item.get("meal_types", ["All Day"]),
+                                        "meal_types": item.get("meal_types") or ["All Day"],
                                     })
 
                             if structured_alternatives:
@@ -1609,7 +1586,35 @@ def create_search_menu_tool(session_id: str):
                         except Exception as e:
                             logger.error(f"alternative_category_emit_failed", error=str(e))
 
-                    # Final fallback if everything fails
+                    # Final fallback if everything fails - emit current meal menu
+                    try:
+                        current_meal_items = _get_menu_from_preloader("", use_meal_filter=True, strict_filter=True)
+                        if current_meal_items:
+                            from app.core.redis import get_cart_sync
+                            cart_data = get_cart_sync(session_id)
+                            cart_items = cart_data.get("items", []) if cart_data else []
+                            cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+                            structured_menu = []
+                            for item in current_meal_items:
+                                item_name = item.get("name", "")
+                                if item_name.lower() not in cart_item_names:
+                                    structured_menu.append({
+                                        "name": item_name,
+                                        "price": item.get("price", 0),
+                                        "category": _infer_category(item_name),
+                                        "description": item.get("description", ""),
+                                        "item_id": str(item.get("id", "")),
+                                        "meal_types": item.get("meal_types") or ["All Day"],
+                                    })
+
+                            if structured_menu:
+                                emit_menu_data(session_id, structured_menu, current_meal_period=current_meal)
+                                return (f"We don't have '{query}' available at the moment. "
+                                       f"I've shown you our current menu - please browse and let me know what you'd like!")
+                    except Exception as e:
+                        logger.error(f"final_fallback_menu_emit_failed", error=str(e))
+
                     return (f"We don't have '{query}' available at the moment. "
                            f"Would you like me to show you what's on the menu?")
             return "Menu is loading. Please try again in a moment."
@@ -1663,7 +1668,7 @@ def create_search_menu_tool(session_id: str):
                                 "category": _infer_category(item_name),
                                 "description": item.get("description", ""),
                                 "item_id": str(item.get("id", "")),
-                                "meal_types": item.get("meal_types", ["All Day"]),
+                                "meal_types": item.get("meal_types") or ["All Day"],
                             })
 
                     if structured_menu:
@@ -1750,7 +1755,7 @@ def create_search_menu_tool(session_id: str):
                         "category": _infer_category(item_name),
                         "description": item.get("description", ""),
                         "item_id": str(item.get("id", "")),
-                        "meal_types": item.get("meal_types", ["All Day"]),
+                        "meal_types": item.get("meal_types") or ["All Day"],
                     })
 
                 if structured_items:
@@ -1786,7 +1791,7 @@ def create_search_menu_tool(session_id: str):
                             "category": _infer_category(item_name),
                             "description": item.get("description", ""),
                             "item_id": str(item.get("id", "")),
-                            "meal_types": item.get("meal_types", ["All Day"]),
+                            "meal_types": item.get("meal_types") or ["All Day"],
                         })
 
                 logger.info(f"filtered_menu_built", total_matches=len(items), structured_count=len(structured_items))
@@ -3088,18 +3093,41 @@ def create_filter_by_cuisine_tool(session_id: str):
                 return f"We have the following cuisines available: {cuisines_list}. Which cuisine would you like to explore?"
 
             # Filter menu by specified cuisine
-            cuisine_lower = cuisine.lower()
+            cuisine_lower = cuisine.lower().strip()
+
+            # Map user-friendly cuisine names to actual database cuisine names
+            cuisine_mapping = {
+                'italian': ['Continental'],
+                'american': ['Continental'],
+                'continental': ['Continental'],
+                'asian': ['Chinese / Indo-Chinese'],
+                'chinese': ['Chinese / Indo-Chinese'],
+                'indo-chinese': ['Chinese / Indo-Chinese'],
+                'indo chinese': ['Chinese / Indo-Chinese'],
+                'indian': ['South Indian', 'North Indian'],
+                'south indian': ['South Indian'],
+                'north indian': ['North Indian'],
+                'street food': ['Street Food / Chaat'],
+                'chaat': ['Street Food / Chaat']
+            }
+
+            # Get mapped cuisine names or use original
+            target_cuisines = cuisine_mapping.get(cuisine_lower, [cuisine])
+
             preloader = get_menu_preloader()
             if not preloader.is_loaded:
                 return "Menu is loading. Please try again in a moment."
 
-            # Filter items by cuisine
+            # Filter items by cuisine (check if any target cuisine matches)
             filtered_items = []
             for item in preloader.menu:
                 item_cuisines = item.get("cuisines", [])
                 if isinstance(item_cuisines, list):
-                    if any(cuisine_lower in c.lower() for c in item_cuisines):
-                        filtered_items.append(item)
+                    # Check if any of the target cuisines match any of the item's cuisines
+                    for target_cuisine in target_cuisines:
+                        if any(target_cuisine.lower() in c.lower() or c.lower() in target_cuisine.lower() for c in item_cuisines):
+                            filtered_items.append(item)
+                            break  # Don't add the same item twice
 
             if not filtered_items:
                 return f"We don't have {cuisine} dishes currently available. Would you like to try another cuisine or see our full menu?"
@@ -3121,7 +3149,7 @@ def create_filter_by_cuisine_tool(session_id: str):
                         "category": _infer_category(item_name),
                         "description": item.get("description", ""),
                         "item_id": str(item.get("id", "")),
-                        "meal_types": item.get("meal_types", ["All Day"]),
+                        "meal_types": item.get("meal_types") or ["All Day"],
                     })
 
             # Emit menu card with filtered items (no meal period tabs for filtered view)
@@ -3198,7 +3226,7 @@ def create_show_popular_items_tool(session_id: str):
                         "category": _infer_category(item_name),
                         "description": item.get("description", ""),
                         "item_id": str(item.get("id", "")),
-                        "meal_types": item.get("meal_types", ["All Day"]),
+                        "meal_types": item.get("meal_types") or ["All Day"],
                     })
 
             # Emit menu card with popular items (no meal period tabs for filtered view)
@@ -3596,19 +3624,27 @@ def create_verify_payment_otp_tool(session_id: str):
             if payment_info.get('status') != 'awaiting_otp':
                 return "Payment is not awaiting OTP verification. Current status: " + payment_info.get('status', 'unknown')
 
-            # Validate OTP (mock - accepts 123456)
+            # Validate OTP
+            import os
+            test_mode = os.getenv("PAYMENT_TEST_MODE", "true").lower() == "true"
+
             otp_clean = otp.strip().replace(' ', '')
             if len(otp_clean) != 6 or not otp_clean.isdigit():
                 return "Invalid OTP format. Please enter a 6-digit OTP."
 
-            # Mock validation - 123456 always succeeds, others fail 50% of time
-            if otp_clean == "123456":
-                otp_valid = True
-            else:
-                otp_valid = random.random() > 0.5  # 50% success for random OTPs
+            if test_mode:
+                # Test mode - 123456 always succeeds, others fail 50% of time
+                if otp_clean == "123456":
+                    otp_valid = True
+                else:
+                    otp_valid = random.random() > 0.5  # 50% success for random OTPs
 
-            if not otp_valid:
-                return "Invalid OTP. Please try again or request a new OTP.\n(Hint: Use 123456 for testing)"
+                if not otp_valid:
+                    return "Invalid OTP. Please try again or request a new OTP.\n(Hint: Use 123456 for testing)"
+            else:
+                # Real payment mode - verify OTP with payment gateway
+                # TODO: Integrate with real payment gateway OTP verification
+                return "Real payment gateway integration not yet implemented. Please set PAYMENT_TEST_MODE=true in .env file."
 
             # Update transaction in PostgreSQL (async with asyncpg)
             async with AsyncDBConnection() as conn:
@@ -3687,6 +3723,62 @@ def create_verify_payment_otp_tool(session_id: str):
                 order_data['payment_transaction_id'] = payment_info['payment_transaction_id']
                 await redis_client.setex(order_key, 86400, json.dumps(order_data))
 
+            # Save confirmed order to MongoDB for persistence
+            try:
+                from pymongo import MongoClient
+                import os
+                from datetime import datetime
+
+                mongo_url = os.getenv("MONGODB_CONNECTION_STRING", "mongodb://mongodb:27017")
+                mongo_db = os.getenv("MONGODB_DATABASE_NAME", "restaurant_ai_analytics")
+
+                client = MongoClient(mongo_url, serverSelectionTimeoutMS=2000)
+                db = client[mongo_db]
+
+                # Get pending order from Redis
+                pending_order_key = f"pending_order:{session_id}"
+                pending_order_raw = await redis_client.get(pending_order_key)
+
+                if pending_order_raw:
+                    pending_order = json.loads(pending_order_raw)
+                    order_items_data = []
+                    for item in pending_order.get('items', []):
+                        order_items_data.append({
+                            "name": item.get("name", "Item"),
+                            "quantity": item.get("quantity", 1),
+                            "price": item.get("price", 0),
+                            "item_total": item.get("price", 0) * item.get("quantity", 1)
+                        })
+
+                    order_doc = {
+                        "order_id": payment_info['order_display_id'],
+                        "session_id": session_id,
+                        "items": order_items_data,
+                        "total": payment_info['amount'],
+                        "order_type": pending_order.get('order_type', 'take_away'),
+                        "status": "confirmed",
+                        "payment_status": "paid",
+                        "payment_method": "card",
+                        "payment_transaction_id": payment_info['payment_transaction_id'],
+                        "card_network": payment_info.get('card_network'),
+                        "card_last4": payment_info.get('card_last4'),
+                        "created_at": pending_order.get('created_at', datetime.now().isoformat()),
+                        "paid_at": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat()
+                    }
+
+                    db.orders.insert_one(order_doc)
+                    logger.info("order_persisted_to_mongodb", session_id=session_id, order_id=payment_info['order_display_id'])
+
+                    # Clear pending order and cart
+                    await redis_client.delete(pending_order_key)
+                    from app.core.redis import set_cart_sync
+                    set_cart_sync(session_id, {"items": [], "total": 0})
+
+                client.close()
+            except Exception as mongo_error:
+                logger.warning("mongodb_order_persist_failed", error=str(mongo_error))
+
             # Clear pending payment
             await redis_client.delete(f"payment_pending:{session_id}")
 
@@ -3698,12 +3790,27 @@ def create_verify_payment_otp_tool(session_id: str):
                 transaction_id=payment_info['payment_transaction_id']
             )
 
+            # Emit order confirmation with receipt data
+            from app.core.agui_events import emit_order_data
+            if pending_order_raw:
+                pending_order = json.loads(pending_order_raw)
+                emit_order_data(
+                    session_id=session_id,
+                    order_id=payment_info['order_display_id'],
+                    items=pending_order.get('items', []),
+                    total=payment_info['amount'],
+                    status="confirmed",
+                    order_type=pending_order.get('order_type', 'take_away')
+                )
+
             return (
-                f"Payment successful!\n\n"
-                f"Order: {payment_info['order_display_id']}\n"
-                f"Amount Paid: Rs.{payment_info['amount']:.0f}\n"
-                f"Card: {payment_info.get('card_network', 'Card')} ending in {payment_info.get('card_last4', '****')}\n\n"
-                "Your order is confirmed and being prepared. Thank you!"
+                f"✅ Payment successful!\n\n"
+                f"📋 Order: {payment_info['order_display_id']}\n"
+                f"💰 Amount Paid: Rs.{payment_info['amount']:.0f}\n"
+                f"💳 Card: {payment_info.get('card_network', 'Card')} ending in {payment_info.get('card_last4', '****')}\n\n"
+                f"Your order is confirmed and being prepared!\n"
+                f"You can view your receipt by saying 'show receipt for {payment_info['order_display_id']}'\n\n"
+                "Thank you for your order! 🎉"
             )
 
         except Exception as e:
@@ -4018,7 +4125,7 @@ Be warm, helpful, and efficient. Use tool outputs to provide accurate informatio
         llm=llm,
         tools=all_tools,
         # Best practices from docs.crewai.com
-        verbose=True,  # DEBUG: Temporarily enabled to see tool invocations
+        verbose=False,  # Disabled for performance (reduces 10s to ~2s per request)
         allow_delegation=False,
         respect_context_window=True,  # Handle long conversations gracefully
         cache=True,  # Cache tool results for repeated queries
@@ -4164,7 +4271,7 @@ Be warm and helpful!""",
         agents=[agent],
         tasks=[task],
         process=Process.sequential,
-        verbose=True,  # DEBUG: Temporarily enabled to see execution flow
+        verbose=False,  # Disabled for performance
     )
 
     return crew

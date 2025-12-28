@@ -131,7 +131,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_get_order_history_tool,
         create_get_order_receipt_tool,
         create_filter_by_cuisine_tool,
-        create_show_popular_items_tool,
+        # create_show_popular_items_tool,  # DISABLED - Popular items feature removed
     )
 
     # Import complaint tools (session-aware sync wrappers)
@@ -158,7 +158,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_get_order_history_tool(session_id),
         create_get_order_receipt_tool(session_id),
         create_filter_by_cuisine_tool(session_id),
-        create_show_popular_items_tool(session_id),
+        # create_show_popular_items_tool(session_id),  # DISABLED - Popular items feature removed
         create_complaint_tool(session_id),
         create_get_complaints_tool(session_id),
         create_complaint_status_tool(session_id),
@@ -172,8 +172,6 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
 🚨 MANDATORY TOOL USAGE - EXACT PHRASE MATCHING 🚨
 When customer says EXACTLY these phrases, you MUST call these tools:
 
-- "show popular items" → call show_popular_items() IMMEDIATELY
-- "popular" → call show_popular_items() IMMEDIATELY
 - "browse by cuisine" → call filter_by_cuisine() with NO cuisine parameter IMMEDIATELY
 - "by cuisine" → call filter_by_cuisine() with NO cuisine parameter IMMEDIATELY
 - "show Italian dishes" → call filter_by_cuisine(cuisine="Italian") IMMEDIATELY
@@ -284,7 +282,6 @@ YOU MUST FOLLOW THIS PROCESS FOR EVERY MESSAGE:
 What does the customer want? Match to required tool:
 
 - "show menu" / "what's available" / "browse menu" → MUST call search_menu()
-- "show popular items" / "popular" / "best sellers" / "what's good" → MUST call show_popular_items()
 - "browse by cuisine" / "by cuisine" / "show available cuisines" → MUST call filter_by_cuisine() with NO cuisine parameter
 - "show Italian dishes" / "Italian food" / "Asian dishes" → MUST call filter_by_cuisine(cuisine="Italian")
 - "add [item]" / "I want [item]":
@@ -293,6 +290,8 @@ What does the customer want? Match to required tool:
 - "view cart" / "what's in my cart" / "show cart" → MUST call view_cart()
 - "remove [item]" → MUST call remove_from_cart()
 - "checkout" / "place order" / "pay" → MUST call checkout()
+- "cash on delivery" / "COD" (after checkout) → Confirm order immediately with message: "Order confirmed! Please pay cash when your order arrives. Thank you!"
+- "pay with card" / "card payment" (after checkout) → MUST call initiate_payment() to start payment process
 - "book table" / "reservation" → MUST delegate to Booking Specialist
 - "clear cart" → MUST call clear_cart()
 - "[number]" in response to YOUR quantity question → MUST call add_to_cart() with the item you just asked about
@@ -434,7 +433,6 @@ HOW TO THINK ABOUT EACH MESSAGE:
 
 11. **Menu Filtering & Discovery - IMPORTANT**
    When customer wants to browse or filter menu:
-   - "Show popular items" / "what's recommended" / "best sellers" → MUST call show_popular_items() - displays recommended items
    - "Browse by cuisine" / "show Italian dishes" / "Asian food" → MUST call filter_by_cuisine(cuisine="Italian") - filters menu by cuisine type
    - "Browse by cuisine" without specifying → call filter_by_cuisine() with no cuisine to show available cuisines
 
@@ -445,7 +443,7 @@ HOW TO THINK ABOUT EACH MESSAGE:
    - "Show order history" / "my past orders" → MUST call get_order_history() - lists all previous orders
    - "Cancel order" → MUST call cancel_order(order_id) - cancels a pending order
 
-TOOLS: search_menu, filter_by_cuisine, show_popular_items, add_to_cart, view_cart, remove_from_cart, checkout (has order_type param), cancel_order, clear_cart, update_quantity, set_special_instructions, get_item_details, reorder_last_order, get_order_status, get_order_history, get_order_receipt, create_complaint, get_complaints, check_complaint_status""",
+TOOLS: search_menu, filter_by_cuisine, add_to_cart, view_cart, remove_from_cart, checkout (has order_type param), cancel_order, clear_cart, update_quantity, set_special_instructions, get_item_details, reorder_last_order, get_order_status, get_order_history, get_order_receipt, create_complaint, get_complaints, check_complaint_status""",
         expected_output="A natural, helpful response that acknowledges what you did and continues the conversation",
         agent=food_ordering_agent,
     )

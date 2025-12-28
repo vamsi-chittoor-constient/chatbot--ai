@@ -49,6 +49,7 @@ WORKDIR /app
 COPY app/ ./app/
 COPY frontend/ ./frontend/
 COPY static/ ./static/
+COPY db/ ./db/
 COPY requirements.txt .
 
 RUN mkdir -p /app/logs && chown -R appuser:appuser /app

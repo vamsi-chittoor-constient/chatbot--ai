@@ -527,7 +527,7 @@ async def store_menu_async(
             processed_ids["items"].append(petpooja_item_id)
 
             # Find sub-category
-            petpooja_category_id = safe_int(item.get("categoryid"))
+            petpooja_category_id = safe_int(item.get("item_categoryid"))
             sub_category = None
             sub_category_id = None
             if petpooja_category_id:

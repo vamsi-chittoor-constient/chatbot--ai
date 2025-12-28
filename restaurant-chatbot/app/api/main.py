@@ -150,6 +150,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Menu cache loading failed (will load on-demand): {str(e)}")
 
+        # Run database migrations before loading menu preloader
+        try:
+            from app.core.migrations import run_migrations
+            await run_migrations()
+            logger.info("Database migrations completed")
+        except Exception as e:
+            logger.warning(f"Database migrations failed (continuing with existing schema): {str(e)}")
+
         # Initialize in-memory menu preloader for instant tool responses
         try:
             from app.core.preloader import preload_all

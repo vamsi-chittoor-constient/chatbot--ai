@@ -202,6 +202,7 @@ class MenuDataEvent(AGUIEvent):
     categories: List[str] = field(default_factory=list)
     current_meal_period: str = ""  # Breakfast, Lunch, Dinner, or All Day
     show_meal_filters: bool = True  # Show breakfast/lunch/dinner tabs (False for filtered views)
+    show_popular_tab: bool = False  # Popular items feature disabled
 
 
 @dataclass
@@ -583,14 +584,20 @@ class AGUIEventEmitter:
             categories = list(set(item.get("category", "Other") for item in items))
             categories.sort()
 
+        # Count recommended items to determine if Popular Items tab should be shown
+        recommended_count = sum(1 for item in items if item.get("is_recommended", False))
+        show_popular_tab = False  # Popular items feature disabled
+
         self._emit(MenuDataEvent(
             items=items,
             categories=categories,
             current_meal_period=current_meal_period,
-            show_meal_filters=show_meal_filters
+            show_meal_filters=show_meal_filters,
+            show_popular_tab=show_popular_tab
         ))
         logger.debug("menu_data_emitted_immediate",
-                    session_id=self.session_id, items_count=len(items))
+                    session_id=self.session_id, items_count=len(items),
+                    recommended_count=recommended_count, show_popular_tab=show_popular_tab)
 
     def emit_order_data(self, order_id: str, items: List[Dict[str, Any]],
                         total: float, status: str, order_type: str = ""):
@@ -1115,11 +1122,16 @@ async def emit_menu_data_async(session_id: str, items: List[Dict[str, Any]],
             categories = list(set(item.get("category", "Other") for item in items))
             categories.sort()
 
+        # Count recommended items to determine if Popular Items tab should be shown
+        recommended_count = sum(1 for item in items if item.get("is_recommended", False))
+        show_popular_tab = False  # Popular items feature disabled
+
         event = MenuDataEvent(
             items=items,
             categories=categories,
             current_meal_period=current_meal_period,
-            show_meal_filters=show_meal_filters
+            show_meal_filters=show_meal_filters,
+            show_popular_tab=show_popular_tab
         )
         queue = get_event_queue(session_id)
         await queue.put(event)
@@ -1127,7 +1139,9 @@ async def emit_menu_data_async(session_id: str, items: List[Dict[str, Any]],
         logger.debug(
             "async_menu_data_emitted",
             session_id=session_id,
-            items_count=len(items)
+            items_count=len(items),
+            recommended_count=recommended_count,
+            show_popular_tab=show_popular_tab
         )
     except Exception as e:
         logger.debug("async_menu_data_emit_failed", error=str(e))
@@ -1321,11 +1335,16 @@ def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: Lis
             categories = list(set(item.get("category", "Other") for item in items))
             categories.sort()
 
+        # Count recommended items to determine if Popular Items tab should be shown
+        recommended_count = sum(1 for item in items if item.get("is_recommended", False))
+        show_popular_tab = False  # Popular items feature disabled
+
         event = MenuDataEvent(
             items=items,
             categories=categories,
             current_meal_period=current_meal_period,
-            show_meal_filters=show_meal_filters
+            show_meal_filters=show_meal_filters,
+            show_popular_tab=show_popular_tab
         )
 
         # Use thread-safe put for cross-thread operation
@@ -1336,7 +1355,9 @@ def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: Lis
             session_id=session_id,
             items_count=len(items),
             categories=categories,
-            current_meal_period=current_meal_period
+            current_meal_period=current_meal_period,
+            recommended_count=recommended_count,
+            show_popular_tab=show_popular_tab
         )
     except Exception as e:
         logger.debug("menu_data_emit_failed", error=str(e))
