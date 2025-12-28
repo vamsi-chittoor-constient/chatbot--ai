@@ -183,10 +183,18 @@ class MenuPreloader:
         # Apply search filter if query provided
         if query and query.lower() not in ["", "all", "show all", "everything"]:
             query_lower = query.lower()
+
+            # Expand drink-related search terms to include common synonyms
+            drink_keywords = ["drink", "drinks", "beverage", "beverages", "cold drink", "cool drink"]
+            is_drink_search = any(keyword in query_lower for keyword in drink_keywords)
+
             available_items = [
                 item for item in available_items
                 if (query_lower in item.get("name", "").lower() or
-                    query_lower in item.get("description", "").lower())
+                    query_lower in item.get("description", "").lower() or
+                    query_lower in item.get("subcategory", "").lower() or
+                    # If searching for drinks, match items in Beverages category
+                    (is_drink_search and item.get("subcategory", "").lower() == "beverages"))
             ]
 
         # Apply meal period filtering/prioritization

@@ -264,11 +264,13 @@ def _search_menu_impl(query: str, session_id: str) -> str:
                 structured_items = []
                 for item in available_now:
                     item_name = item.get("name", "")
-                    if item_name.lower() in cart_item_names:
+                    item_price = item.get("price", 0)
+                    # Skip items already in cart or with price 0
+                    if item_name.lower() in cart_item_names or item_price <= 0:
                         continue
                     structured_items.append({
                         "name": item_name,
-                        "price": item.get("price", 0),
+                        "price": item_price,
                         "category": _infer_category(item_name),
                         "description": item.get("description", ""),
                         "item_id": str(item.get("id", "")),
@@ -315,11 +317,13 @@ def _search_menu_impl(query: str, session_id: str) -> str:
             structured_items = []
             for item in items:
                 item_name = item.get("name", "")
-                if item_name.lower() in cart_item_names:
+                item_price = item.get("price", 0)
+                # Skip items already in cart or with price 0
+                if item_name.lower() in cart_item_names or item_price <= 0:
                     continue
                 structured_items.append({
                     "name": item_name,
-                    "price": item.get("price", 0),
+                    "price": item_price,
                     "category": _infer_category(item_name),
                     "description": item.get("description", ""),
                     "item_id": str(item.get("id", "")),
