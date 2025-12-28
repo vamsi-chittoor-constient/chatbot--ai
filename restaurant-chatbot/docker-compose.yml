@@ -55,6 +55,8 @@ services:
       # MongoDB
       - MONGODB_CONNECTION_STRING=mongodb://mongodb:27017
       - MONGODB_DATABASE_NAME=restaurant_ai_analytics
+      # Qdrant
+      - QDRANT_URL=http://qdrant:6333
       # Application
       - ENVIRONMENT=production
       - DEBUG=false
@@ -94,6 +96,8 @@ services:
       redis:
         condition: service_healthy
       mongodb:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
@@ -174,6 +178,27 @@ services:
     networks:
       - restaurant-network
 
+  # ===========================================================================
+  # Qdrant Vector Database (Port 6333)
+  # ===========================================================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: restaurant-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - restaurant-network
+
 networks:
   restaurant-network:
     driver: bridge
@@ -182,4 +207,5 @@ volumes:
   postgres-data:
   redis-data:
   mongodb-data:
+  qdrant-data:
   app-logs:

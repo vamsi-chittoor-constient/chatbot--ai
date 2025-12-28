@@ -37,7 +37,7 @@ langchain-core
 langgraph
 crewai>=1.7.0
 crewai-tools
-chromadb>=0.4.0
+qdrant-client
 sentence-transformers
 
 # MongoDB
