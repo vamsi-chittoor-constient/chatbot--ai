@@ -208,6 +208,9 @@ def _search_menu_impl(query: str, session_id: str) -> str:
     # Emit activity
     emit_tool_activity(session_id, "search_menu")
 
+    # Get current meal period
+    current_meal = get_current_meal_period()
+
     # Get menu from preloader
     items = _get_menu_from_preloader(query)
 
@@ -216,6 +219,78 @@ def _search_menu_impl(query: str, session_id: str) -> str:
         if query:
             return f"No items found matching '{query}'. Try browsing the full menu."
         return "Menu is loading. Please try again in a moment."
+
+    # Check if search results are available in current meal period (when there's a query)
+    if query:
+        # Separate items by meal availability
+        available_now = [item for item in items if current_meal in item.get("meal_types", [])]
+        available_other_times = [item for item in items if current_meal not in item.get("meal_types", []) and item.get("meal_types")]
+
+        # If found items but none available in current meal period
+        if not available_now and available_other_times:
+            # Get the meal periods when these items ARE available
+            other_meals = set()
+            for item in available_other_times:
+                other_meals.update(item.get("meal_types", []))
+
+            meal_times = {
+                "Breakfast": "6 AM - 11 AM",
+                "Lunch": "11 AM - 4 PM",
+                "Dinner": "4 PM - 10 PM"
+            }
+
+            availability_text = ", ".join([f"{meal} ({meal_times.get(meal, '')})" for meal in sorted(other_meals)])
+            item_names = ", ".join([item.get("name") for item in available_other_times[:3]])
+
+            # Get suggestions for current meal
+            current_meal_items = _get_menu_from_preloader("", use_meal_filter=True, strict_filter=True)
+            suggestions = [item.get("name") for item in current_meal_items[:5]]
+            suggestion_text = ", ".join(suggestions) if suggestions else "our current menu"
+
+            return (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
+                    f"but they're only available during {availability_text}. "
+                    f"It's currently {current_meal} time. "
+                    f"Would you like to see our {current_meal.lower()} items instead? "
+                    f"We have {suggestion_text} available right now!")
+
+        # If some items ARE available now, emit them
+        if available_now:
+            try:
+                cart_data = get_cart_sync(session_id)
+                cart_items = cart_data.get("items", []) if cart_data else []
+                cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+                structured_items = []
+                for item in available_now:
+                    item_name = item.get("name", "")
+                    if item_name.lower() in cart_item_names:
+                        continue
+                    structured_items.append({
+                        "name": item_name,
+                        "price": item.get("price", 0),
+                        "category": _infer_category(item_name),
+                        "description": item.get("description", ""),
+                        "item_id": str(item.get("id", "")),
+                        "meal_types": item.get("meal_types", ["All Day"]),
+                    })
+
+                if structured_items:
+                    emit_menu_data(session_id, structured_items, current_meal_period=current_meal)
+
+                # Also mention if there are items available at other times
+                if available_other_times:
+                    other_meals = set()
+                    for item in available_other_times:
+                        other_meals.update(item.get("meal_types", []))
+                    availability_text = ", ".join(sorted(other_meals))
+
+                    return (f"[MENU CARD DISPLAYED - {len(structured_items)} items available now] "
+                            f"Found {len(available_now)} items available now. "
+                            f"Note: {len(available_other_times)} more items are available during {availability_text}.")
+
+                return f"[MENU CARD DISPLAYED - {len(structured_items)} items shown]"
+            except Exception as e:
+                logger.debug("search_menu_emit_failed", error=str(e))
 
     logger.debug("menu_from_preloader", query=query, count=len(items))
 
