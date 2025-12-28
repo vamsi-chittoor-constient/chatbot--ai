@@ -211,8 +211,8 @@ def _search_menu_impl(query: str, session_id: str) -> str:
     # Get current meal period
     current_meal = get_current_meal_period()
 
-    # Get menu from preloader
-    items = _get_menu_from_preloader(query)
+    # Get menu from preloader (without meal filtering for searches, so we can provide context)
+    items = _get_menu_from_preloader(query, use_meal_filter=False) if query else _get_menu_from_preloader(query)
 
     if not items:
         logger.warning("menu_preloader_empty", query=query)
