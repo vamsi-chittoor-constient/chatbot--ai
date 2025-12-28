@@ -1470,6 +1470,12 @@ def create_search_menu_tool(session_id: str):
         # For searches, get ALL items without pre-filtering to enable contextual messages
         items = _get_menu_from_preloader(query, use_meal_filter=False) if query else _get_menu_from_preloader(query)
 
+        # DEBUG: Log what preloader returned
+        logger.info(f"preloader_search_result", query=query, items_count=len(items) if items else 0,
+                   items_type=type(items), current_meal=current_meal)
+        if items:
+            logger.info(f"preloader_first_item", first_item=items[0] if items else None)
+
         if not items:
             # Preloader should always have data, but log if empty
             logger.warning("menu_preloader_empty", query=query, items_type=type(items), items_value=items)
@@ -1614,8 +1620,12 @@ def create_search_menu_tool(session_id: str):
             available_now = [item for item in items if current_meal in item.get("meal_types", [])]
             available_other_times = [item for item in items if current_meal not in item.get("meal_types", []) and item.get("meal_types")]
 
+            logger.info(f"meal_time_check", query=query, current_meal=current_meal,
+                       available_now=len(available_now), available_other_times=len(available_other_times))
+
             # If found items but NONE available in current meal period
             if not available_now and available_other_times:
+                logger.info(f"returning_meal_context_message", query=query, unavailable_count=len(available_other_times))
                 # Get the meal periods when these items ARE available
                 other_meals = set()
                 for item in available_other_times:
@@ -1635,11 +1645,14 @@ def create_search_menu_tool(session_id: str):
                 suggestions = [item.get("name") for item in current_meal_items[:5]]
                 suggestion_text = ", ".join(suggestions) if suggestions else "our current menu"
 
-                return (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
+                contextual_message = (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
                         f"but they're only available during {availability_text}. "
                         f"It's currently {current_meal} time. "
                         f"Would you like to see our {current_meal.lower()} items instead? "
                         f"We have {suggestion_text} available right now!")
+
+                logger.info(f"tool_returning_message", message=contextual_message[:200])
+                return contextual_message
 
             # Filter items to only show what's available NOW (for menu emit)
             if available_now:
