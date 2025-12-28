@@ -1462,8 +1462,13 @@ def create_search_menu_tool(session_id: str):
         from app.core.agui_events import emit_tool_activity
         emit_tool_activity(session_id, "search_menu")
 
+        # Get current meal period for time-aware filtering
+        from app.core.preloader import get_current_meal_period
+        current_meal = get_current_meal_period()
+
         # Try preloader first (instant - no DB query!)
-        items = _get_menu_from_preloader(query)
+        # For searches, get ALL items without pre-filtering to enable contextual messages
+        items = _get_menu_from_preloader(query, use_meal_filter=False) if query else _get_menu_from_preloader(query)
 
         if not items:
             # Preloader should always have data, but log if empty
@@ -1602,6 +1607,43 @@ def create_search_menu_tool(session_id: str):
                     return (f"We don't have '{query}' available at the moment. "
                            f"Would you like me to show you what's on the menu?")
             return "Menu is loading. Please try again in a moment."
+
+        # **MEAL-TIME CONTEXT AWARENESS** - Check if search results are available during current meal period
+        if query:
+            # Separate items by meal availability
+            available_now = [item for item in items if current_meal in item.get("meal_types", [])]
+            available_other_times = [item for item in items if current_meal not in item.get("meal_types", []) and item.get("meal_types")]
+
+            # If found items but NONE available in current meal period
+            if not available_now and available_other_times:
+                # Get the meal periods when these items ARE available
+                other_meals = set()
+                for item in available_other_times:
+                    other_meals.update(item.get("meal_types", []))
+
+                meal_times = {
+                    "Breakfast": "6 AM - 11 AM",
+                    "Lunch": "11 AM - 4 PM",
+                    "Dinner": "4 PM - 10 PM"
+                }
+
+                availability_text = ", ".join([f"{meal} ({meal_times.get(meal, '')})" for meal in sorted(other_meals)])
+                item_names = ", ".join([item.get("name") for item in available_other_times[:3]])
+
+                # Get suggestions for current meal
+                current_meal_items = _get_menu_from_preloader("", use_meal_filter=True, strict_filter=True)
+                suggestions = [item.get("name") for item in current_meal_items[:5]]
+                suggestion_text = ", ".join(suggestions) if suggestions else "our current menu"
+
+                return (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
+                        f"but they're only available during {availability_text}. "
+                        f"It's currently {current_meal} time. "
+                        f"Would you like to see our {current_meal.lower()} items instead? "
+                        f"We have {suggestion_text} available right now!")
+
+            # Filter items to only show what's available NOW (for menu emit)
+            if available_now:
+                items = available_now  # Replace items list with only currently available items
 
         logger.debug("menu_from_preloader", query=query, count=len(items))
 
