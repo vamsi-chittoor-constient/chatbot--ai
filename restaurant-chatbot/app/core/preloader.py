@@ -73,7 +73,7 @@ class MenuPreloader:
         try:
             pool = await get_async_pool()
             async with pool.acquire() as conn:
-                # Load basic menu items (meal_type mapping will be added later)
+                # Load menu items with meal types from availability schedule
                 rows = await conn.fetch("""
                     SELECT
                         mi.menu_item_id as id,
@@ -82,10 +82,21 @@ class MenuPreloader:
                         mi.menu_item_description as description,
                         mi.menu_item_in_stock as is_available,
                         mi.menu_item_is_recommended as is_recommended,
-                        COALESCE(mi.menu_item_meal_types, 'All Day') as meal_types
+                        ARRAY_AGG(DISTINCT mt.meal_type_name)
+                            FILTER (WHERE mt.meal_type_name IS NOT NULL) as meal_types
                     FROM menu_item mi
+                    LEFT JOIN menu_item_availability_schedule mas
+                        ON mi.menu_item_id = mas.menu_item_id
+                        AND mas.is_deleted = FALSE
+                        AND mas.is_available = TRUE
+                    LEFT JOIN meal_type mt
+                        ON mas.meal_type_id = mt.meal_type_id
+                        AND mt.is_deleted = FALSE
                     WHERE mi.is_deleted = FALSE
                     AND mi.menu_item_status = 'active'
+                    GROUP BY mi.menu_item_id, mi.menu_item_name, mi.menu_item_price,
+                             mi.menu_item_description, mi.menu_item_in_stock,
+                             mi.menu_item_is_recommended
                     ORDER BY mi.menu_item_is_recommended DESC, mi.menu_item_name
                 """)
 
@@ -97,7 +108,7 @@ class MenuPreloader:
                         "description": row['description'] or "",
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
-                        "meal_types": row['meal_types'].split(',') if row['meal_types'] else ['All Day']
+                        "meal_types": list(row['meal_types']) if row['meal_types'] else []
                     }
                     for row in rows
                 ]
@@ -171,15 +182,21 @@ class MenuPreloader:
 
         # Apply meal period filtering/prioritization
         if meal_period:
-            def is_for_meal(item):
-                meal_types = item.get("meal_types", ["All Day"])
-                return meal_period in meal_types or "All Day" in meal_types
-
             if strict_meal_filter:
-                # Strict filter - ONLY show meal-appropriate items (for browse menu)
-                available_items = [item for item in available_items if is_for_meal(item)]
+                # Strict filter - ONLY show items explicitly for current meal period
+                # Do NOT include "All Day" items when browsing (too permissive)
+                def is_for_meal_strict(item):
+                    meal_types = item.get("meal_types", [])
+                    return meal_period in meal_types
+
+                available_items = [item for item in available_items if is_for_meal_strict(item)]
             elif prioritize_meal:
                 # Show meal-appropriate items first, then others (for search results)
+                # In this mode, "All Day" items ARE included
+                def is_for_meal(item):
+                    meal_types = item.get("meal_types", ["All Day"])
+                    return meal_period in meal_types or "All Day" in meal_types
+
                 meal_items = [item for item in available_items if is_for_meal(item)]
                 other_items = [item for item in available_items if not is_for_meal(item)]
                 available_items = meal_items + other_items
