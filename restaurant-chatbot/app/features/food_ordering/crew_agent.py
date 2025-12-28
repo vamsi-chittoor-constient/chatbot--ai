@@ -142,16 +142,17 @@ def _get_all_menu_items() -> List[Dict]:
     return _get_menu_from_preloader(query="", use_meal_filter=False)
 
 
-def _get_menu_from_preloader(query: str = "", use_meal_filter: bool = True) -> List[Dict]:
+def _get_menu_from_preloader(query: str = "", use_meal_filter: bool = True, strict_filter: bool = False) -> List[Dict]:
     """
     Get menu items from preloader cache (instant, no DB).
 
     Args:
         query: Search term
-        use_meal_filter: If True, prioritize items for current meal period
+        use_meal_filter: If True, filter by current meal period
+        strict_filter: If True, ONLY show items for current meal (not other meals)
 
     Returns:
-        List of menu items, prioritized by current meal period
+        List of menu items, filtered by current meal period
     """
     try:
         from app.core.preloader import get_menu_preloader, get_current_meal_period
@@ -160,7 +161,9 @@ def _get_menu_from_preloader(query: str = "", use_meal_filter: bool = True) -> L
         if preloader.is_loaded:
             # Get current meal period for smart filtering
             meal_period = get_current_meal_period() if use_meal_filter else None
-            return preloader.search(query, meal_period=meal_period)
+            # For full menu browsing (empty query), use strict filter to only show current meal items
+            use_strict = strict_filter or (not query)
+            return preloader.search(query, meal_period=meal_period, strict_meal_filter=use_strict)
     except Exception as e:
         logger.debug("preloader_not_available", error=str(e))
     return []
@@ -170,7 +173,10 @@ def _infer_category(item_name: str) -> str:
     """Infer category from item name for UI grouping."""
     name_lower = item_name.lower()
 
-    if "pizza" in name_lower:
+    # South Indian breakfast items
+    if any(s in name_lower for s in ["dosa", "dosai", "idli", "vada", "upma", "pongal", "uttapam"]):
+        return "South Indian Breakfast"
+    elif "pizza" in name_lower:
         return "Pizza"
     elif "burger" in name_lower:
         return "Burgers"

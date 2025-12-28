@@ -81,11 +81,12 @@ class MenuPreloader:
                         mi.menu_item_price as price,
                         mi.menu_item_description as description,
                         mi.menu_item_in_stock as is_available,
-                        'All Day' as meal_types
+                        mi.menu_item_is_recommended as is_recommended,
+                        COALESCE(mi.menu_item_meal_types, 'All Day') as meal_types
                     FROM menu_item mi
                     WHERE mi.is_deleted = FALSE
                     AND mi.menu_item_status = 'active'
-                    ORDER BY mi.menu_item_name
+                    ORDER BY mi.menu_item_is_recommended DESC, mi.menu_item_name
                 """)
 
                 self._menu_cache = [
@@ -95,6 +96,7 @@ class MenuPreloader:
                         "price": float(row['price']),
                         "description": row['description'] or "",
                         "is_available": row['is_available'],
+                        "is_recommended": row['is_recommended'],
                         "meal_types": row['meal_types'].split(',') if row['meal_types'] else ['All Day']
                     }
                     for row in rows
@@ -134,7 +136,7 @@ class MenuPreloader:
                 pass
             self._refresh_task = None
 
-    def search(self, query: str = "", meal_period: Optional[str] = None, prioritize_meal: bool = True) -> List[Dict]:
+    def search(self, query: str = "", meal_period: Optional[str] = None, prioritize_meal: bool = True, strict_meal_filter: bool = False) -> List[Dict]:
         """
         Search cached menu (no DB query!).
 
@@ -144,6 +146,7 @@ class MenuPreloader:
             query: Search term (empty = show all)
             meal_period: Filter by meal period (Breakfast, Lunch, Dinner, All Day)
             prioritize_meal: If True, show meal-appropriate items first, then others
+            strict_meal_filter: If True, ONLY show meal-appropriate items (ignores prioritize_meal)
 
         Returns:
             List of menu items, optionally filtered/prioritized by meal period
@@ -172,14 +175,14 @@ class MenuPreloader:
                 meal_types = item.get("meal_types", ["All Day"])
                 return meal_period in meal_types or "All Day" in meal_types
 
-            if prioritize_meal:
-                # Show meal-appropriate items first, then others
+            if strict_meal_filter:
+                # Strict filter - ONLY show meal-appropriate items (for browse menu)
+                available_items = [item for item in available_items if is_for_meal(item)]
+            elif prioritize_meal:
+                # Show meal-appropriate items first, then others (for search results)
                 meal_items = [item for item in available_items if is_for_meal(item)]
                 other_items = [item for item in available_items if not is_for_meal(item)]
                 available_items = meal_items + other_items
-            else:
-                # Strict filter - only show meal-appropriate items
-                available_items = [item for item in available_items if is_for_meal(item)]
 
         return available_items
 
