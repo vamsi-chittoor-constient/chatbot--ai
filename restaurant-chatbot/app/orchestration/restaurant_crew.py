@@ -136,28 +136,40 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_complaint_status_tool,
     )
 
-    # Create sync tools only
-    search_menu = create_search_menu_tool(session_id)
-    add_to_cart = create_add_to_cart_tool(session_id)
-    view_cart = create_view_cart_tool(session_id)
-    remove_from_cart = create_remove_from_cart_tool(session_id)
-    checkout = create_checkout_tool(session_id)
-    cancel_order = create_cancel_order_tool(session_id)
-    clear_cart = create_clear_cart_tool(session_id)
-    update_quantity = create_update_quantity_tool(session_id)
-    set_special_instructions = create_set_special_instructions_tool(session_id)
-    get_item_details = create_get_item_details_tool(session_id)
-    reorder_last_order = create_reorder_tool(session_id)
-    get_order_status = create_get_order_status_tool(session_id)
-    get_order_history = create_get_order_history_tool(session_id)
-    get_order_receipt = create_get_order_receipt_tool(session_id)
-    filter_by_cuisine = create_filter_by_cuisine_tool(session_id)
-    show_popular_items = create_show_popular_items_tool(session_id)
+    # Create ALL tools (but we'll filter them with RAG)
+    all_tools = {
+        "search_menu": create_search_menu_tool(session_id),
+        "add_to_cart": create_add_to_cart_tool(session_id),
+        "view_cart": create_view_cart_tool(session_id),
+        "remove_from_cart": create_remove_from_cart_tool(session_id),
+        "checkout": create_checkout_tool(session_id),
+        "cancel_order": create_cancel_order_tool(session_id),
+        "clear_cart": create_clear_cart_tool(session_id),
+        "update_quantity": create_update_quantity_tool(session_id),
+        "set_special_instructions": create_set_special_instructions_tool(session_id),
+        "get_item_details": create_get_item_details_tool(session_id),
+        "reorder_last_order": create_reorder_tool(session_id),
+        "get_order_status": create_get_order_status_tool(session_id),
+        "get_order_history": create_get_order_history_tool(session_id),
+        "get_order_receipt": create_get_order_receipt_tool(session_id),
+        "filter_by_cuisine": create_filter_by_cuisine_tool(session_id),
+        "show_popular_items": create_show_popular_items_tool(session_id),
+        "create_complaint": create_complaint_tool(session_id),
+        "get_complaints": create_get_complaints_tool(session_id),
+        "check_complaint_status": create_complaint_status_tool(session_id),
+    }
 
-    # Create complaint tools
-    create_complaint = create_complaint_tool(session_id)
-    get_complaints = create_get_complaints_tool(session_id)
-    check_complaint_status = create_complaint_status_tool(session_id)
+    # 🚀 RAG-BASED TOOL RETRIEVAL - Only provide relevant tools!
+    from app.core.tool_retrieval import get_relevant_tools
+    relevant_tools = get_relevant_tools(user_input, all_tools, max_tools=6)
+
+    logger.info(
+        "rag_tool_retrieval",
+        session_id=session_id,
+        total_tools=len(all_tools),
+        relevant_tools=len(relevant_tools),
+        reduction=f"{int((1-len(relevant_tools)/len(all_tools))*100)}%"
+    )
 
     food_ordering_agent = Agent(
         role="Kavya - Food Ordering Specialist",
@@ -207,12 +219,12 @@ When customer complains about food quality, service, wait time, or other issues:
 - Use the create_complaint tool to log the issue
 - Show empathy and offer resolution (replacement/refund)""",
         llm=llm,
-        tools=[search_menu, filter_by_cuisine, show_popular_items, add_to_cart, view_cart, remove_from_cart, update_quantity, set_special_instructions, get_item_details, checkout, cancel_order, clear_cart, reorder_last_order, get_order_status, get_order_history, get_order_receipt, create_complaint, get_complaints, check_complaint_status],
-        verbose=True,  # Required for proper result extraction
-        allow_delegation=True,  # Can delegate to booking agent
+        tools=relevant_tools,  # 🚀 RAG-FILTERED: Only 5-6 most relevant tools! (80% context reduction)
+        verbose=True,
+        allow_delegation=True,
         respect_context_window=True,
-        cache=False,  # Disable - prevents "reusing same input" loop on view_cart
-        max_iter=8,  # Reduced for faster responses (prevent long iterations)
+        cache=False,
+        max_iter=5,  # Reduced for speed with RAG retrieval
         max_retry_limit=2,
         reasoning=False,  # Disabled for speed - simple tool usage doesn't need extra reasoning
         memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)

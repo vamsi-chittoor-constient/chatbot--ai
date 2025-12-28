@@ -1902,18 +1902,15 @@ def create_checkout_tool(session_id: str):
     @tool("checkout")
     def checkout(order_type: Optional[str] = None) -> str:
         """
-        Complete the order and place it.
+        Complete the order and place it. Call this when customer wants to checkout, place order, or pay.
 
-        IMPORTANT: You MUST specify order_type explicitly. Do NOT call this with
-        empty or default order_type. Ask the customer first if they want
-        dine-in or take-away, then call with their choice.
+        WHEN TO USE: Customer says "checkout", "place order", "proceed to checkout", "pay", "finalize", "confirm order", "checkout for dine in", "checkout for takeaway"
 
         Args:
-            order_type: REQUIRED - "dine_in" or "take_away". Must ask customer first!
+            order_type: "dine_in" or "take_away" - extract from customer message if present, otherwise ask first
 
         Returns:
-            Order confirmation with order ID, total, and order type.
-            If order_type not specified, returns error asking to specify.
+            Order confirmation with order ID and total
         """
         # Use the sync implementation
         return _checkout_impl(order_type or "", session_id)
@@ -2550,14 +2547,16 @@ def create_update_quantity_tool(session_id: str):
         """
         Update the quantity of an item already in the cart.
 
-        Use this when customer wants to change quantity (e.g., "make it 3 burgers" or "change to 2").
+        WHEN TO USE: Customer says "change quantity to X", "make it X", "update to X", "change burger quantity to 3", "make it 5 burgers"
+
+        DO NOT use remove + add - use THIS tool instead for quantity changes!
 
         Args:
-            item_name: Name of the item to update.
-            new_quantity: New quantity to set (must be >= 1).
+            item_name: Name of the item to update
+            new_quantity: New quantity to set (must be >= 1)
 
         Returns:
-            Confirmation of updated quantity and new cart total.
+            Confirmation of updated quantity and new cart total
         """
         # Emit activity for frontend (sync)
         from app.core.agui_events import emit_tool_activity, emit_cart_data
