@@ -16,6 +16,7 @@ Architecture (v30):
 - GPT-4o for better reasoning on nuanced conversations
 
 v30 Change: Ask quantity when not specified, handle multiple items in one request
+v42 Change: RAG-based tool retrieval with in-memory ChromaDB (68-78% context reduction)
 """
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
@@ -24,6 +25,9 @@ import structlog
 import asyncio
 import os
 import re
+
+# 🚀 RAG TOOL RETRIEVAL - Import at module level for one-time ChromaDB initialization
+from app.core.tool_retrieval import get_relevant_tools
 
 logger = structlog.get_logger(__name__)
 
@@ -89,6 +93,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
 
     v28: Fixed delegation - agents use 'Delegate work to coworker' tool properly.
     Uses LLM manager for multi-account load balancing.
+    NOTE: Tools are dynamically filtered with RAG before each execution.
     """
     from langchain_openai import ChatOpenAI
     from app.ai_services.llm_manager import get_llm_manager
@@ -104,7 +109,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         model="gpt-4o",  # Using gpt-4o for reliable tool calling
         temperature=0.1,
         api_key=api_key,
-        max_tokens=2048,  # CRITICAL FIX: Increased from 512 to accommodate 55 tool schemas (~7000 tokens needed)
+        max_tokens=512,  # Optimized for RAG (4-6 tools instead of 55)
     )
 
     # ========================================================================
@@ -136,40 +141,28 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_complaint_status_tool,
     )
 
-    # Create ALL tools (but we'll filter them with RAG)
-    all_tools = {
-        "search_menu": create_search_menu_tool(session_id),
-        "add_to_cart": create_add_to_cart_tool(session_id),
-        "view_cart": create_view_cart_tool(session_id),
-        "remove_from_cart": create_remove_from_cart_tool(session_id),
-        "checkout": create_checkout_tool(session_id),
-        "cancel_order": create_cancel_order_tool(session_id),
-        "clear_cart": create_clear_cart_tool(session_id),
-        "update_quantity": create_update_quantity_tool(session_id),
-        "set_special_instructions": create_set_special_instructions_tool(session_id),
-        "get_item_details": create_get_item_details_tool(session_id),
-        "reorder_last_order": create_reorder_tool(session_id),
-        "get_order_status": create_get_order_status_tool(session_id),
-        "get_order_history": create_get_order_history_tool(session_id),
-        "get_order_receipt": create_get_order_receipt_tool(session_id),
-        "filter_by_cuisine": create_filter_by_cuisine_tool(session_id),
-        "show_popular_items": create_show_popular_items_tool(session_id),
-        "create_complaint": create_complaint_tool(session_id),
-        "get_complaints": create_get_complaints_tool(session_id),
-        "check_complaint_status": create_complaint_status_tool(session_id),
-    }
-
-    # 🚀 RAG-BASED TOOL RETRIEVAL - Only provide relevant tools!
-    from app.core.tool_retrieval import get_relevant_tools
-    relevant_tools = get_relevant_tools(user_input, all_tools, max_tools=6)
-
-    logger.info(
-        "rag_tool_retrieval",
-        session_id=session_id,
-        total_tools=len(all_tools),
-        relevant_tools=len(relevant_tools),
-        reduction=f"{int((1-len(relevant_tools)/len(all_tools))*100)}%"
-    )
+    # Create ALL tools (will be stored in crew for RAG filtering on each request)
+    all_food_tools = [
+        create_search_menu_tool(session_id),
+        create_add_to_cart_tool(session_id),
+        create_view_cart_tool(session_id),
+        create_remove_from_cart_tool(session_id),
+        create_checkout_tool(session_id),
+        create_cancel_order_tool(session_id),
+        create_clear_cart_tool(session_id),
+        create_update_quantity_tool(session_id),
+        create_set_special_instructions_tool(session_id),
+        create_get_item_details_tool(session_id),
+        create_reorder_tool(session_id),
+        create_get_order_status_tool(session_id),
+        create_get_order_history_tool(session_id),
+        create_get_order_receipt_tool(session_id),
+        create_filter_by_cuisine_tool(session_id),
+        create_show_popular_items_tool(session_id),
+        create_complaint_tool(session_id),
+        create_get_complaints_tool(session_id),
+        create_complaint_status_tool(session_id),
+    ]
 
     food_ordering_agent = Agent(
         role="Kavya - Food Ordering Specialist",
@@ -219,7 +212,7 @@ When customer complains about food quality, service, wait time, or other issues:
 - Use the create_complaint tool to log the issue
 - Show empathy and offer resolution (replacement/refund)""",
         llm=llm,
-        tools=relevant_tools,  # 🚀 RAG-FILTERED: Only 5-6 most relevant tools! (80% context reduction)
+        tools=all_food_tools,  # Will be replaced with RAG-filtered tools before each execution
         verbose=True,
         allow_delegation=True,
         respect_context_window=True,
@@ -476,6 +469,10 @@ TOOLS: search_menu, filter_by_cuisine, show_popular_items, add_to_cart, view_car
         memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
     )
 
+    # Store all_food_tools for RAG filtering on each request
+    crew._all_food_tools = all_food_tools
+    crew._food_ordering_agent = food_ordering_agent
+
     return crew
 
 
@@ -562,6 +559,23 @@ async def process_with_restaurant_crew(
         logger.debug("reusing_cached_crew", session_id=session_id)
 
     crew = _CREW_CACHE[cache_key]
+
+    # 🚀 RAG-BASED TOOL RETRIEVAL - Dynamically filter tools per request
+    # Convert tools list to dict for RAG
+    all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
+    relevant_tools = get_relevant_tools(user_message, all_tools_dict, max_tools=6)
+
+    # Update food ordering agent's tools dynamically (cached crew, fresh tools!)
+    crew._food_ordering_agent.tools = relevant_tools
+
+    logger.info(
+        "rag_tool_retrieval",
+        session_id=session_id,
+        total_tools=len(all_tools_dict),
+        relevant_tools=len(relevant_tools),
+        reduction=f"{int((1-len(relevant_tools)/len(all_tools_dict))*100)}%",
+        tool_names=[t.name for t in relevant_tools]
+    )
 
     # Build context from conversation history (8 turns for better context)
     context_lines = []
@@ -766,6 +780,23 @@ async def process_with_agui_streaming(
             _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id)
 
         crew = _CREW_CACHE[cache_key]
+
+        # 🚀 RAG-BASED TOOL RETRIEVAL - Dynamically filter tools per request
+        # Convert tools list to dict for RAG
+        all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
+        relevant_tools = get_relevant_tools(user_message, all_tools_dict, max_tools=6)
+
+        # Update food ordering agent's tools dynamically (cached crew, fresh tools!)
+        crew._food_ordering_agent.tools = relevant_tools
+
+        logger.info(
+            "rag_tool_retrieval",
+            session_id=session_id,
+            total_tools=len(all_tools_dict),
+            relevant_tools=len(relevant_tools),
+            reduction=f"{int((1-len(relevant_tools)/len(all_tools_dict))*100)}%",
+            tool_names=[t.name for t in relevant_tools]
+        )
 
         # Build context
         context_lines = []

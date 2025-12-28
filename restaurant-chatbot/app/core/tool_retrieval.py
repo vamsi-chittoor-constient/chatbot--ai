@@ -404,16 +404,14 @@ class AgentToolRetriever:
         return tool_names
 
 # =============================================================================
-# SINGLETON INSTANCE
+# SINGLETON INSTANCE - Initialize at module import time (eager loading)
 # =============================================================================
 
-_retriever_instance = None
+# Initialize immediately to avoid repeated initialization during requests
+_retriever_instance = AgentToolRetriever()
 
 def get_agent_tool_retriever() -> AgentToolRetriever:
-    """Get singleton instance of AgentToolRetriever."""
-    global _retriever_instance
-    if _retriever_instance is None:
-        _retriever_instance = AgentToolRetriever()
+    """Get singleton instance of AgentToolRetriever (initialized at module import)."""
     return _retriever_instance
 
 # =============================================================================
