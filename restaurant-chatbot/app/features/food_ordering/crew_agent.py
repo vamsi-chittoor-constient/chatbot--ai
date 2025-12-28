@@ -1640,16 +1640,57 @@ def create_search_menu_tool(session_id: str):
                 availability_text = ", ".join([f"{meal} ({meal_times.get(meal, '')})" for meal in sorted(other_meals)])
                 item_names = ", ".join([item.get("name") for item in available_other_times[:3]])
 
-                # Get suggestions for current meal
+                # Get full current meal menu and emit MENU_DATA card
                 current_meal_items = _get_menu_from_preloader("", use_meal_filter=True, strict_filter=True)
-                suggestions = [item.get("name") for item in current_meal_items[:5]]
-                suggestion_text = ", ".join(suggestions) if suggestions else "our current menu"
 
-                contextual_message = (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
-                        f"but they're only available during {availability_text}. "
-                        f"It's currently {current_meal} time. "
-                        f"Would you like to see our {current_meal.lower()} items instead? "
-                        f"We have {suggestion_text} available right now!")
+                # Emit full lunch/dinner menu card so user can browse
+                try:
+                    from app.core.agui_events import emit_menu_data
+                    from app.core.redis import get_cart_sync
+
+                    cart_data = get_cart_sync(session_id)
+                    cart_items = cart_data.get("items", []) if cart_data else []
+                    cart_item_names = {item.get("name", "").lower() for item in cart_items}
+
+                    # Build structured menu items (exclude items already in cart)
+                    structured_menu = []
+                    for item in current_meal_items:
+                        item_name = item.get("name", "")
+                        if item_name.lower() not in cart_item_names:
+                            structured_menu.append({
+                                "name": item_name,
+                                "price": item.get("price", 0),
+                                "category": _infer_category(item_name),
+                                "description": item.get("description", ""),
+                                "item_id": str(item.get("id", "")),
+                                "meal_types": item.get("meal_types", ["All Day"]),
+                            })
+
+                    if structured_menu:
+                        emit_menu_data(session_id, structured_menu, current_meal_period=current_meal)
+                        logger.info(f"current_meal_menu_emitted", meal=current_meal, count=len(structured_menu))
+
+                        contextual_message = (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
+                                f"but they're only available during {availability_text}. "
+                                f"It's currently {current_meal} time. "
+                                f"I've displayed our full {current_meal.lower()} menu for you to browse! "
+                                f"Please check the menu card and let me know what you'd like to order.")
+                    else:
+                        # All items in cart
+                        contextual_message = (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
+                                f"but they're only available during {availability_text}. "
+                                f"It's currently {current_meal} time. "
+                                f"All our {current_meal.lower()} items are already in your cart!")
+                except Exception as e:
+                    logger.error(f"menu_emit_failed", error=str(e))
+                    # Fallback to text-only suggestions
+                    suggestions = [item.get("name") for item in current_meal_items[:5]]
+                    suggestion_text = ", ".join(suggestions) if suggestions else "our current menu"
+                    contextual_message = (f"I found {len(available_other_times)} items matching '{query}' ({item_names}), "
+                            f"but they're only available during {availability_text}. "
+                            f"It's currently {current_meal} time. "
+                            f"Would you like to see our {current_meal.lower()} items instead? "
+                            f"We have {suggestion_text} available right now!")
 
                 logger.info(f"tool_returning_message", message=contextual_message[:200])
                 return contextual_message
