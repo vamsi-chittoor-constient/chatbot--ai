@@ -37,8 +37,6 @@ langchain-core
 langgraph
 crewai>=1.7.0
 crewai-tools
-qdrant-client
-sentence-transformers
 
 # MongoDB
 pymongo

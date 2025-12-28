@@ -1,18 +1,16 @@
 """
-RAG-based Tool Retrieval System with Agent-Specific Collections (Qdrant)
-=========================================================================
-Each agent has its own Qdrant collection for focused tool retrieval.
+RAG-based Tool Retrieval System with Agent-Specific Collections (ChromaDB)
+===========================================================================
+Each agent has its own ChromaDB collection for focused tool retrieval.
 - Food Ordering Agent: 25 tools
 - Booking Agent: 4 tools
-- Uses self-hosted Qdrant vector database
-- Sentence-transformers for embeddings
+- Uses in-memory ChromaDB (already included in CrewAI dependencies)
+- No additional dependencies required
 """
 
-import os
 from typing import Dict, List, Callable, Literal
-from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+import chromadb
+from chromadb.config import Settings
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -285,21 +283,19 @@ BOOKING_TOOLS = {
 }
 
 # =============================================================================
-# QDRANT-BASED TOOL RETRIEVER
+# CHROMADB-BASED TOOL RETRIEVER
 # =============================================================================
 
 class AgentToolRetriever:
-    """RAG-based tool retrieval using Qdrant with separate collections per agent."""
+    """RAG-based tool retrieval using in-memory ChromaDB with separate collections per agent."""
 
-    def __init__(self, qdrant_url: str = None):
-        """Initialize Qdrant client and collections."""
-        # Connect to Qdrant
-        self.qdrant_url = qdrant_url or os.getenv("QDRANT_URL", "http://localhost:6333")
-        self.client = QdrantClient(url=self.qdrant_url)
-
-        # Initialize sentence transformer for embeddings
-        self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
-        self.vector_size = 384  # all-MiniLM-L6-v2 produces 384-dimensional vectors
+    def __init__(self):
+        """Initialize in-memory ChromaDB client and collections."""
+        # Create in-memory ChromaDB client
+        self.client = chromadb.Client(Settings(
+            is_persistent=False,
+            anonymized_telemetry=False
+        ))
 
         # Collection names
         self.collection_names = {
@@ -308,71 +304,62 @@ class AgentToolRetriever:
         }
 
         # Initialize collections
+        self.collections = {}
         self._setup_collections()
 
         logger.info(
-            "qdrant_retriever_initialized",
-            qdrant_url=self.qdrant_url,
+            "chromadb_retriever_initialized",
             collections=list(self.collection_names.values()),
-            vector_size=self.vector_size
+            storage="in-memory"
         )
 
     def _setup_collections(self):
-        """Create Qdrant collections and index tools."""
-        # Create collections if they don't exist
+        """Create ChromaDB collections and index tools."""
         for agent_type, collection_name in self.collection_names.items():
-            try:
-                # Check if collection exists
-                self.client.get_collection(collection_name)
-                logger.info(f"collection_exists", collection=collection_name)
-            except Exception:
-                # Create collection
-                self.client.create_collection(
-                    collection_name=collection_name,
-                    vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
-                )
-                logger.info(f"collection_created", collection=collection_name)
+            # Create collection with default embedding function
+            collection = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"}
+            )
+            self.collections[agent_type] = collection
 
-                # Index tools for this agent
-                self._index_agent_tools(agent_type, collection_name)
+            # Index tools for this agent
+            self._index_agent_tools(agent_type, collection)
 
-    def _index_agent_tools(self, agent_type: AgentType, collection_name: str):
-        """Index tools for a specific agent into Qdrant."""
+    def _index_agent_tools(self, agent_type: AgentType, collection):
+        """Index tools for a specific agent into ChromaDB."""
         tools = FOOD_ORDERING_TOOLS if agent_type == "food_ordering" else BOOKING_TOOLS
 
-        points = []
-        for idx, (tool_name, tool_info) in enumerate(tools.items()):
+        documents = []
+        metadatas = []
+        ids = []
+
+        for tool_name, tool_info in tools.items():
             # Create rich text for embedding
             text = f"{tool_info['description']} {tool_info['usage']} {' '.join(tool_info['examples'])}"
 
-            # Generate embedding
-            vector = self.encoder.encode(text).tolist()
+            documents.append(text)
+            metadatas.append({
+                "tool_name": tool_name,
+                "description": tool_info["description"],
+                "usage": tool_info["usage"],
+                "category": tool_info["category"],
+                "priority": tool_info["priority"]
+            })
+            ids.append(tool_name)
 
-            # Create point
-            point = PointStruct(
-                id=idx,
-                vector=vector,
-                payload={
-                    "tool_name": tool_name,
-                    "description": tool_info["description"],
-                    "usage": tool_info["usage"],
-                    "category": tool_info["category"],
-                    "priority": tool_info["priority"]
-                }
-            )
-            points.append(point)
-
-        # Upload to Qdrant
-        self.client.upsert(
-            collection_name=collection_name,
-            points=points
+        # Add to ChromaDB
+        collection.add(
+            documents=documents,
+            metadatas=metadatas,
+            ids=ids
         )
 
         logger.info(
             "tools_indexed",
             agent_type=agent_type,
-            collection=collection_name,
-            count=len(points)
+            collection=collection.name,
+            count=len(documents)
         )
 
     def retrieve_tools(
@@ -392,20 +379,19 @@ class AgentToolRetriever:
         Returns:
             List of tool names
         """
-        collection_name = self.collection_names[agent_type]
+        collection = self.collections[agent_type]
 
-        # Encode query
-        query_vector = self.encoder.encode(user_query).tolist()
-
-        # Search in agent's collection
-        search_results = self.client.search(
-            collection_name=collection_name,
-            query_vector=query_vector,
-            limit=k
+        # Query ChromaDB
+        results = collection.query(
+            query_texts=[user_query],
+            n_results=min(k, collection.count())
         )
 
-        # Extract tool names
-        tool_names = [hit.payload["tool_name"] for hit in search_results]
+        # Extract tool names from metadata
+        tool_names = []
+        if results and results['metadatas'] and len(results['metadatas']) > 0:
+            for metadata in results['metadatas'][0]:
+                tool_names.append(metadata["tool_name"])
 
         logger.info(
             "tools_retrieved",
