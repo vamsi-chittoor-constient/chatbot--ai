@@ -3258,176 +3258,135 @@ def create_initiate_payment_tool(session_id: str):
     @tool("initiate_payment")
     async def initiate_payment(order_id: str = "") -> str:
         """
-        Initiate payment for an order.
+        Initiate Razorpay payment for an order.
 
-        Use this when customer is ready to pay. This creates a payment order
-        and returns a payment form for card details entry.
+        Use this when customer chooses card payment. This creates a secure
+        Razorpay payment link that the customer can use to complete payment.
 
         Args:
             order_id: Order ID to pay for (e.g., "ORD-ABC12345"). Leave empty for most recent.
 
         Returns:
-            Payment initiation status with instructions.
+            Payment link or error message.
         """
-        from app.core.redis import get_redis_client
-        from app.core.db_pool import AsyncDBConnection
+        from app.core.redis import get_sync_redis_client
+        from app.core.agui_events import emit_payment_link
+        from app.tools.external_apis.razorpay_tools import razorpay_payment_tool
         import json
-        import uuid as uuid_module
+        import os
 
         try:
-            redis_client = get_redis_client()
-            order_display_id = order_id.strip().upper() if order_id else None
+            # Check if Razorpay is configured
+            razorpay_key_id = os.getenv("RAZORPAY_KEY_ID", "")
+            if not razorpay_key_id or razorpay_key_id.startswith("your_") or razorpay_key_id == "rzp_test_XXXXXXXXXXXXX":
+                return (
+                    "Payment gateway is not configured. Please contact restaurant support.\n\n"
+                    "For admins: Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env file.\n"
+                    "Get test keys from: https://dashboard.razorpay.com/app/keys (Test Mode ON)"
+                )
 
-            # If no order_id provided, get most recent unpaid order (async Redis)
-            if not order_display_id:
-                history_key = f"order_history:{session_id}"
-                recent_orders = await redis_client.lrange(history_key, 0, 4)
-                if not recent_orders:
-                    return "No recent orders found. Please place an order first."
+            redis_client = get_sync_redis_client()
 
-                # Find first unpaid order
-                for order_key in recent_orders:
-                    order_key_str = order_key.decode() if isinstance(order_key, bytes) else order_key
-                    order_data_key = f"order:{session_id}:{order_key_str}"
-                    order_data = await redis_client.get(order_data_key)
-                    if order_data:
-                        order = json.loads(order_data)
-                        if order.get("status") == "confirmed" and order.get("payment_status") != "paid":
-                            order_display_id = order_key_str
-                            break
+            # Get pending order from Redis (created during checkout)
+            pending_order_key = f"pending_order:{session_id}"
+            pending_order_data = redis_client.get(pending_order_key)
 
-                if not order_display_id:
-                    return "No unpaid orders found. All your orders have been paid."
+            if not pending_order_data:
+                return "No pending order found. Please complete checkout first."
 
-            # Get order details from PostgreSQL (async with asyncpg)
-            async with AsyncDBConnection() as conn:
-                # Get order
-                order_row = await conn.fetchrow("""
-                    SELECT o.order_id, o.order_display_id, o.total_amount,
-                           o.payment_status, o.payment_order_id
-                    FROM orders o
-                    WHERE o.order_display_id = $1
-                """, order_display_id)
+            pending_order = json.loads(pending_order_data)
+            order_display_id = pending_order.get("order_id")
+
+            # Get customer info from session (for Razorpay customer details)
+            # Default to guest customer if no customer info
+            customer_name = "Guest Customer"
+            customer_email = f"guest_{session_id[:8]}@restaurant.com"
+            customer_phone = "9999999999"  # Razorpay requires phone
+
+            # Try to get actual customer info if available
+            try:
+                customer_key = f"session:{session_id}:customer"
+                customer_data = redis_client.get(customer_key)
+                if customer_data:
+                    customer = json.loads(customer_data)
+                    customer_name = customer.get("name", customer_name)
+                    customer_email = customer.get("email", customer_email)
+                    customer_phone = customer.get("phone", customer_phone)
+            except:
+                pass  # Use defaults
+
+            # Find order in database to get order ID
+            from app.core.database import get_db_session
+            from sqlalchemy import select, text
+            from app.shared.models import Order
+
+            async with get_db_session() as db_session:
+                # Find order by order_number (which matches our order_display_id from Redis)
+                # Use text query since we need to search by order_number string
+                result = await db_session.execute(
+                    text("SELECT id, order_number, total_amount FROM orders WHERE order_number = :order_num"),
+                    {"order_num": order_display_id}
+                )
+                order_row = result.fetchone()
 
                 if not order_row:
-                    return f"Order {order_display_id} not found."
+                    logger.error(f"Order not found in database: {order_display_id}")
+                    return f"Order {order_display_id} not found. Please contact support."
 
-                if order_row.get('payment_status') == 'paid':
-                    return f"Order {order_display_id} has already been paid."
+                db_order_id = str(order_row[0])
+                total_amount = float(order_row[2])
 
-                order_uuid = order_row['order_id']
-                amount = float(order_row['total_amount'] or 0)
+                # Create Razorpay payment link using razorpay_payment_tool
+                payment_result = await razorpay_payment_tool._execute_impl(
+                    operation="create_order",
+                    order_id=db_order_id,
+                    user_id="guest",  # For guest checkout
+                    payment_source="chat",
+                    session_id=session_id,
+                    notes={
+                        "order_display_id": order_display_id,
+                        "session_id": session_id,
+                        "customer_name": customer_name
+                    }
+                )
 
-                # Check if payment order already exists
-                if order_row.get('payment_order_id'):
-                    existing = await conn.fetchrow("""
-                        SELECT payment_order_id, pst.payment_status_code as status
-                        FROM payment_order po
-                        LEFT JOIN payment_status_type pst ON po.payment_status_type_id = pst.payment_status_type_id
-                        WHERE payment_order_id = $1
-                    """, order_row['payment_order_id'])
-                    if existing and existing['status'] not in ('failed', 'cancelled'):
-                        # Store payment info in Redis for form handling
-                        payment_info = {
-                            "payment_order_id": str(existing['payment_order_id']),
-                            "order_id": str(order_uuid),
-                            "order_display_id": order_display_id,
-                            "amount": amount,
-                            "status": "awaiting_card_details"
-                        }
-                        await redis_client.setex(
-                            f"payment_pending:{session_id}",
-                            1800,  # 30 min TTL
-                            json.dumps(payment_info)
-                        )
-                        return (
-                            f"Payment already initiated for order {order_display_id}.\n"
-                            f"Amount: Rs.{amount:.0f}\n\n"
-                            "Please enter your card details to complete the payment:\n"
-                            "- Card Number (16 digits)\n"
-                            "- Expiry (MM/YY)\n"
-                            "- CVV (3-4 digits)\n"
-                            "- Cardholder Name\n\n"
-                            "(For testing, use any valid format - payment will be simulated)"
-                        )
+                if payment_result.status.value == "success":
+                    payment_link = payment_result.data.get("payment_link")
+                    expires_at = payment_result.data.get("expires_at")
 
-                # Get mock gateway ID
-                gateway_row = await conn.fetchrow("""
-                    SELECT payment_gateway_id FROM payment_gateway
-                    WHERE gateway_code = 'mock_gateway' LIMIT 1
-                """)
-                gateway_id = gateway_row['payment_gateway_id'] if gateway_row else None
+                    # Emit payment link to frontend
+                    try:
+                        emit_payment_link(session_id, payment_link, total_amount, expires_at)
+                    except Exception as e:
+                        logger.warning(f"Failed to emit payment link event: {e}")
 
-                # Get pending status ID
-                status_row = await conn.fetchrow("""
-                    SELECT payment_status_type_id FROM payment_status_type
-                    WHERE payment_status_code = 'pending' LIMIT 1
-                """)
-                pending_status_id = status_row['payment_status_type_id'] if status_row else None
+                    # Update pending order in Redis with payment info
+                    pending_order["payment_link"] = payment_link
+                    pending_order["payment_initiated"] = True
+                    redis_client.setex(pending_order_key, 3600, json.dumps(pending_order))
 
-                # Create payment order
-                payment_order_id = str(uuid_module.uuid4())
-                gateway_order_id = f"pay_{uuid_module.uuid4().hex[:12]}"
-
-                await conn.execute("""
-                    INSERT INTO payment_order (
-                        payment_order_id, order_id, payment_gateway_id,
-                        gateway_order_id, amount, payment_status_type_id,
-                        expires_at
-                    ) VALUES (
-                        $1::uuid, $2, $3, $4, $5, $6,
-                        NOW() + INTERVAL '30 minutes'
+                    logger.info(
+                        "razorpay_payment_initiated",
+                        session_id=session_id,
+                        order_id=order_display_id,
+                        payment_link=payment_link[:50]
                     )
-                """, payment_order_id, order_uuid, gateway_id,
-                    gateway_order_id, amount, pending_status_id)
 
-                # Update order with payment_order_id
-                await conn.execute("""
-                    UPDATE orders SET
-                        payment_order_id = $1::uuid,
-                        payment_status = 'pending',
-                        updated_at = NOW()
-                    WHERE order_id = $2
-                """, payment_order_id, order_uuid)
-
-            # Store payment info in Redis for form handling (async)
-            payment_info = {
-                "payment_order_id": payment_order_id,
-                "gateway_order_id": gateway_order_id,
-                "order_id": str(order_uuid),
-                "order_display_id": order_display_id,
-                "amount": amount,
-                "status": "awaiting_card_details"
-            }
-            await redis_client.setex(
-                f"payment_pending:{session_id}",
-                1800,  # 30 min TTL
-                json.dumps(payment_info)
-            )
-
-            logger.info(
-                "payment_initiated",
-                session_id=session_id,
-                order_display_id=order_display_id,
-                payment_order_id=payment_order_id,
-                amount=amount
-            )
-
-            return (
-                f"Payment initiated for order {order_display_id}!\n"
-                f"Amount: Rs.{amount:.0f}\n\n"
-                "Please enter your card details to proceed:\n"
-                "- Card Number (16 digits)\n"
-                "- Expiry (MM/YY)\n"
-                "- CVV (3-4 digits)\n"
-                "- Cardholder Name\n\n"
-                "You can type them in this format: '4111111111111111 12/25 123 John Doe'\n"
-                "(For testing, use any valid format - payment will be simulated)"
-            )
+                    return (
+                        f"Payment link generated for order {order_display_id}!\n"
+                        f"Amount: Rs.{total_amount:.0f}\n\n"
+                        f"Click here to pay securely: {payment_link}\n\n"
+                        f"Link valid for 15 minutes.\n"
+                        f"After payment, return here for order confirmation."
+                    )
+                else:
+                    error_msg = payment_result.data.get("error", "Unknown error")
+                    logger.error(f"Razorpay payment creation failed: {error_msg}")
+                    return f"Payment initiation failed: {error_msg}"
 
         except Exception as e:
-            logger.error("initiate_payment_error", error=str(e), session_id=session_id)
-            return f"Payment initiation failed: {str(e)}"
+            logger.error("initiate_payment_error", error=str(e), session_id=session_id, exc_info=True)
+            return f"Payment initiation failed: {str(e)}. Please try again or contact support."
 
     return initiate_payment
 

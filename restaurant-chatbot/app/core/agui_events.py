@@ -68,6 +68,7 @@ class EventType(str, Enum):
     ORDER_DATA = "ORDER_DATA"
     MENU_DATA = "MENU_DATA"
     QUICK_REPLIES = "QUICK_REPLIES"
+    PAYMENT_LINK = "PAYMENT_LINK"
 
 
 @dataclass
@@ -218,6 +219,22 @@ class QuickRepliesEvent(AGUIEvent):
     """
     type: EventType = EventType.QUICK_REPLIES
     replies: List[Dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class PaymentLinkEvent(AGUIEvent):
+    """
+    Emitted with Razorpay payment link for online payment.
+
+    Contains:
+    - payment_link: Razorpay payment link URL
+    - amount: Payment amount in rupees
+    - expires_at: Payment link expiry timestamp
+    """
+    type: EventType = EventType.PAYMENT_LINK
+    payment_link: str = ""
+    amount: float = 0.0
+    expires_at: str = ""
 
 
 @dataclass
@@ -1395,6 +1412,44 @@ def emit_quick_replies(session_id: str, replies: List[Dict[str, str]]):
         )
     except Exception as e:
         logger.debug("quick_replies_emit_failed", error=str(e))
+
+
+def emit_payment_link(session_id: str, payment_link: str, amount: float, expires_at: str = ""):
+    """
+    Emit Razorpay payment link for online payment.
+
+    This provides a secure payment link from Razorpay that supports
+    multiple payment methods (cards, UPI, net banking, wallets, etc.)
+
+    Thread-safe: uses _put_event_threadsafe() for cross-thread queue operations.
+
+    Args:
+        session_id: The session ID
+        payment_link: Razorpay payment link URL
+        amount: Payment amount in rupees
+        expires_at: Payment link expiry timestamp (ISO format)
+
+    Example:
+        emit_payment_link(session_id, "https://rzp.io/l/abc123", 450.0, "2025-01-01T12:00:00Z")
+    """
+    try:
+        event = PaymentLinkEvent(
+            payment_link=payment_link,
+            amount=amount,
+            expires_at=expires_at
+        )
+
+        # Use thread-safe put for cross-thread operation
+        _put_event_threadsafe(session_id, event)
+
+        logger.debug(
+            "payment_link_emitted",
+            session_id=session_id,
+            amount=amount,
+            link_length=len(payment_link)
+        )
+    except Exception as e:
+        logger.error("payment_link_emit_failed", error=str(e), session_id=session_id)
 
 
 def _get_activity_type_for_tool(tool_name: str) -> str:
