@@ -474,8 +474,9 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         order_display_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
         # Store order as pending_payment in Redis (temporary)
-        from app.core.redis import redis_client
+        from app.core.redis import get_sync_redis_client
         import json
+        redis_client = get_sync_redis_client()
         pending_order_key = f"pending_order:{session_id}"
         pending_order = {
             "order_id": order_display_id,
