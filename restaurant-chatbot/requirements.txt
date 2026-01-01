@@ -44,3 +44,7 @@ motor
 
 # Utilities
 python-multipart
+pybreaker
+
+# Payment Gateway
+razorpay

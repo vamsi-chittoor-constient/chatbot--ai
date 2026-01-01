@@ -127,24 +127,76 @@ async def verify_payment(
                 if razorpay_payment_id:
                     payment_order.razorpay_payment_id = razorpay_payment_id
 
-                # Get order with eager loading for notifications
-                order_query = select(Order).options(
-                    selectinload(Order.order_items).selectinload(OrderItem.menu_item)
-                ).where(
-                    Order.id == payment_order.order_id
-                )
-                order_result = await session.execute(order_query)
-                order = order_result.scalar_one_or_none()
+                # ================================================================
+                # CREATE DATABASE ORDER AFTER PAYMENT SUCCESS
+                # ================================================================
+                # Retrieve pending order from Redis
+                from app.core.redis import get_sync_redis_client
+                import json
 
-                if order:
-                    order.payment_status = "paid"
-                    order.status = "confirmed"
+                redis_client = get_sync_redis_client()
+                # Try to get pending order by order_id from payment_order notes
+                notes = payment_order.notes or {}
+                pending_session_id = notes.get("session_id")
 
-                    logger.info(
-                        "payment_verified_order_updated",
-                        order_id=order.id,
+                order = None
+                if pending_session_id:
+                    pending_order_key = f"pending_order:{pending_session_id}"
+                    pending_order_data = redis_client.get(pending_order_key)
+
+                    if pending_order_data:
+                        pending_order = json.loads(pending_order_data)
+
+                        # Create actual database order now that payment succeeded
+                        from app.features.food_ordering.models import OrderType, OrderSourceType, OrderStatusType
+                        from datetime import timedelta
+                        import uuid
+
+                        # Create order
+                        order = Order(
+                            order_id=uuid.uuid4(),
+                            order_number=pending_order["order_id"],  # Use the reference ID
+                            restaurant_id=uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),  # Default restaurant
+                            user_id=payment_order.user_id if payment_order.user_id else None,
+                            order_type_id=uuid.UUID("d1e2f3a4-b5c6-7890-abcd-123456789def"),  # Default order type
+                            order_source_type_id=uuid.UUID("11111111-2222-3333-4444-555555555555"),  # Chat source
+                            order_status_type_id=uuid.UUID("a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5"),  # Confirmed status
+                            total_amount=pending_order["total"],
+                            payment_status="paid",
+                            status="confirmed",
+                            estimated_ready_time=datetime.now(timezone.utc) + timedelta(minutes=25),
+                            created_at=datetime.now(timezone.utc)
+                        )
+                        session.add(order)
+                        await session.flush()  # Get order.order_id
+
+                        # Create order items
+                        for item in pending_order.get("items", []):
+                            order_item = OrderItem(
+                                order_item_id=uuid.uuid4(),
+                                order_id=order.order_id,
+                                menu_item_id=uuid.UUID(item.get("menu_item_id")) if item.get("menu_item_id") else None,
+                                quantity=item.get("quantity", 1),
+                                unit_price=item.get("price", 0),
+                                total_price=item.get("price", 0) * item.get("quantity", 1)
+                            )
+                            session.add(order_item)
+
+                        # Delete pending order from Redis (order now confirmed)
+                        redis_client.delete(pending_order_key)
+
+                        logger.info(
+                            "order_created_after_payment",
+                            order_id=order.order_number,
+                            order_uuid=str(order.order_id),
+                            payment_order_id=payment_order.id,
+                            amount=payment_order.amount / 100
+                        )
+                else:
+                    logger.warning(
+                        "pending_order_not_found_in_redis",
                         payment_order_id=payment_order.id,
-                        amount=payment_order.amount / 100
+                        session_id=pending_session_id
                     )
 
                 await session.commit()

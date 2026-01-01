@@ -30,7 +30,7 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    order_id: Mapped[str] = mapped_column(String(20), ForeignKey("orders.id"))
+    order_id: Mapped[str] = mapped_column(String(20), ForeignKey("orders.order_id"))
     razorpay_payment_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     razorpay_order_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
@@ -71,7 +71,7 @@ class PaymentOrder(Base):
     __tablename__ = "payment_orders"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    order_id: Mapped[str] = mapped_column(String(20), ForeignKey("orders.id"), nullable=False)
+    order_id: Mapped[str] = mapped_column(String(20), ForeignKey("orders.order_id"), nullable=False)
     user_id: Mapped[Optional[str]] = mapped_column(String(20), ForeignKey("users.id"), nullable=True)  # Nullable for safety (Tier 1 users should authenticate before payment, but nullable as fallback)
     razorpay_order_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)  # Amount in paise
@@ -122,7 +122,7 @@ class PaymentTransaction(Base):
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
     payment_order_id: Mapped[str] = mapped_column(String(20), ForeignKey("payment_orders.id"), nullable=False)
     user_id: Mapped[str] = mapped_column(String(20), ForeignKey("users.id"), nullable=False)
-    order_id: Mapped[str] = mapped_column(String(20), ForeignKey("orders.id"), nullable=False)
+    order_id: Mapped[str] = mapped_column(String(20), ForeignKey("orders.order_id"), nullable=False)
     razorpay_payment_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     razorpay_order_id: Mapped[str] = mapped_column(String(255), nullable=False)
     razorpay_signature: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)

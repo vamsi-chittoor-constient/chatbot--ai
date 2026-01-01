@@ -26,10 +26,8 @@ from sqlalchemy.orm import selectinload
 
 from app.tools.base.tool_base import ToolBase, ToolResult, ToolStatus
 from app.core.database import get_db_session
-from app.shared.models import (
-    PaymentOrder, PaymentRetryAttempt,
-    Order
-)
+from app.features.food_ordering.models import PaymentOrder, Order
+from app.shared.models.payment import PaymentRetryAttempt
 from app.core.logging_config import get_logger
 from app.utils.validation_decorators import require_tables
 from app.services.circuit_breaker_service import razorpay_breaker

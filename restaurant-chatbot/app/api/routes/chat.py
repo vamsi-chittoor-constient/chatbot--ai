@@ -1300,6 +1300,32 @@ async def process_message_with_ai(
             logger.warning(f"Failed to load conversation history: {str(e)}")
             conversation_history = []
 
+        # =====================================================================
+        # PAYMENT WORKFLOW INTERCEPTOR - Handle payment messages deterministically
+        # =====================================================================
+        from app.services.payment_handler import handle_payment_message
+
+        payment_response = await handle_payment_message(session_id, message)
+
+        if payment_response:
+            # Payment handler processed the message - return response directly
+            logger.info(
+                "payment_handler_processed_message",
+                session_id=session_id,
+                response_length=len(payment_response)
+            )
+
+            cycle_metadata = {
+                "type": "payment_workflow",
+                "orchestrator": "payment_handler",
+                "deterministic": True
+            }
+
+            return payment_response, cycle_metadata
+
+        # =====================================================================
+        # REGULAR CREW PROCESSING - Payment not active, use normal flow
+        # =====================================================================
         try:
             # Process message with AG-UI streaming
             # Pass user_id from authenticated session (available after OTP verification at session start)

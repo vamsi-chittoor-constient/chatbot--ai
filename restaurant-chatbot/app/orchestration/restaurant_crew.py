@@ -132,6 +132,11 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_get_order_receipt_tool,
         create_filter_by_cuisine_tool,
         # create_show_popular_items_tool,  # DISABLED - Popular items feature removed
+        # Payment tools
+        create_initiate_payment_tool,
+        create_verify_payment_otp_tool,
+        create_check_payment_status_tool,
+        create_cancel_payment_tool,
     )
 
     # Import complaint tools (session-aware sync wrappers)
@@ -162,6 +167,11 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_complaint_tool(session_id),
         create_get_complaints_tool(session_id),
         create_complaint_status_tool(session_id),
+        # Payment tools
+        create_initiate_payment_tool(session_id),
+        create_verify_payment_otp_tool(session_id),
+        create_check_payment_status_tool(session_id),
+        create_cancel_payment_tool(session_id),
     ]
 
     food_ordering_agent = Agent(

@@ -18,7 +18,7 @@ logger = structlog.get_logger(__name__)
 AgentType = Literal["food_ordering", "booking"]
 
 # =============================================================================
-# FOOD ORDERING AGENT TOOLS (25 tools)
+# FOOD ORDERING AGENT TOOLS (29 tools)
 # =============================================================================
 
 FOOD_ORDERING_TOOLS = {
@@ -171,7 +171,7 @@ FOOD_ORDERING_TOOLS = {
     },
 
     # =========================================================================
-    # Payment Processing (5 tools)
+    # Payment Processing (9 tools)
     # =========================================================================
     "apply_coupon": {
         "name": "apply_coupon",
@@ -212,6 +212,38 @@ FOOD_ORDERING_TOOLS = {
         "examples": [],
         "category": "payment",
         "priority": 4
+    },
+    "initiate_payment": {
+        "name": "initiate_payment",
+        "description": "Initiate online payment process and generate Razorpay payment link for card/UPI/online payment",
+        "usage": "When customer wants to pay online, pay by card, complete payment, or proceed with online payment after checkout",
+        "examples": ["pay online", "pay by card", "I want to pay now", "online payment", "card payment", "pay with UPI", "generate payment link"],
+        "category": "payment",
+        "priority": 10
+    },
+    "verify_payment_otp": {
+        "name": "verify_payment_otp",
+        "description": "Verify OTP for payment authentication",
+        "usage": "When customer needs to verify payment OTP",
+        "examples": ["verify OTP", "payment OTP", "enter OTP"],
+        "category": "payment",
+        "priority": 6
+    },
+    "check_payment_status": {
+        "name": "check_payment_status",
+        "description": "Check the status of a payment transaction",
+        "usage": "When customer wants to check if payment was successful or check payment status",
+        "examples": ["payment status", "check payment", "was payment successful", "did payment go through"],
+        "category": "payment",
+        "priority": 8
+    },
+    "cancel_payment": {
+        "name": "cancel_payment",
+        "description": "Cancel an initiated payment transaction",
+        "usage": "When customer wants to cancel payment or stop payment process",
+        "examples": ["cancel payment", "stop payment", "don't want to pay", "abort payment"],
+        "category": "payment",
+        "priority": 5
     },
 
     # =========================================================================
