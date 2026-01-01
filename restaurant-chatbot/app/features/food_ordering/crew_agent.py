@@ -2760,16 +2760,25 @@ def create_get_order_receipt_tool(session_id: str):
     @tool("get_order_receipt")
     def get_order_receipt(order_id: str = "") -> str:
         """
-        Generate a detailed receipt for an order.
+        Generate detailed receipt/invoice for an order.
 
-        Use this when customer asks for receipt, invoice, or bill.
-        Returns a formatted receipt that can be downloaded.
+        Creates formatted receipt with itemized list, prices, taxes, discounts,
+        and payment details. Can be downloaded or printed.
 
         Args:
-            order_id: Order ID to get receipt for. Leave empty for most recent.
+            order_id: Order ID for receipt (e.g., "ORD-123", leave empty for most recent)
 
         Returns:
-            Formatted receipt with all order details.
+            Formatted receipt with complete order breakdown and totals.
+
+        Examples:
+            - get_order_receipt("ORD-123") → Receipt for specific order
+            - get_order_receipt() → Receipt for most recent order
+
+        Common triggers:
+            - Customer: "can I get a receipt?" → get_order_receipt()
+            - Customer: "show me the bill" → get_order_receipt()
+            - Customer: "invoice please" → get_order_receipt()
         """
         return _get_order_receipt_impl(order_id, session_id)
 
