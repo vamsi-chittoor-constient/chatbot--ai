@@ -66,6 +66,16 @@ class WebSocketManager:
 
     async def connect(self, websocket: WebSocket, session_id: str, tester_id: str = None, restaurant: Dict[str, Any] = None):
         """Accept WebSocket connection and track it"""
+        # CRITICAL: Disconnect existing connection for this session BEFORE accepting new one
+        # This prevents duplicate welcome messages when server restarts and clients reconnect
+        if session_id in self.active_connections:
+            old_websocket = self.active_connections[session_id]
+            try:
+                await old_websocket.close(code=1000, reason="New connection for same session")
+                logger.info(f"Closed old WebSocket connection for session: {session_id}")
+            except Exception as e:
+                logger.debug(f"Failed to close old WebSocket (already closed): {str(e)}")
+
         try:
             await websocket.accept()
             logger.info(f"WebSocket accepted for session: {session_id}")
