@@ -122,7 +122,7 @@ services:
       - DEBUG=false
       - LOG_LEVEL=INFO
       # Enable authentication (phone + OTP flow)
-      - AUTH_REQUIRED=true
+      - AUTH_REQUIRED=false
       # Enable PetPooja kitchen sync (sandbox mode)
       - ENABLE_PETPOOJA_SYNC=true
     depends_on:

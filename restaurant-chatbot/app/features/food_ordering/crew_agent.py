@@ -343,7 +343,7 @@ def _search_menu_impl(query: str, session_id: str) -> str:
 
 def _add_to_cart_impl(item_name: str, quantity: int, session_id: str) -> str:
     """Sync implementation of add_to_cart for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_update
+    from app.core.agui_events import emit_tool_activity, emit_cart_update, emit_quick_replies
     from app.core.redis import get_cart_sync, save_cart_sync
     from app.core.preloader import get_menu_preloader
 
@@ -383,6 +383,14 @@ def _add_to_cart_impl(item_name: str, quantity: int, session_id: str) -> str:
     # Emit cart update
     emit_cart_update(session_id, cart_items, total)
 
+    # DETERMINISTIC CHECKOUT: Always show checkout quick reply after cart update
+    emit_quick_replies(session_id, [
+        {"label": "Checkout", "action": "checkout", "icon": "cart", "variant": "primary"},
+        {"label": "View Cart", "action": "show my cart", "icon": "view", "variant": "secondary"},
+        {"label": "Add More", "action": "show menu", "icon": "menu", "variant": "secondary"},
+    ])
+
+    # SECURITY: Return natural language response only (no JSON)
     return f"Added {quantity}x {item.get('name')} to cart. Total: Rs.{total}. Anything else?"
 
 
@@ -409,7 +417,7 @@ def _view_cart_impl(session_id: str) -> str:
 
 def _remove_from_cart_impl(item_name: str, session_id: str) -> str:
     """Sync implementation of remove_from_cart for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_update
+    from app.core.agui_events import emit_tool_activity, emit_cart_update, emit_quick_replies
     from app.core.redis import get_cart_sync, save_cart_sync
 
     emit_tool_activity(session_id, "remove_from_cart")
@@ -430,6 +438,14 @@ def _remove_from_cart_impl(item_name: str, session_id: str) -> str:
     cart_data = {"items": new_items, "total": total}
     save_cart_sync(session_id, cart_data)
     emit_cart_update(session_id, new_items, total)
+
+    # DETERMINISTIC CHECKOUT: Show checkout quick reply if cart still has items
+    if new_items:
+        emit_quick_replies(session_id, [
+            {"label": "Checkout", "action": "checkout", "icon": "cart", "variant": "primary"},
+            {"label": "View Cart", "action": "show my cart", "icon": "view", "variant": "secondary"},
+            {"label": "Add More", "action": "show menu", "icon": "menu", "variant": "secondary"},
+        ])
 
     return f"Removed {item_name} from cart. Total: Rs.{total}."
 

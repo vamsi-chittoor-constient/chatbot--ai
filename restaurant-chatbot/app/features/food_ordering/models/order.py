@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from app.features.food_ordering.models.order_item import OrderItem
     from app.features.food_ordering.models.order_total import OrderTotal
     from app.features.food_ordering.models.order_status_history import OrderStatusHistory
+    from app.shared.models.payment import Payment
+    from app.features.food_ordering.models.payment_order import PaymentOrder
 
 
 class Order(Base):
@@ -103,6 +105,18 @@ class Order(Base):
         "OrderStatusHistory",
         back_populates="order",
         cascade="all, delete-orphan"
+    )
+    # Legacy payment relationship (for backward compatibility with app.shared.models.payment)
+    payments: Mapped[List["Payment"]] = relationship(
+        "Payment",
+        back_populates="order",
+        foreign_keys="Payment.order_id"
+    )
+    # New payment order relationship
+    payment_order: Mapped[Optional["PaymentOrder"]] = relationship(
+        "PaymentOrder",
+        back_populates="order",
+        uselist=False
     )
 
     __table_args__ = (

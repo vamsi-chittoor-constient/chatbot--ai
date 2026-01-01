@@ -35,12 +35,14 @@ async def handle_payment_message(
     # Get current payment state
     payment_state = get_payment_state(session_id)
     current_step = payment_state.get("step")
+    order_id = payment_state.get("order_id")
 
     # Only intercept if we're in an active payment workflow
+    # Check: 1) step is payment-related AND 2) there's an actual order_id
     if current_step not in [
         PaymentStep.SELECT_METHOD.value,
         PaymentStep.AWAITING_PAYMENT.value
-    ]:
+    ] or not order_id:
         return None  # Not in payment flow, let crew handle it
 
     message_lower = message.lower().strip()

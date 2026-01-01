@@ -87,6 +87,143 @@ def clean_crew_response(raw_response: str) -> str:
     return "I'm processing your request. Could you please try again?"
 
 
+def _build_conversation_context(
+    conversation_history: List[str],
+    welcome_msg: Optional[str] = None,
+    context_limit_tokens: int = 96000,  # 75% of 128k context window
+    estimated_overhead_tokens: int = 10000  # Estimated tokens for system prompts + tools
+) -> str:
+    """
+    Build conversation context with intelligent dynamic summarization.
+
+    Strategy:
+    - Include ALL conversation history by default (no artificial budget)
+    - Only summarize when total tokens approach context limit (75% of 128k = 96k tokens)
+    - This scenario is rare - most conversations won't need summarization
+
+    Args:
+        conversation_history: List of conversation messages
+        welcome_msg: Optional welcome message to include
+        context_limit_tokens: Start summarizing when approaching this limit (default 96k = 75% of 128k)
+        estimated_overhead_tokens: Estimated tokens for system prompts, tools, etc. (default 10k)
+
+    Returns:
+        Formatted conversation context string
+    """
+    context_lines = []
+
+    # Add welcome message if present
+    welcome_tokens = 0
+    if welcome_msg:
+        welcome_text = f"Assistant: {welcome_msg}"
+        context_lines.append(welcome_text)
+        welcome_tokens = _estimate_tokens(welcome_text)
+
+    if not conversation_history:
+        return "\n".join(context_lines) if context_lines else "No previous context"
+
+    # Calculate total tokens for all conversation history
+    total_history_tokens = sum(_estimate_tokens(msg) for msg in conversation_history)
+    total_tokens = welcome_tokens + total_history_tokens + estimated_overhead_tokens
+
+    # If we're under 75% of context limit, include ALL history (no summarization needed)
+    if total_tokens < context_limit_tokens:
+        context_lines.extend(conversation_history)
+        return "\n".join(context_lines) if context_lines else "No previous context"
+
+    # We're approaching limit - use intelligent summarization
+    # Keep recent messages within budget, summarize older ones
+    available_for_history = context_limit_tokens - welcome_tokens - estimated_overhead_tokens
+
+    # Work backwards from most recent messages
+    recent_messages = []
+    recent_tokens = 0
+
+    for message in reversed(conversation_history):
+        message_tokens = _estimate_tokens(message)
+        if recent_tokens + message_tokens > available_for_history:
+            # Hit the limit - stop adding recent messages
+            break
+        recent_messages.insert(0, message)  # Insert at beginning to maintain order
+        recent_tokens += message_tokens
+
+    # Summarize older messages that didn't fit
+    older_message_count = len(conversation_history) - len(recent_messages)
+    if older_message_count > 0:
+        older_messages = conversation_history[:older_message_count]
+        summary = _summarize_old_conversation(older_messages)
+        if summary:
+            context_lines.append(f"[Earlier conversation summary ({older_message_count} messages): {summary}]")
+
+    # Add recent messages
+    context_lines.extend(recent_messages)
+
+    return "\n".join(context_lines) if context_lines else "No previous context"
+
+
+def _estimate_tokens(text: str) -> int:
+    """
+    Estimate token count for text.
+
+    Simple heuristic: ~4 characters = 1 token for English text.
+    This is approximate but good enough for budgeting.
+
+    Args:
+        text: Text to estimate tokens for
+
+    Returns:
+        Estimated token count
+    """
+    return max(1, len(text) // 4)
+
+
+def _summarize_old_conversation(messages: List[str]) -> str:
+    """
+    Summarize older conversation messages to save context space.
+
+    Extracts key information:
+    - Items ordered/in cart
+    - Preferences mentioned
+    - Actions taken (bookings, complaints)
+
+    Args:
+        messages: List of older conversation messages
+
+    Returns:
+        Summary string
+    """
+    if not messages:
+        return ""
+
+    # Simple extraction-based summary (no LLM call for speed)
+    summary_points = []
+
+    # Join all messages
+    full_text = " ".join(messages).lower()
+
+    # Extract key patterns
+    if "added to cart" in full_text or "added" in full_text:
+        summary_points.append("customer added items to cart")
+
+    if "booking" in full_text or "reservation" in full_text or "table" in full_text:
+        summary_points.append("discussed table reservation")
+
+    if "complaint" in full_text or "issue" in full_text or "problem" in full_text:
+        summary_points.append("customer raised concerns")
+
+    if "checkout" in full_text or "payment" in full_text or "order" in full_text:
+        summary_points.append("discussed checkout/payment")
+
+    if "menu" in full_text or "browse" in full_text:
+        summary_points.append("browsed menu")
+
+    # Return summary or default
+    if summary_points:
+        return ", ".join(summary_points)
+    else:
+        return "general conversation about restaurant services"
+
+
 def create_restaurant_crew_fixed(session_id: str) -> Crew:
     """
     Create unified restaurant crew with multiple agents.
@@ -109,7 +246,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         model="gpt-4o",  # Using gpt-4o for reliable tool calling
         temperature=0.1,
         api_key=api_key,
-        max_tokens=512,  # Optimized for RAG (4-6 tools instead of 55)
+        max_tokens=4096,  # Increased from 512 to prevent truncation causing premature JSON responses
     )
 
     # ========================================================================
@@ -196,6 +333,13 @@ When customer says EXACTLY these phrases, you MUST call these tools:
 - NEVER describe cart contents without calling view_cart()
 - ALWAYS call the required tool BEFORE responding to the customer
 - When customer mentions an item WITHOUT quantity: call search_menu(query=item) to verify it exists & save context BEFORE asking "how many?"
+
+🚨 ABSOLUTELY FORBIDDEN - SECURITY CRITICAL 🚨
+- NEVER return raw JSON objects like {"name": "item", "quantity": 2}
+- NEVER echo tool parameters in your response
+- NEVER return technical data structures
+- ONLY return natural conversational language to customers
+- If you accidentally start typing JSON, STOP immediately and call the tool instead
 
 You excel at understanding what customers mean, not just what they say:
 - You pay attention to the flow of conversation - what YOU just said shapes what their response means
@@ -585,15 +729,13 @@ async def process_with_restaurant_crew(
         tool_names=[t.name for t in relevant_tools]
     )
 
-    # Build context from conversation history (8 turns for better context)
-    context_lines = []
-    if welcome_msg:
-        context_lines.append(f"Assistant: {welcome_msg}")
-    if conversation_history:
-        # Use last 8 messages for comprehensive context understanding
-        context_lines.extend(conversation_history[-8:])
-
-    context = "\n".join(context_lines) if context_lines else "No previous context"
+    # Build context from conversation history with intelligent dynamic summarization
+    # Includes ALL history by default, only summarizes when approaching 75% of 128k context (rare scenario)
+    context = _build_conversation_context(
+        conversation_history=conversation_history,
+        welcome_msg=welcome_msg
+        # Uses defaults: 96k token limit (75% of 128k), 10k estimated overhead
+    )
 
     # Prepare inputs - include entity graph context for pronoun/positional resolution
     inputs = {
@@ -806,13 +948,12 @@ async def process_with_agui_streaming(
             tool_names=[t.name for t in relevant_tools]
         )
 
-        # Build context
-        context_lines = []
-        if welcome_msg:
-            context_lines.append(f"Assistant: {welcome_msg}")
-        if conversation_history:
-            context_lines.extend(conversation_history[-8:])
-        context = "\n".join(context_lines) if context_lines else "No previous context"
+        # Build context with intelligent dynamic summarization
+        context = _build_conversation_context(
+            conversation_history=conversation_history,
+            welcome_msg=welcome_msg
+            # Uses defaults: 96k token limit (75% of 128k), 10k estimated overhead
+        )
 
         inputs = {
             "user_input": user_message,

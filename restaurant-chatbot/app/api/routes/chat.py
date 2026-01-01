@@ -1301,6 +1301,33 @@ async def process_message_with_ai(
             conversation_history = []
 
         # =====================================================================
+        # CHECKOUT WORKFLOW INTERCEPTOR - Handle checkout messages deterministically
+        # =====================================================================
+        from app.services.checkout_handler import handle_checkout_message
+        from app.core.response_sanitizer import sanitize_response
+
+        checkout_response = await handle_checkout_message(session_id, message)
+
+        if checkout_response:
+            # SECURITY: Sanitize response before sending to frontend
+            checkout_response = sanitize_response(checkout_response)
+
+            # Checkout handler processed the message - return response directly
+            logger.info(
+                "checkout_handler_processed_message",
+                session_id=session_id,
+                response_length=len(checkout_response)
+            )
+
+            cycle_metadata = {
+                "type": "checkout_workflow",
+                "orchestrator": "checkout_handler",
+                "deterministic": True
+            }
+
+            return checkout_response, cycle_metadata
+
+        # =====================================================================
         # PAYMENT WORKFLOW INTERCEPTOR - Handle payment messages deterministically
         # =====================================================================
         from app.services.payment_handler import handle_payment_message
@@ -1308,6 +1335,9 @@ async def process_message_with_ai(
         payment_response = await handle_payment_message(session_id, message)
 
         if payment_response:
+            # SECURITY: Sanitize response before sending to frontend
+            payment_response = sanitize_response(payment_response)
+
             # Payment handler processed the message - return response directly
             logger.info(
                 "payment_handler_processed_message",
@@ -1324,7 +1354,7 @@ async def process_message_with_ai(
             return payment_response, cycle_metadata
 
         # =====================================================================
-        # REGULAR CREW PROCESSING - Payment not active, use normal flow
+        # REGULAR CREW PROCESSING - Checkout/Payment not active, use normal flow
         # =====================================================================
         try:
             # Process message with AG-UI streaming
@@ -1357,6 +1387,9 @@ async def process_message_with_ai(
                 except Exception as e:
                     logger.warning(f"Error waiting for event stream: {str(e)}")
 
+        # SECURITY: Sanitize crew response before sending to frontend
+        ai_response = sanitize_response(ai_response)
+
         # Log cycle metadata for analytics
         logger.info(
             "Restaurant Crew completed",
@@ -1376,12 +1409,9 @@ async def process_message_with_ai(
             exc_info=True
         )
 
-        # Simple fallback without additional OpenAI calls
-        fallback_response = (
-            "I apologize, but I'm experiencing some technical difficulties right now. "
-            "Could you please try rephrasing your request? I'm here to help with menu questions, "
-            "reservations, orders, or any other restaurant needs."
-        )
+        # SECURITY: Convert technical error to user-friendly message
+        from app.core.response_sanitizer import sanitize_error
+        fallback_response = sanitize_error(e)
 
         return fallback_response, {
             "type": "fallback",
