@@ -127,9 +127,32 @@ class ResponseSanitizer:
         JSON in responses means the LLM returned prematurely instead of calling tools.
         This is a bug that should be blocked entirely.
         """
-        # Look for JSON-like structures with key-value pairs
-        json_pattern = r'\{["\']?\w+["\']?\s*:\s*["\']?[^}]+["\']?\}'
-        return bool(re.search(json_pattern, text))
+        # Remove markdown code fences if present
+        text_clean = re.sub(r'```(?:json)?\s*', '', text)
+        text_clean = text_clean.strip()
+
+        # Strategy 1: Try to parse as JSON
+        # If it's valid JSON starting with {, it's definitely JSON
+        if text_clean.startswith('{'):
+            try:
+                json.loads(text_clean)
+                # Successfully parsed as JSON - this is a leak!
+                return True
+            except (json.JSONDecodeError, ValueError):
+                pass  # Not valid JSON, continue checking
+
+        # Strategy 2: Look for JSON-like patterns (handles partial JSON or JSON in text)
+        # Match: { "key": "value" } or { key: value } with optional whitespace/newlines
+        json_patterns = [
+            r'\{\s*["\']?\w+["\']?\s*:\s*["\']?[^}]*["\']?\s*,?\s*["\']?\w+["\']?\s*:\s*',  # Multiple key-value pairs
+            r'\{\s*["\']?\w+["\']?\s*:\s*(?:["\'][^"\']*["\']|\d+)\s*\}',  # Single key-value pair
+        ]
+
+        for pattern in json_patterns:
+            if re.search(pattern, text_clean, re.DOTALL):
+                return True
+
+        return False
 
     @staticmethod
     def _extract_user_friendly_content(text: str) -> str:
