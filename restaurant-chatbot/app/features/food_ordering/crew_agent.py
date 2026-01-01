@@ -2059,18 +2059,28 @@ def create_remove_from_cart_tool(session_id: str):
     @tool("remove_from_cart")
     def remove_from_cart(item_name: str, quantity: int = 1) -> str:
         """
-        Remove item(s) from the customer's cart.
+        Remove specific item(s) from the customer's cart.
 
-        Use this when customer wants to remove something they added.
-        Specify quantity to remove that many (default: 1).
-        Use quantity=0 or "all" to remove all of that item.
+        Removes specified quantity of an item from cart. If quantity equals or exceeds
+        current quantity, removes the item completely. Cart total is recalculated.
 
         Args:
-            item_name: Name of the item to remove from cart.
-            quantity: How many to remove (default 1). Use 0 to remove all.
+            item_name: Name of item to remove (e.g., "burger", "Butter Chicken")
+            quantity: Number of items to remove (default: 1, use 0 to remove all)
 
         Returns:
-            Confirmation of what was removed and remaining cart total.
+            Confirmation of removed items and updated cart total.
+
+        Examples:
+            - remove_from_cart("burger", 1) → Removes 1 burger
+            - remove_from_cart("Butter Chicken", 2) → Removes 2 Butter Chicken
+            - remove_from_cart("coke", 0) → Removes all Cokes
+            - remove_from_cart("pizza") → Removes 1 pizza (default quantity)
+
+        Common triggers:
+            - Customer: "remove the burger" → remove_from_cart("burger", 1)
+            - Customer: "delete 2 cokes" → remove_from_cart("coke", 2)
+            - Customer: "take out all pizzas" → remove_from_cart("pizza", 0)
         """
         # Emit activity for frontend (sync)
         from app.core.agui_events import emit_tool_activity
@@ -2620,16 +2630,25 @@ def create_get_order_status_tool(session_id: str):
     @tool("get_order_status")
     def get_order_status(order_id: str = "") -> str:
         """
-        Get the current status of an order.
+        Get the current status and progress of an order.
 
-        Use this when customer asks "where is my order" or "what's the status".
-        Status can be: pending, confirmed, preparing, ready, completed, or cancelled.
+        Retrieves real-time order status including preparation stage, estimated time,
+        and any special notes. If no order_id provided, checks most recent order.
 
         Args:
-            order_id: Order ID to check (e.g., "ORD-ABC12345"). Leave empty for most recent.
+            order_id: Order ID to check (e.g., "ORD-ABC12345", leave empty for most recent)
 
         Returns:
-            Current order status with details.
+            Order status (pending/confirmed/preparing/ready/completed/cancelled) with details.
+
+        Examples:
+            - get_order_status("ORD-123") → Status of specific order
+            - get_order_status() → Status of customer's most recent order
+
+        Common triggers:
+            - Customer: "where is my order?" → get_order_status()
+            - Customer: "what's the status?" → get_order_status()
+            - Customer: "is my food ready?" → get_order_status()
         """
         return _get_order_status_impl(order_id, session_id)
 
@@ -2802,18 +2821,27 @@ def create_update_quantity_tool(session_id: str):
     @tool("update_quantity")
     def update_quantity(item_name: str, new_quantity: int) -> str:
         """
-        Update the quantity of an item already in the cart.
+        Update the quantity of an existing item in the cart.
 
-        WHEN TO USE: Customer says "change quantity to X", "make it X", "update to X", "change burger quantity to 3", "make it 5 burgers"
-
-        DO NOT use remove + add - use THIS tool instead for quantity changes!
+        Modifies the quantity of an item already in cart without removing and re-adding.
+        Automatically recalculates cart total.
 
         Args:
-            item_name: Name of the item to update
-            new_quantity: New quantity to set (must be >= 1)
+            item_name: Name of the item to update (e.g., "burger", "Butter Chicken")
+            new_quantity: New quantity to set (must be positive integer >= 1)
 
         Returns:
-            Confirmation of updated quantity and new cart total
+            Confirmation of updated quantity with item name and new cart total.
+
+        Examples:
+            - update_quantity("burger", 3) → Changes burger quantity to 3
+            - update_quantity("Butter Chicken", 2) → Changes Butter Chicken to 2
+            - update_quantity("coke", 5) → Changes Coke quantity to 5
+
+        Common triggers:
+            - Customer: "change quantity to 3" → update_quantity(item, 3)
+            - Customer: "make it 5 burgers" → update_quantity("burger", 5)
+            - Customer: "update to 2" → update_quantity(item, 2)
         """
         # Emit activity for frontend (sync)
         from app.core.agui_events import emit_tool_activity, emit_cart_data
