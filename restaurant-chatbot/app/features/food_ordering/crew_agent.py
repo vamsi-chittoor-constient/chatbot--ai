@@ -333,7 +333,7 @@ def _search_menu_impl(query: str, session_id: str) -> str:
             if structured_items:
                 emit_menu_data(session_id, structured_items, current_meal_period=current_meal)
 
-            return f"[MENU CARD DISPLAYED - {len(structured_items)} items shown. Tell customer to browse the menu card!]"
+            return f"Menu card displayed with {len(structured_items)} items available."
         except Exception as e:
             logger.debug("menu_data_emit_failed", error=str(e))
 
@@ -1557,10 +1557,7 @@ def create_search_menu_tool(session_id: str):
                         if structured_similar:
                             emit_menu_data(session_id, structured_similar, current_meal_period=current_meal)
                             logger.info(f"similar_items_menu_emitted", query=query, count=len(structured_similar))
-                            return (f"[SIMILAR ITEMS MENU CARD DISPLAYED] We don't have '{query}' available, "
-                                   f"but I've shown {len(structured_similar)} similar items in the menu card. "
-                                   f"Please check if any of these interest you! "
-                                   f"(DO NOT show full menu - user is browsing similar items)")
+                            return f"Menu card showing {len(structured_similar)} similar items to '{query}'."
                         else:
                             # All similar items already in cart
                             return (f"We don't have '{query}' available. The similar items I found are already in your cart. "
@@ -1814,8 +1811,8 @@ def create_search_menu_tool(session_id: str):
                 if structured_items:
                     emit_menu_data(session_id, structured_items, current_meal_period=current_meal)
 
-                # Short response - MenuCard shows the details (DO NOT list items!)
-                return f"[MENU CARD DISPLAYED - {len(structured_items)} items shown in visual menu. DO NOT list items - just tell customer to browse the menu card and let you know what they'd like!]"
+                # Menu card displayed - provide data, let LLM decide next action based on user intent
+                return f"Menu card displayed with {len(structured_items)} items available for ordering."
             except Exception as e:
                 logger.debug("menu_data_emit_failed", error=str(e))
 
@@ -1853,9 +1850,7 @@ def create_search_menu_tool(session_id: str):
                     logger.info(f"emitting_filtered_menu", session_id=session_id, count=len(structured_items))
                     emit_menu_data(session_id, structured_items, current_meal_period=current_meal)
                     logger.info(f"filtered_menu_emitted_successfully", count=len(structured_items))
-                    return (f"[FILTERED MENU CARD DISPLAYED] I found {len(items)} items matching '{query}'. "
-                           f"Please check the menu card for all options and let me know which one you'd like! "
-                           f"(DO NOT list items in text - menu card is showing them)")
+                    return f"Menu card showing {len(items)} items matching '{query}'."
                 else:
                     # All items already in cart
                     logger.info(f"filtered_items_all_in_cart", query=query)
