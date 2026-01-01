@@ -1476,14 +1476,21 @@ def create_search_menu_tool(session_id: str):
         Search the restaurant menu for food items.
 
         Use this tool to show customers what's available to order.
-        Call with empty string "" to show all menu items.
-        Call with a search term to filter (e.g., "burger", "spicy", "vegetarian").
+        Displays a menu card UI with matching items.
 
         Args:
-            query: Search term to filter menu items. Use "" for all items.
+            query: Search term to filter menu items (e.g., "burger", "spicy", "chicken").
+                   Use None or "" to show full menu.
 
         Returns:
-            List of menu items with names and prices.
+            Confirmation message that menu card was displayed with item count.
+
+        Examples:
+            - search_menu("") → Full menu card displayed
+            - search_menu("burger") → All burger items in menu card
+            - search_menu("spicy") → All items containing "spicy"
+            - search_menu("vegetarian") → Vegetarian items only
+            - search_menu("pizza") → All pizza varieties
         """
         # Convert None to empty string for backward compatibility
         query = query or ""
@@ -1881,22 +1888,24 @@ def create_add_to_cart_tool(session_id: str):
     @tool("add_to_cart")
     def add_to_cart(item: str, quantity: int = 1) -> str:
         """
-        Add a food item to the customer's cart.
+        Add a food item to the customer's cart with specified quantity.
 
-        IMPORTANT: Only use this tool when the customer has specified BOTH the item AND quantity.
-        - "I want 2 burgers" → Use tool with quantity=2
-        - "add 3 cokes" → Use tool with quantity=3
-        - "I want a burger" (no quantity) → DO NOT use tool, ask "How many would you like?" FIRST!
-        - "add orange juice" (no quantity) → DO NOT use tool, ask "How many?" FIRST!
-
-        The item name can be partial (fuzzy matched).
+        Performs fuzzy matching on item names to find the closest menu match.
+        Requires both item name and quantity to complete the order accurately.
 
         Args:
-            item: Name of the menu item to add (e.g., "Butter Chicken", "burger")
-            quantity: Number of items to add - MUST be explicitly specified by customer!
+            item: Name or partial name of menu item (e.g., "Butter Chicken", "burger", "coke")
+            quantity: Number of items to add (must be positive integer)
 
         Returns:
-            Confirmation message with item added.
+            Confirmation message that item was added to cart with details.
+
+        Examples:
+            - add_to_cart("burger", 2) → Adds 2 burgers to cart
+            - add_to_cart("Butter Chicken", 1) → Adds 1 Butter Chicken
+            - add_to_cart("coke", 3) → Adds 3 Cokes
+            - add_to_cart("pizza", 1) → Adds 1 pizza (fuzzy matched from menu)
+            - add_to_cart("chick burg", 2) → Finds "Chicken Burger" via fuzzy match
         """
         # Emit activity for frontend (async - no thread overhead)
         from app.core.agui_events import emit_tool_activity
@@ -1988,10 +1997,17 @@ def create_view_cart_tool(session_id: str):
         """
         View the current contents of the customer's shopping cart.
 
-        Use this to show what items have been added and the total price.
+        Displays all items currently in cart with quantities, individual prices,
+        and total order amount. Emits cart UI for visual display.
 
         Returns:
-            List of cart items with quantities and total price.
+            Detailed cart summary with items, quantities, prices, and total.
+
+        Examples:
+            - view_cart() → Shows cart with all items and total
+            - Common use: After adding items, before checkout
+            - Common use: When customer asks "what's in my cart?"
+            - Common use: When customer asks "how much is my total?"
         """
         # Emit activity for frontend (async - no thread overhead)
         from app.core.agui_events import emit_tool_activity, emit_cart_data
@@ -2132,15 +2148,26 @@ def create_checkout_tool(session_id: str):
     @tool("checkout")
     def checkout(order_type: Optional[str] = None) -> str:
         """
-        Complete the order and place it. Call this when customer wants to checkout, place order, or pay.
+        Complete the order and initiate payment workflow.
 
-        WHEN TO USE: Customer says "checkout", "place order", "proceed to checkout", "pay", "finalize", "confirm order", "checkout for dine in", "checkout for takeaway"
+        Creates order in database, initiates payment workflow (online/cash/card at counter),
+        and returns order confirmation. Cart is cleared after successful checkout.
 
         Args:
-            order_type: "dine_in" or "take_away" - extract from customer message if present, otherwise ask first
+            order_type: Order type - "dine_in" or "take_away" (extracted from customer message)
 
         Returns:
-            Order confirmation with order ID and total
+            Order confirmation with order ID, total amount, and payment workflow status.
+
+        Examples:
+            - checkout("dine_in") → Creates dine-in order and starts payment
+            - checkout("take_away") → Creates takeaway order and starts payment
+            - checkout() → If order type missing, will be handled by checkout handler
+
+        Common triggers:
+            - Customer: "checkout" / "place order" / "proceed to checkout"
+            - Customer: "checkout for dine in" → checkout("dine_in")
+            - Customer: "checkout for takeaway" → checkout("take_away")
         """
         # Use the sync implementation
         return _checkout_impl(order_type or "", session_id)

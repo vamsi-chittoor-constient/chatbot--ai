@@ -163,18 +163,27 @@ def _build_conversation_context(
 
 def _estimate_tokens(text: str) -> int:
     """
-    Estimate token count for text.
+    Accurately count tokens using OpenAI's tiktoken tokenizer.
 
-    Simple heuristic: ~4 characters = 1 token for English text.
-    This is approximate but good enough for budgeting.
+    Uses the official tokenizer for gpt-4o to ensure accurate token counting.
+    This prevents underestimation that could lead to context limit errors.
 
     Args:
-        text: Text to estimate tokens for
+        text: Text to count tokens for
 
     Returns:
-        Estimated token count
+        Exact token count for gpt-4o model
     """
-    return max(1, len(text) // 4)
+    import tiktoken
+
+    try:
+        # Use tiktoken for accurate token counting
+        encoding = tiktoken.encoding_for_model("gpt-4o")
+        return len(encoding.encode(text))
+    except Exception as e:
+        # Fallback to heuristic if tiktoken fails
+        logger.warning(f"tiktoken failed, using heuristic: {str(e)}")
+        return max(1, len(text) // 4)
 
 
 def _summarize_old_conversation(messages: List[str]) -> str:
