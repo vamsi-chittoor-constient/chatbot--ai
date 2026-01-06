@@ -18,6 +18,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
+from uuid import UUID
 import pybreaker
 
 import razorpay
@@ -27,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from app.tools.base.tool_base import ToolBase, ToolResult, ToolStatus
 from app.core.database import get_db_session
 from app.features.food_ordering.models import PaymentOrder, Order
-from app.shared.models.payment import PaymentRetryAttempt
+from app.database.models import PaymentRetryAttempt
 from app.core.logging_config import get_logger
 from app.utils.validation_decorators import require_tables
 from app.services.circuit_breaker_service import razorpay_breaker
@@ -259,14 +260,13 @@ Thank you for choosing A24 Restaurant!"""
 
         try:
             # Get order details - THIS is the source of truth for amount
-            # Eagerly load user and order_items relationships to avoid lazy-loading in async context
+            # Eagerly load user and items relationships to avoid lazy-loading in async context
             from sqlalchemy.orm import selectinload
             # from app.shared.models import OrderItem
             from app.features.food_ordering.models import OrderItem
 
-            order_query = select(Order).where(Order.id == order_id).options(
-                selectinload(Order.user),
-                selectinload(Order.order_items).selectinload(OrderItem.menu_item)
+            order_query = select(Order).where(Order.order_id == order_id).options(
+                selectinload(Order.items).selectinload(OrderItem.menu_item)
             )
             order_result = await session.execute(order_query)
             order = order_result.scalar_one_or_none()
@@ -277,30 +277,22 @@ Thank you for choosing A24 Restaurant!"""
                     data={"error": "Order not found"}
                 )
 
-            # SECURITY: Use order.total_amount from database as ONLY source of truth
-            # Never trust LLM-provided amounts for payment processing
-            amount = Decimal(str(order.total_amount))
+            # Calculate amount from order items
+            if not order.items or len(order.items) == 0:
+                return ToolResult(
+                    status=ToolStatus.FAILURE,
+                    data={"error": "Order has no items"}
+                )
+
+            # Sum up base_price from all order items (base_price = unit_price * quantity)
+            amount = sum(
+                Decimal(str(item.base_price or 0)) for item in order.items
+            )
 
             if amount <= 0:
                 return ToolResult(
                     status=ToolStatus.FAILURE,
                     data={"error": f"Invalid order amount: {amount}"}
-                )
-
-            # CRITICAL VALIDATION: Order must have order_items before payment
-            # This prevents the bug where orders are created without items
-            if not order.order_items or len(order.order_items) == 0:
-                logger.error(
-                    "Payment creation blocked - order has no items",
-                    order_id=order_id,
-                    order_number=order.order_number,
-                    total_amount=float(amount)
-                )
-                return ToolResult(
-                    status=ToolStatus.FAILURE,
-                    data={
-                        "error": "Cannot create payment for order without items. Please add items to the order first using checkout_cart or add_order_item tools."
-                    }
                 )
 
             # Check if payment order already exists
@@ -331,27 +323,50 @@ Thank you for choosing A24 Restaurant!"""
                 callback_url = f"{self.callback_url}?source=external"
 
             # Create payment link FIRST to get Razorpay's order_id
+            # Get customer info from session (user already authenticated via OTP)
+            from app.core.redis import get_sync_redis_client
+            redis_client = get_sync_redis_client()
+
+            customer_name = "Customer"
+            customer_phone = None
+
+            # Fetch user name from session
+            user_name_key = f"session:{session_id}:user_name"
+            user_name_bytes = redis_client.get(user_name_key)
+            if user_name_bytes:
+                customer_name = user_name_bytes.decode('utf-8')
+
+            # Fetch user phone from session
+            user_phone_key = f"session:{session_id}:user_phone"
+            user_phone_bytes = redis_client.get(user_phone_key)
+            if user_phone_bytes:
+                customer_phone = user_phone_bytes.decode('utf-8')
+
+            customer_data = {
+                "name": customer_name,
+            }
+
+            # Add phone if available (optional for Razorpay)
+            if customer_phone:
+                customer_data["contact"] = customer_phone
+
             payment_link_data = {
                 "amount": amount_paise,
                 "currency": self.currency,
-                "reference_id": order.order_number,  # Our internal order number for traceability
+                "reference_id": str(order.order_invoice_number) if order.order_invoice_number else str(order_id),
                 "callback_url": callback_url,
                 "callback_method": "get",
-                "description": f"Payment for Order #{order.order_number}",
-                "customer": {
-                    "name": order.user.full_name or "Customer",
-                    "email": order.user.email,
-                    "contact": order.user.phone_number or order.contact_phone
-                },
+                "description": f"Payment for Order #{order.order_invoice_number or order_id}",
+                "customer": customer_data,
                 "notify": {
                     "sms": False,   # We send our own branded SMS via Twilio
                     "email": False  # We send our own branded email via SMTP
                 },
                 "reminder_enable": False,  # We handle reminders ourselves
                 "notes": {
-                    "internal_order_id": order_id,
-                    "order_number": order.order_number,
-                    "user_id": user_id,
+                    "internal_order_id": str(order_id),
+                    "order_number": str(order.order_invoice_number) if order.order_invoice_number else str(order_id),
+                    "session_id": session_id,
                     **notes
                 },
                 "expire_by": int(expires_at.timestamp())
@@ -367,71 +382,73 @@ Thank you for choosing A24 Restaurant!"""
                     error="Payment service is temporarily unavailable. Your order has been saved and we'll process the payment when service resumes. We'll notify you via SMS once payment is ready."
                 )
 
-            # Generate ID manually to avoid sync event listener in async context
-            from app.utils.id_generator import generate_id
-            payment_order_id = await generate_id(session, "payment_orders")
-
             # IMPORTANT: Razorpay Payment Links API does NOT return order_id in create response
-            # The order_id will be populated later from webhook/callback when payment is completed
-            # For now, we track via payment_link_id and reference_id (order_number)
+            # The gateway_order_id will be populated later from webhook/callback when payment is completed
+            # For now, we track via payment_link_id and reference_id (order_invoice_number)
+
+            # Convert user_id to UUID if it's a string
+            customer_uuid = None
+            if user_id:
+                try:
+                    if isinstance(user_id, UUID):
+                        customer_uuid = user_id
+                    elif isinstance(user_id, str):
+                        customer_uuid = UUID(user_id)
+                except (ValueError, AttributeError) as e:
+                    logger.warning(f"Invalid user_id format: {user_id}, error: {e}")
+                    customer_uuid = None
+
             payment_order = PaymentOrder(
-                id=payment_order_id,  # Set ID manually
                 order_id=order_id,
-                user_id=user_id,
-                razorpay_order_id=None,  # Will be updated from webhook when payment is made
-                amount=amount_paise,
-                currency=self.currency,
-                status="created",
-                payment_link=payment_link["short_url"],
+                restaurant_id=order.restaurant_id,  # Copy from order
+                customer_id=customer_uuid,
+                gateway_order_id=None,  # Will be updated from webhook when payment is made
+                order_amount=amount,  # Store as Decimal, not paise
+                order_currency=self.currency,
+                payment_order_status="created",
+                payment_link_url=payment_link["short_url"],
                 payment_link_id=payment_link["id"],  # Primary identifier for payment link
-                expires_at=expires_at,
+                payment_link_short_url=payment_link.get("short_url"),
+                payment_link_expires_at=expires_at,
                 retry_count=0,
                 max_retry_attempts=self.max_retry_attempts,
-                notes=notes
+                payment_metadata=notes  # Maps to 'metadata' column in database
             )
 
-            # Disable autoflush to prevent event listener from triggering sync queries in async context
-            with session.no_autoflush:
-                session.add(payment_order)
-                await session.flush()  # Flush changes
-
+            session.add(payment_order)
+            await session.flush()
             await session.commit()
+
+            payment_order_id = payment_order.payment_order_id
 
             logger.info(
                 "Payment link created successfully",
-                payment_order_id=payment_order.id,
-                order_number=order.order_number,
+                payment_order_id=payment_order_id,
+                order_invoice_number=order.order_invoice_number,
                 payment_link_id=payment_link["id"],
-                reference_id=order.order_number,
+                reference_id=str(order.order_invoice_number) if order.order_invoice_number else str(order_id),
                 note="razorpay_order_id will be populated from webhook"
             )
 
-            # Send payment link via SMS
-            sms_sent = await self._send_payment_link_sms(
-                phone_number=order.user.phone_number or order.contact_phone,
-                payment_link=payment_link["short_url"],
-                order_number=order.order_number,
-                amount=float(amount),
-                customer_name=order.user.full_name or "Customer",
-                order_items=order.order_items,
-                order_type=order.order_type
-            )
+            # SMS sending skipped for guest checkout (no user phone number available)
+            # Payment link will be displayed in the UI instead
+            sms_sent = False
 
             return ToolResult(
                 status=ToolStatus.SUCCESS,
                 data={
-                    "payment_order_id": payment_order.id,
-                    "razorpay_order_id": payment_order.razorpay_order_id,
+                    "payment_order_id": payment_order.payment_order_id,
+                    "razorpay_order_id": payment_order.gateway_order_id,
                     "payment_link": payment_link["short_url"],
                     "payment_link_id": payment_link["id"],
-                    "reference_id": order.order_number,
+                    "reference_id": order.order_invoice_number,
                     "amount": float(amount),
                     "currency": self.currency,
                     "expires_at": expires_at.isoformat(),
                     "sms_sent": sms_sent,
                     "order_details": {
-                        "order_number": order.order_number,
-                        "total_amount": float(order.total_amount)
+                        "order_number": order.order_invoice_number,
+                        "total_amount": float(amount)
                     }
                 }
             )
@@ -472,12 +489,12 @@ Thank you for choosing A24 Restaurant!"""
 
             # Check if already has valid link
             if (payment_order.payment_link and
-                payment_order.expires_at > datetime.now()):
+                payment_order.payment_link_expires_at > datetime.now()):
                 return ToolResult(
                     status=ToolStatus.SUCCESS,
                     data={
                         "payment_link": payment_order.payment_link,
-                        "expires_at": payment_order.expires_at.isoformat(),
+                        "expires_at": payment_order.payment_link_expires_at.isoformat(),
                         "message": "Existing valid payment link returned"
                     }
                 )
@@ -545,8 +562,8 @@ Thank you for choosing A24 Restaurant!"""
 
             # Record retry attempt
             retry_attempt = PaymentRetryAttempt(
-                payment_order_id=payment_order.id,
-                user_id=payment_order.user_id,
+                payment_order_id=payment_order.payment_order_id,
+                user_id=payment_order.customer_id,
                 attempt_number=payment_order.retry_count + 1,
                 status="attempted"
             )
@@ -558,7 +575,7 @@ Thank you for choosing A24 Restaurant!"""
             # Generate new expiry time in UTC (same as booking implementation)
             # Add 1 extra minute buffer to ensure Razorpay sees > 15 minutes
             new_expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.link_expiry_minutes + 1)
-            payment_order.expires_at = new_expires_at
+            payment_order.payment_link_expires_at = new_expires_at
 
             # Build callback URL with source parameter
             callback_url = self.callback_url
@@ -569,16 +586,14 @@ Thank you for choosing A24 Restaurant!"""
 
             # Create new payment link (reuse existing Razorpay order)
             payment_link_data = {
-                "amount": payment_order.amount,
-                "currency": payment_order.currency,
-                "order_id": payment_order.razorpay_order_id,
+                "amount": payment_order.order_amount,
+                "currency": payment_order.order_currency,
+                "order_id": payment_order.gateway_order_id,
                 "callback_url": callback_url,
                 "callback_method": "get",
-                "description": f"Payment for Order #{payment_order.order.order_number} (Retry {payment_order.retry_count})",
+                "description": f"Payment for Order #{payment_order.order.order_invoice_number} (Retry {payment_order.retry_count})",
                 "customer": {
-                    "name": payment_order.user.full_name or "Customer",
-                    "email": payment_order.user.email,
-                    "contact": payment_order.user.phone_number or payment_order.order.contact_phone
+                    "name": "Customer",  # Default for retry attempts
                 },
                 "notify": {
                     "sms": False,   # We send our own branded SMS via Twilio
@@ -587,7 +602,7 @@ Thank you for choosing A24 Restaurant!"""
                 "reminder_enable": False,  # We handle reminders ourselves
                 "notes": {
                     "restaurant_order_id": payment_order.order_id,
-                    "user_id": payment_order.user_id,
+                    "user_id": payment_order.customer_id,
                     "retry_attempt": payment_order.retry_count
                 },
                 "expire_by": int(new_expires_at.timestamp())
@@ -606,17 +621,17 @@ Thank you for choosing A24 Restaurant!"""
                 )
 
             # Update payment order
-            payment_order.payment_link = payment_link["short_url"]
+            payment_order.payment_link_url = payment_link["short_url"]
             payment_order.payment_link_id = payment_link["id"]
-            payment_order.status = "created"
+            payment_order.payment_order_status = "created"
 
             await session.commit()
 
             return ToolResult(
                 status=ToolStatus.SUCCESS,
                 data={
-                    "payment_order_id": payment_order.id,
-                    "razorpay_order_id": payment_order.razorpay_order_id,
+                    "payment_order_id": payment_order.payment_order_id,
+                    "razorpay_order_id": payment_order.gateway_order_id,
                     "payment_link": payment_link["short_url"],
                     "expires_at": new_expires_at.isoformat(),
                     "retry_count": payment_order.retry_count,

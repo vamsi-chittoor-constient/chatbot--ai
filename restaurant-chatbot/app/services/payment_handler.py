@@ -32,6 +32,40 @@ async def handle_payment_message(
     Returns:
         Response message if handled, None if should pass to crew agent
     """
+    message_lower = message.lower().strip()
+
+    # =========================================================================
+    # POST-PAYMENT QUICK REPLY ACTIONS
+    # =========================================================================
+    # Handle quick replies from payment success card (view_receipt, order_more)
+    if message_lower == "view_receipt":
+        payment_state = get_payment_state(session_id)
+        order_id = payment_state.get("order_id")
+        order_number = payment_state.get("order_number", "N/A")
+
+        if order_id:
+            # Generate PDF receipt download link
+            pdf_download_url = f"/api/v1/orders/{order_id}/receipt/pdf"
+
+            return (
+                f"📄 **Order Receipt**\n\n"
+                f"Order Number: {order_number}\n"
+                f"Order ID: {order_id}\n\n"
+                f"📥 [Download PDF Receipt]({pdf_download_url})\n\n"
+                f"Your receipt has also been sent to your registered mobile number via SMS.\n\n"
+                f"Anything else I can help you with?"
+            )
+
+        return "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?"
+
+    if message_lower == "order_more":
+        from app.services.payment_state_service import clear_payment_state
+
+        # Clear only payment state, keep cart and session intact for continuation
+        clear_payment_state(session_id)
+
+        return "🍽️ Great! What else would you like to order? I can show you our menu or you can tell me what you're craving!"
+
     # Get current payment state
     payment_state = get_payment_state(session_id)
     current_step = payment_state.get("step")
@@ -44,8 +78,6 @@ async def handle_payment_message(
         PaymentStep.AWAITING_PAYMENT.value
     ] or not order_id:
         return None  # Not in payment flow, let crew handle it
-
-    message_lower = message.lower().strip()
 
     logger.info(
         "payment_message_intercepted",

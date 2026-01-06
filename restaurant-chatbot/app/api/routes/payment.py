@@ -339,41 +339,30 @@ async def payment_callback(
     razorpay_payment_link_reference_id: Optional[str] = None,
     razorpay_payment_link_status: Optional[str] = None,
     razorpay_signature: Optional[str] = None,
-    source: str = "external",  # "chat" or "external"
+    source: str = "chat",  # "chat" or "external"
     session_id: Optional[str] = None
 ):
     """
     Payment callback from Razorpay after user completes payment.
 
-    Handles two scenarios:
-    - source=chat: Redirect back to chat interface
-    - source=external: Show success page and auto-close window
-
-    Args:
-        razorpay_payment_id: Payment ID from Razorpay
-        razorpay_payment_link_id: Payment link ID
-        razorpay_payment_link_reference_id: Reference ID (our order ID)
-        razorpay_payment_link_status: Payment status (paid, cancelled, failed)
-        razorpay_signature: Signature for verification
-        source: Payment source ("chat" or "external")
-        session_id: Chat session ID for chat payments
+    Only updates PaymentOrder status since Order is already created in checkout.
     """
 
     logger.info(
         "payment_callback_received",
         payment_id=razorpay_payment_id,
         link_id=razorpay_payment_link_id,
+        reference_id=razorpay_payment_link_reference_id,
         status=razorpay_payment_link_status,
         source=source,
         session_id=session_id
     )
 
-    # Check payment status
+    # Payment successful
     if razorpay_payment_link_status == "paid":
-        # Payment successful - update order status
         try:
             async with get_db_session() as session:
-                # Find payment order by link ID
+                # Find and update payment order
                 payment_query = select(PaymentOrder).where(
                     PaymentOrder.payment_link_id == razorpay_payment_link_id
                 )
@@ -382,134 +371,59 @@ async def payment_callback(
 
                 if payment_order:
                     # Update payment order status
-                    payment_order.status = "paid"
-                    payment_order.razorpay_payment_id = razorpay_payment_id
-
-                    # Update associated order status (load order items for SMS)
-                    order_query = select(Order).options(
-                        selectinload(Order.order_items).selectinload(OrderItem.menu_item)
-                    ).where(
-                        Order.id == payment_order.order_id
-                    )
-                    order_result = await session.execute(order_query)
-                    order = order_result.scalar_one_or_none()
-
-                    if order:
-                        order.payment_status = "paid"
-                        order.status = "confirmed"
-
-                        logger.info(
-                            "payment_success_order_updated",
-                            order_id=order.id,
-                            payment_order_id=payment_order.id,
-                            amount=payment_order.amount / 100  # Convert paise to rupees
-                        )
+                    payment_order.payment_order_status = "paid"
+                    # Store the actual Razorpay payment ID (not order ID)
+                    if razorpay_payment_id:
+                        # Create a notes/metadata entry for the payment ID
+                        if not payment_order.payment_metadata:
+                            payment_order.payment_metadata = {}
+                        payment_order.payment_metadata["razorpay_payment_id"] = razorpay_payment_id
 
                     await session.commit()
 
-                    # Send WebSocket notification to original chat session (if chat payment)
+                    # Fetch the order to get order_invoice_number
+                    from app.features.food_ordering.models.order import Order
+                    order_query = select(Order).where(Order.order_id == payment_order.order_id)
+                    order_result = await session.execute(order_query)
+                    order = order_result.scalar_one_or_none()
+
+                    logger.info(
+                        "payment_success_updated",
+                        payment_order_id=str(payment_order.payment_order_id),
+                        order_id=str(payment_order.order_id),
+                        amount=float(payment_order.order_amount) if payment_order.order_amount else 0
+                    )
+
+                    # Send WebSocket notification to chat
                     if source == "chat" and session_id:
                         try:
-                            from app.api.routes.chat import websocket_manager
-                            import asyncio
+                            from app.core.agui_events import emit_payment_success
 
-                            # Send payment success message to original chat window
-                            await websocket_manager.send_message(
+                            # Emit payment success card with quick replies
+                            emit_payment_success(
                                 session_id=session_id,
-                                message="Payment received! Your order has been confirmed. You will receive an SMS confirmation shortly.",
-                                message_type="system_message"
+                                order_id=str(payment_order.order_id),
+                                order_number=str(order.order_invoice_number) if order and order.order_invoice_number else str(payment_order.order_id),
+                                amount=float(payment_order.order_amount) if payment_order.order_amount else 0,
+                                payment_id=razorpay_payment_id or "",
+                                order_type="takeaway",  # TODO: Get from order
+                                quick_replies=[
+                                    {"label": "📄 View Receipt", "action": "view_receipt"},
+                                    {"label": "🍽️ Order More", "action": "order_more"}
+                                ]
                             )
 
                             logger.info(
-                                "payment_success_websocket_sent",
+                                "payment_success_notification_sent",
                                 session_id=session_id,
-                                order_id=order.id if order else None
+                                order_number=str(order.order_invoice_number) if order and order.order_invoice_number else str(payment_order.order_id)
                             )
-
-                            # Send follow-up message to continue conversation
-                            await asyncio.sleep(1)  # Small delay for better UX
-                            await websocket_manager.send_message(
-                                session_id=session_id,
-                                message="Is there anything else I can help you with? You can order more items, check our menu, or ask any questions!",
-                                message_type="ai_response"
-                            )
-
                         except Exception as e:
                             logger.warning(
-                                "payment_success_websocket_failed",
+                                "payment_success_notification_failed",
                                 session_id=session_id,
                                 error=str(e)
                             )
-
-                    # Send post-payment confirmation SMS (graceful degradation if fails)
-                    try:
-                        from app.services.sms_service import get_sms_service
-
-                        if order and order.contact_phone:
-                            # Calculate estimated ready time in minutes
-                            ready_minutes = "20-25"  # default
-                            if order.estimated_ready_time:
-                                time_diff = order.estimated_ready_time - datetime.now(timezone.utc)
-                                ready_minutes = str(max(15, int(time_diff.total_seconds() / 60)))
-
-                            # Format amount in rupees
-                            amount_rupees = float(payment_order.amount) / 100
-
-                            # Order type display
-                            order_type_display = "dine-in" if order.order_type == "dine_in" else "takeout"
-
-                            # Build items list for SMS
-                            items_text = ""
-                            if order.order_items:
-                                items_list = []
-                                for item in order.order_items[:5]:  # Limit to first 5 items for SMS
-                                    item_name = item.menu_item.name if item.menu_item else "Item"
-                                    items_list.append(f"- {item.quantity}x {item_name}")
-                                items_text = "\n".join(items_list)
-                                if len(order.order_items) > 5:
-                                    items_text += f"\n...and {len(order.order_items) - 5} more"
-
-                            # Create ORDER confirmation message (plain text, no emojis)
-                            confirmation_message = (
-                                f"Order Confirmed #{order.order_number}\n\n"
-                                f"Items Ordered:\n{items_text}\n\n"
-                                f"Total Paid: Rs.{amount_rupees:.2f}\n"
-                                f"Ready in: {ready_minutes} minutes\n"
-                                f"Order Type: {order_type_display.title()}\n\n"
-                                f"Thank you for your order.\n"
-                                f"A24 Restaurant"
-                            )
-
-                            # Send SMS
-                            sms_service = get_sms_service()
-                            sms_result = await sms_service.send_notification(
-                                phone_number=order.contact_phone,
-                                message=confirmation_message,
-                                notification_type="order_confirmation"
-                            )
-
-                            if sms_result.get("success"):
-                                logger.info(
-                                    "post_payment_sms_sent",
-                                    order_id=order.id,
-                                    phone=order.contact_phone[-4:],
-                                    amount=amount_rupees
-                                )
-                            else:
-                                logger.warning(
-                                    "post_payment_sms_failed",
-                                    order_id=order.id,
-                                    error=sms_result.get("error")
-                                )
-
-                    except Exception as e:
-                        # SMS failure should NOT break payment callback
-                        logger.error(
-                            "post_payment_sms_exception",
-                            order_id=order.id if order else None,
-                            error=str(e)
-                        )
-
                 else:
                     logger.warning(
                         "payment_order_not_found",
@@ -522,397 +436,188 @@ async def payment_callback(
                 error=str(e),
                 payment_id=razorpay_payment_id
             )
-            # Continue to show success even if DB update fails
-            # We can reconcile later via Razorpay API
 
-        # Redirect based on source
-        if source == "chat" and session_id:
-            # Show success page and auto-close (WebSocket handles sending message to chat)
-            return HTMLResponse(content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Successful</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {{
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            margin: 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        }}
-                        .container {{
-                            background: white;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                            text-align: center;
-                            max-width: 400px;
-                            animation: slideIn 0.3s ease-out;
-                        }}
-                        @keyframes slideIn {{
-                            from {{
-                                opacity: 0;
-                                transform: translateY(-20px);
-                            }}
-                            to {{
-                                opacity: 1;
-                                transform: translateY(0);
-                            }}
-                        }}
-                        .success-icon {{
-                            width: 80px;
-                            height: 80px;
-                            background: #10b981;
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            margin: 0 auto 1.5rem;
-                            animation: scaleIn 0.5s ease-out 0.2s both;
-                        }}
-                        @keyframes scaleIn {{
-                            from {{
-                                transform: scale(0);
-                            }}
-                            to {{
-                                transform: scale(1);
-                            }}
-                        }}
-                        .checkmark {{
-                            width: 40px;
-                            height: 40px;
-                            border: 4px solid white;
-                            border-left: none;
-                            border-top: none;
-                            transform: rotate(45deg);
-                        }}
-                        h1 {{
-                            color: #1f2937;
-                            margin: 0 0 0.5rem;
-                            font-size: 1.875rem;
-                        }}
-                        p {{
-                            color: #6b7280;
-                            margin: 0 0 1.5rem;
-                            font-size: 1rem;
-                        }}
-                        .payment-id {{
-                            background: #f3f4f6;
-                            padding: 0.75rem;
-                            border-radius: 8px;
-                            font-family: monospace;
-                            font-size: 0.875rem;
-                            color: #4b5563;
-                            margin-bottom: 1.5rem;
-                        }}
-                        .close-info {{
-                            color: #9ca3af;
-                            font-size: 0.875rem;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="success-icon">
-                            <div class="checkmark"></div>
-                        </div>
-                        <h1>Payment Successful!</h1>
-                        <p>Your payment has been processed successfully.</p>
-                        <div class="payment-id">
-                            Payment ID: {razorpay_payment_id}
-                        </div>
-                        <p class="close-info">You can close this window and return to chat.</p>
+        # Show success page
+        return HTMLResponse(content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Payment Successful</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                    }}
+                    .container {{
+                        background: white;
+                        padding: 3rem;
+                        border-radius: 20px;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                        text-align: center;
+                        max-width: 400px;
+                        animation: slideIn 0.3s ease-out;
+                    }}
+                    @keyframes slideIn {{
+                        from {{ opacity: 0; transform: translateY(-20px); }}
+                        to {{ opacity: 1; transform: translateY(0); }}
+                    }}
+                    .success-icon {{
+                        width: 80px;
+                        height: 80px;
+                        background: #10b981;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 1.5rem;
+                        animation: scaleIn 0.5s ease-out 0.2s both;
+                    }}
+                    @keyframes scaleIn {{
+                        from {{ transform: scale(0); }}
+                        to {{ transform: scale(1); }}
+                    }}
+                    .checkmark {{
+                        width: 40px;
+                        height: 40px;
+                        border: 4px solid white;
+                        border-left: none;
+                        border-top: none;
+                        transform: rotate(45deg);
+                    }}
+                    h1 {{
+                        color: #1f2937;
+                        margin: 0 0 0.5rem;
+                        font-size: 1.875rem;
+                    }}
+                    p {{
+                        color: #6b7280;
+                        margin: 0 0 1.5rem;
+                        font-size: 1rem;
+                    }}
+                    .payment-id {{
+                        background: #f3f4f6;
+                        padding: 0.75rem;
+                        border-radius: 8px;
+                        font-family: monospace;
+                        font-size: 0.875rem;
+                        color: #4b5563;
+                        margin-bottom: 1.5rem;
+                        word-break: break-all;
+                    }}
+                    .close-info {{
+                        color: #9ca3af;
+                        font-size: 0.875rem;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">
+                        <div class="checkmark"></div>
                     </div>
-
-                    <script>
-                        // Auto-close window after 3 seconds
-                        setTimeout(function() {{
-                            window.close();
-                        }}, 3000);
-                    </script>
-                </body>
-                </html>
-            """)
-
-        else:
-            # Show success page and auto-close window (for SMS/Email payments)
-            return HTMLResponse(content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Successful</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {{
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            margin: 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        }}
-                        .container {{
-                            background: white;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                            text-align: center;
-                            max-width: 400px;
-                            animation: slideIn 0.3s ease-out;
-                        }}
-                        @keyframes slideIn {{
-                            from {{
-                                opacity: 0;
-                                transform: translateY(-20px);
-                            }}
-                            to {{
-                                opacity: 1;
-                                transform: translateY(0);
-                            }}
-                        }}
-                        .success-icon {{
-                            width: 80px;
-                            height: 80px;
-                            background: #10b981;
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            margin: 0 auto 1.5rem;
-                            animation: scaleIn 0.5s ease-out 0.2s both;
-                        }}
-                        @keyframes scaleIn {{
-                            from {{
-                                transform: scale(0);
-                            }}
-                            to {{
-                                transform: scale(1);
-                            }}
-                        }}
-                        .checkmark {{
-                            width: 40px;
-                            height: 40px;
-                            border: 4px solid white;
-                            border-left: none;
-                            border-top: none;
-                            transform: rotate(45deg);
-                        }}
-                        h1 {{
-                            color: #1f2937;
-                            margin: 0 0 0.5rem;
-                            font-size: 1.875rem;
-                        }}
-                        p {{
-                            color: #6b7280;
-                            margin: 0 0 1.5rem;
-                            font-size: 1rem;
-                        }}
-                        .payment-id {{
-                            background: #f3f4f6;
-                            padding: 0.75rem;
-                            border-radius: 8px;
-                            font-family: monospace;
-                            font-size: 0.875rem;
-                            color: #4b5563;
-                            margin-bottom: 1.5rem;
-                        }}
-                        .close-info {{
-                            color: #9ca3af;
-                            font-size: 0.875rem;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="success-icon">
-                            <div class="checkmark"></div>
-                        </div>
-                        <h1>Payment Successful!</h1>
-                        <p>Your payment has been processed successfully.</p>
-                        <div class="payment-id">
-                            Payment ID: {razorpay_payment_id}
-                        </div>
-                        <p class="close-info">This window will close automatically in 3 seconds...</p>
+                    <h1>Payment Successful!</h1>
+                    <p>Your payment has been processed successfully.</p>
+                    <div class="payment-id">
+                        Order: {razorpay_payment_link_reference_id or 'N/A'}
                     </div>
+                    <p class="close-info">You can close this window and return to chat.</p>
+                </div>
 
-                    <script>
-                        // Auto-close window after 3 seconds
-                        setTimeout(function() {{
-                            window.close();
-                        }}, 3000);
-                    </script>
-                </body>
-                </html>
-            """)
+                <script>
+                    // Auto-close window after 3 seconds
+                    setTimeout(function() {{
+                        window.close();
+                    }}, 3000);
+                </script>
+            </body>
+            </html>
+        """)
 
     elif razorpay_payment_link_status == "cancelled":
-        # Payment cancelled by user
+        # Payment cancelled
         logger.info(
             "payment_cancelled",
             payment_link_id=razorpay_payment_link_id,
             source=source
         )
 
-        if source == "chat" and session_id:
-            # Show cancelled page that communicates back to parent chat window
-            return HTMLResponse(content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Cancelled</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {{
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            margin: 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        }}
-                        .container {{
-                            background: white;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                            text-align: center;
-                            max-width: 400px;
-                        }}
-                        .warning-icon {{
-                            width: 80px;
-                            height: 80px;
-                            background: #f59e0b;
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            margin: 0 auto 1.5rem;
-                            font-size: 3rem;
-                            color: white;
-                        }}
-                        h1 {{
-                            color: #1f2937;
-                            margin: 0 0 0.5rem;
-                            font-size: 1.875rem;
-                        }}
-                        p {{
-                            color: #6b7280;
-                            margin: 0 0 1.5rem;
-                            font-size: 1rem;
-                        }}
-                        .close-info {{
-                            color: #9ca3af;
-                            font-size: 0.875rem;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="warning-icon">!</div>
-                        <h1>Payment Cancelled</h1>
-                        <p>You cancelled the payment. No charges were made.</p>
-                        <p class="close-info">Returning to chat...</p>
-                    </div>
+        return HTMLResponse(content="""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Payment Cancelled</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+                    }
+                    .container {
+                        background: white;
+                        padding: 3rem;
+                        border-radius: 20px;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                        text-align: center;
+                        max-width: 400px;
+                    }
+                    .warning-icon {
+                        width: 80px;
+                        height: 80px;
+                        background: #f59e0b;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 1.5rem;
+                        font-size: 3rem;
+                        color: white;
+                    }
+                    h1 {
+                        color: #1f2937;
+                        margin: 0 0 0.5rem;
+                        font-size: 1.875rem;
+                    }
+                    p {
+                        color: #6b7280;
+                        margin: 0 0 1.5rem;
+                        font-size: 1rem;
+                    }
+                    .close-info {
+                        color: #9ca3af;
+                        font-size: 0.875rem;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="warning-icon">!</div>
+                    <h1>Payment Cancelled</h1>
+                    <p>You cancelled the payment. No charges were made.</p>
+                    <p class="close-info">This window will close in 3 seconds...</p>
+                </div>
 
-                    <script>
-                        // Send payment cancelled message to parent chat window
-                        if (window.opener && !window.opener.closed) {{
-                            window.opener.postMessage({{
-                                type: 'payment_cancelled',
-                                session_id: '{session_id}'
-                            }}, '*');
-
-                            setTimeout(function() {{
-                                window.close();
-                            }}, 2000);
-                        }} else {{
-                            setTimeout(function() {{
-                                window.location.href = '{config.FRONTEND_URL or "http://localhost:3000"}?payment=cancelled&session_id={session_id}';
-                            }}, 2000);
-                        }}
-                    </script>
-                </body>
-                </html>
-            """)
-        else:
-            # Show cancelled page
-            return HTMLResponse(content="""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Cancelled</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            margin: 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        }
-                        .container {
-                            background: white;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                            text-align: center;
-                            max-width: 400px;
-                        }
-                        .warning-icon {
-                            width: 80px;
-                            height: 80px;
-                            background: #f59e0b;
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            margin: 0 auto 1.5rem;
-                            font-size: 3rem;
-                            color: white;
-                        }
-                        h1 {
-                            color: #1f2937;
-                            margin: 0 0 0.5rem;
-                            font-size: 1.875rem;
-                        }
-                        p {
-                            color: #6b7280;
-                            margin: 0 0 1.5rem;
-                            font-size: 1rem;
-                        }
-                        .close-info {
-                            color: #9ca3af;
-                            font-size: 0.875rem;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="warning-icon">!</div>
-                        <h1>Payment Cancelled</h1>
-                        <p>You cancelled the payment. No charges were made.</p>
-                        <p class="close-info">This window will close in 3 seconds...</p>
-                    </div>
-
-                    <script>
-                        setTimeout(function() {
-                            window.close();
-                        }, 3000);
-                    </script>
-                </body>
-                </html>
-            """)
+                <script>
+                    setTimeout(function() {
+                        window.close();
+                    }, 3000);
+                </script>
+            </body>
+            </html>
+        """)
 
     else:
-        # Payment failed or unknown status
+        # Payment failed
         logger.error(
             "payment_failed",
             payment_link_id=razorpay_payment_link_id,
@@ -920,157 +625,73 @@ async def payment_callback(
             source=source
         )
 
-        if source == "chat" and session_id:
-            # Show failure page that communicates back to parent chat window
-            return HTMLResponse(content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Failed</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {{
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            margin: 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        }}
-                        .container {{
-                            background: white;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                            text-align: center;
-                            max-width: 400px;
-                        }}
-                        .error-icon {{
-                            width: 80px;
-                            height: 80px;
-                            background: #ef4444;
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            margin: 0 auto 1.5rem;
-                            font-size: 3rem;
-                            color: white;
-                        }}
-                        h1 {{
-                            color: #1f2937;
-                            margin: 0 0 0.5rem;
-                            font-size: 1.875rem;
-                        }}
-                        p {{
-                            color: #6b7280;
-                            margin: 0 0 1.5rem;
-                            font-size: 1rem;
-                        }}
-                        .close-info {{
-                            color: #9ca3af;
-                            font-size: 0.875rem;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="error-icon">X</div>
-                        <h1>Payment Failed</h1>
-                        <p>Unfortunately, your payment could not be processed.</p>
-                        <p>Please try again or contact support.</p>
-                        <p class="close-info">Returning to chat...</p>
-                    </div>
+        return HTMLResponse(content="""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Payment Failed</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                    }
+                    .container {
+                        background: white;
+                        padding: 3rem;
+                        border-radius: 20px;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                        text-align: center;
+                        max-width: 400px;
+                    }
+                    .error-icon {
+                        width: 80px;
+                        height: 80px;
+                        background: #ef4444;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 1.5rem;
+                        font-size: 3rem;
+                        color: white;
+                    }
+                    h1 {
+                        color: #1f2937;
+                        margin: 0 0 0.5rem;
+                        font-size: 1.875rem;
+                    }
+                    p {
+                        color: #6b7280;
+                        margin: 0 0 1.5rem;
+                        font-size: 1rem;
+                    }
+                    .close-info {
+                        color: #9ca3af;
+                        font-size: 0.875rem;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="error-icon">✕</div>
+                    <h1>Payment Failed</h1>
+                    <p>Unfortunately, your payment could not be processed.</p>
+                    <p>Please try again or contact support.</p>
+                    <p class="close-info">This window will close in 5 seconds...</p>
+                </div>
 
-                    <script>
-                        // Send payment failed message to parent chat window
-                        if (window.opener && !window.opener.closed) {{
-                            window.opener.postMessage({{
-                                type: 'payment_failed',
-                                session_id: '{session_id}'
-                            }}, '*');
+                <script>
+                    setTimeout(function() {
+                        window.close();
+                    }, 5000);
+                </script>
+            </body>
+            </html>
+        """)
 
-                            setTimeout(function() {{
-                                window.close();
-                            }}, 2000);
-                        }} else {{
-                            setTimeout(function() {{
-                                window.location.href = '{config.FRONTEND_URL or "http://localhost:3000"}?payment=failed&session_id={session_id}';
-                            }}, 2000);
-                        }}
-                    </script>
-                </body>
-                </html>
-            """)
-        else:
-            # Show failure page
-            return HTMLResponse(content="""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Failed</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            margin: 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        }
-                        .container {
-                            background: white;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                            text-align: center;
-                            max-width: 400px;
-                        }
-                        .error-icon {
-                            width: 80px;
-                            height: 80px;
-                            background: #ef4444;
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            margin: 0 auto 1.5rem;
-                            font-size: 3rem;
-                            color: white;
-                        }
-                        h1 {
-                            color: #1f2937;
-                            margin: 0 0 0.5rem;
-                            font-size: 1.875rem;
-                        }
-                        p {
-                            color: #6b7280;
-                            margin: 0 0 1.5rem;
-                            font-size: 1rem;
-                        }
-                        .close-info {
-                            color: #9ca3af;
-                            font-size: 0.875rem;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="error-icon">X</div>
-                        <h1>Payment Failed</h1>
-                        <p>Unfortunately, your payment could not be processed.</p>
-                        <p>Please try again or contact support.</p>
-                        <p class="close-info">This window will close in 5 seconds...</p>
-                    </div>
-
-                    <script>
-                        setTimeout(function() {
-                            window.close();
-                        }, 5000);
-                    </script>
-                </body>
-                </html>
-            """)

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { Wifi, WifiOff, Loader2 } from 'lucide-react'
 import { useWebSocket, hasRecentSession, clearSession } from './hooks/useWebSocket'
 import { useAGUI } from './hooks/useAGUI'
+import { useVoiceChat } from './hooks/useVoiceChat'
 import {
   ChatMessage,
   CartCard,
@@ -12,9 +14,13 @@ import {
   ActivityIndicator,
   ChatInput,
   SessionModal,
+  PaymentMethodCard,
+  PaymentSuccessCard,
 } from './components'
+import PaymentSuccess from './components/PaymentSuccess'
+import PaymentFailure from './components/PaymentFailure'
 
-function App() {
+function ChatInterface() {
   const chatContainerRef = useRef(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
@@ -41,7 +47,10 @@ function App() {
     const isAuthForm = event.type === 'FORM_REQUEST' &&
       (event.form_type === 'phone_auth' || event.form_type === 'login_otp' || event.form_type === 'name_collection')
 
-    if (isAuthForm || sessionReadyRef.current) {
+    // Always process payment-related events
+    const isPaymentEvent = event.type === 'PAYMENT_METHOD_SELECTION'
+
+    if (isAuthForm || isPaymentEvent || sessionReadyRef.current) {
       handleEvent(event)
       // If auth form is received, auto-dismiss session modal and mark session ready
       if (isAuthForm && !sessionReadyRef.current) {
@@ -95,6 +104,11 @@ function App() {
     handleSendMessage(value)
   }, [handleSendMessage])
 
+  // Handle checkout button click
+  const handleCheckout = useCallback(() => {
+    handleSendMessage('I want to checkout for dine-in')
+  }, [handleSendMessage])
+
   // Handle form submission
   const handleFormSubmit = useCallback((formType, data) => {
     console.log('handleFormSubmit called:', { formType, data })
@@ -109,15 +123,40 @@ function App() {
     sendMessage(message)
   }, [sendMessage])
 
+  // Handle payment method selection
+  const handlePaymentMethodSelect = useCallback((methodAction) => {
+    // Send the payment method action as a message
+    handleSendMessage(methodAction)
+  }, [handleSendMessage])
+
   // Render message based on type
   const renderMessage = (message) => {
+    console.log('renderMessage called for:', message.type, 'id:', message.id)
     switch (message.type) {
       case 'cart':
-        return <CartCard key={message.id} data={message.data} />
+        return <CartCard key={message.id} data={message.data} onCheckout={handleCheckout} />
       case 'menu':
         return <MenuCard key={message.id} data={message.data} onAddToCart={handleAddToCart} />
       case 'order':
         return <OrderCard key={message.id} data={message.data} />
+      case 'payment_method_selection':
+        console.log('Rendering PaymentMethodCard with data:', message.data)
+        return (
+          <PaymentMethodCard
+            key={message.id}
+            data={message.data}
+            onSelectMethod={handlePaymentMethodSelect}
+          />
+        )
+      case 'payment_success':
+        console.log('Rendering PaymentSuccessCard with data:', message.data)
+        return (
+          <PaymentSuccessCard
+            key={message.id}
+            data={message.data}
+            onQuickReply={handleQuickReply}
+          />
+        )
       case 'quick_replies':
         return (
           <QuickReplies
@@ -156,6 +195,39 @@ function App() {
       </div>
     )
   }
+
+  // Voice Chat Hook Integration
+  const [selectedLanguage, setSelectedLanguage] = useState("English")
+  const {
+    connect: connectVoice,
+    startRecording,
+    stopRecording,
+    isRecording: isVoiceRecording,
+    isProcessing: isVoiceProcessing, // New
+    isUserSpeaking,
+    isConnected: isVoiceConnected,
+    transcript // Get realtime transcript
+  } = useVoiceChat("session_" + Math.random().toString(36).substr(2, 9)) // Simple session ID for prototype
+
+  // Auto-connect voice when language changes or session is ready
+  useEffect(() => {
+    if (sessionReady) {
+      // Connect to voice socket with selected language
+      // We disconnect/reconnect to update the System Prompt with the new language
+      connectVoice(selectedLanguage);
+    }
+  }, [sessionReady, selectedLanguage, connectVoice]);
+
+  // Effect: When transcript updates, show it as a temporary "Assistant is speaking..." bubble or append to messages
+  // For V1 Prototype: We just log it or show it in the input area.
+  // Ideally, we want to push a new message when transcript finishes.
+  useEffect(() => {
+    if (transcript) {
+      // In a real app, we'd debounce this and push to 'messages'
+      console.log("Realtime Transcript:", transcript);
+    }
+  }, [transcript]);
+
 
   return (
     <div className="h-screen flex flex-col bg-chat-bg">
@@ -199,8 +271,30 @@ function App() {
             </div>
           )}
 
+
           {/* Messages */}
+          {console.log('Rendering messages array, length:', messages.length, 'types:', messages.map(m => m.type))}
           {messages.map(renderMessage)}
+
+          {/* Realtime Voice Transcript (Streaming Bubble) */}
+          {transcript && (
+            <div className="flex justify-start mb-4 animate-pulse">
+              <div className="bg-chat-secondary rounded-2xl rounded-tl-sm px-5 py-3.5 max-w-[80%] text-white shadow-sm border border-chat-border/50">
+                <p className="text-[15px] leading-relaxed opacity-90 whitespace-pre-wrap">{transcript}</p>
+              </div>
+            </div>
+          )}
+
+          {/* User Speaking Indicator */}
+          {isUserSpeaking && !transcript && (
+            <div className="flex justify-start mb-4">
+              <div className="flex items-center gap-2 text-gray-400 text-sm">
+                <span className="w-2 h-2 bg-accent rounded-full animate-pulse"></span>
+                User is speaking...
+              </div>
+            </div>
+          )}
+
 
           {/* Activity Indicator */}
           {activity && <ActivityIndicator message={activity} />}
@@ -211,9 +305,29 @@ function App() {
       <ChatInput
         onSend={handleSendMessage}
         disabled={status !== 'connected' || isStreaming || showSessionModal}
+
+        // Voice Props
+        isRecording={isVoiceRecording}
+        isProcessing={isVoiceProcessing}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        selectedLanguage={selectedLanguage}
+        onLanguageChange={setSelectedLanguage}
       />
     </div>
   )
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/payment/success" element={<PaymentSuccess />} />
+        <Route path="/payment/failure" element={<PaymentFailure />} />
+        <Route path="/" element={<ChatInterface />} />
+      </Routes>
+    </Router>
+  );
 }
 
 export default App

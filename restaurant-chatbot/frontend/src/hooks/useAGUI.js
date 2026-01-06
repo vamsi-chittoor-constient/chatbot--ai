@@ -138,6 +138,60 @@ function aguiReducer(state, action) {
         }],
       }
 
+    case 'PAYMENT_METHOD_SELECTION':
+      console.log('REDUCER: PAYMENT_METHOD_SELECTION', action.payload)
+      const newMessage = {
+        id: Date.now(),
+        role: 'system',
+        type: 'payment_method_selection',
+        data: {
+          methods: action.payload.methods,
+          amount: action.payload.amount,
+          order_id: action.payload.order_id,
+        },
+        timestamp: new Date(),
+      }
+      console.log('REDUCER: Created message:', newMessage)
+      const newState = {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'payment_method_selection'), newMessage],
+      }
+      console.log('REDUCER: New messages array length:', newState.messages.length)
+      console.log('REDUCER: Last message type:', newState.messages[newState.messages.length - 1]?.type)
+      return newState
+
+    case 'PAYMENT_LINK':
+      console.log('REDUCER: PAYMENT_LINK', action.payload)
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+          id: Date.now(),
+          role: 'assistant',
+          content: `🔗 **Payment Link Generated**\n\nPlease complete your payment of ₹${action.payload.amount} using the link below:\n\n[Click here to pay](${action.payload.payment_link})\n\nPayment link: ${action.payload.payment_link}\n\nExpires at: ${new Date(action.payload.expires_at).toLocaleString()}`,
+          timestamp: new Date(),
+        }],
+      }
+
+    case 'PAYMENT_SUCCESS':
+      console.log('REDUCER: PAYMENT_SUCCESS', action.payload)
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+          id: Date.now(),
+          role: 'system',
+          type: 'payment_success',
+          data: {
+            order_id: action.payload.order_id,
+            order_number: action.payload.order_number,
+            amount: action.payload.amount,
+            payment_id: action.payload.payment_id,
+            order_type: action.payload.order_type,
+            quick_replies: action.payload.quick_replies || [],
+          },
+          timestamp: new Date(),
+        }],
+      }
+
     case 'FORM_REQUEST':
       // Mark auth forms as ephemeral so they don't persist in chat history
       const isAuthForm = ['phone_auth', 'login_otp', 'name_collection'].includes(action.payload.form_type)

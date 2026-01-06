@@ -69,6 +69,8 @@ class EventType(str, Enum):
     MENU_DATA = "MENU_DATA"
     QUICK_REPLIES = "QUICK_REPLIES"
     PAYMENT_LINK = "PAYMENT_LINK"
+    PAYMENT_METHOD_SELECTION = "PAYMENT_METHOD_SELECTION"
+    PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
 
 
 @dataclass
@@ -235,6 +237,44 @@ class PaymentLinkEvent(AGUIEvent):
     payment_link: str = ""
     amount: float = 0.0
     expires_at: str = ""
+
+
+@dataclass
+class PaymentMethodSelectionEvent(AGUIEvent):
+    """
+    Emitted with payment method selection options (card UI).
+
+    Contains:
+    - methods: List of payment methods with label, action, description
+    - amount: Order total amount
+    - order_id: Order display ID
+    """
+    type: EventType = EventType.PAYMENT_METHOD_SELECTION
+    methods: List[Dict[str, str]] = field(default_factory=list)
+    amount: float = 0.0
+    order_id: str = ""
+
+
+@dataclass
+class PaymentSuccessEvent(AGUIEvent):
+    """
+    Emitted when payment is successfully completed.
+
+    Contains:
+    - order_id: Order display ID
+    - order_number: Order invoice number
+    - amount: Payment amount
+    - payment_id: Razorpay payment ID
+    - order_type: dine_in or takeaway
+    - quick_replies: Next action buttons (View Receipt, Track Order, etc.)
+    """
+    type: EventType = EventType.PAYMENT_SUCCESS
+    order_id: str = ""
+    order_number: str = ""
+    amount: float = 0.0
+    payment_id: str = ""
+    order_type: str = "takeaway"
+    quick_replies: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -1450,6 +1490,134 @@ def emit_payment_link(session_id: str, payment_link: str, amount: float, expires
         )
     except Exception as e:
         logger.error("payment_link_emit_failed", error=str(e), session_id=session_id)
+
+
+def emit_payment_method_selection(session_id: str, methods: List[Dict[str, str]], amount: float, order_id: str = ""):
+    """
+    Emit payment method selection card for visual UI.
+
+    This provides a card-based UI (similar to menu card) for users to select
+    their preferred payment method visually instead of using quick reply buttons.
+
+    Thread-safe: uses _put_event_threadsafe() for cross-thread queue operations.
+
+    Args:
+        session_id: The session ID
+        methods: List of payment method objects with label, action, description
+        amount: Order total amount
+        order_id: Order display ID
+
+    Example:
+        emit_payment_method_selection(session_id, [
+            {
+                "label": "💳 Pay Online",
+                "action": "pay_online",
+                "description": "Secure payment via Razorpay (Card/UPI/NetBanking)"
+            },
+            {
+                "label": "💵 Cash",
+                "action": "pay_cash",
+                "description": "Pay cash on delivery or at counter"
+            },
+            {
+                "label": "💳 Card at Counter",
+                "action": "pay_card_counter",
+                "description": "Pay by card when you arrive"
+            }
+        ], 450.0, "ORD-ABC12345")
+    """
+    try:
+        event = PaymentMethodSelectionEvent(
+            methods=methods,
+            amount=amount,
+            order_id=order_id
+        )
+
+        # Use thread-safe put for cross-thread operation
+        _put_event_threadsafe(session_id, event)
+
+        # Set flag in Redis to prevent quick replies from overriding payment card
+        # This flag is checked in _emit_response_quick_replies()
+        from app.core.redis import get_sync_redis_client
+        redis_client = get_sync_redis_client()
+        redis_client.setex(f"payment_card_shown:{session_id}", 300, "1")  # 5 min TTL
+
+        logger.info(
+            "payment_method_selection_emitted",
+            session_id=session_id,
+            methods_count=len(methods),
+            amount=amount,
+            order_id=order_id
+        )
+    except Exception as e:
+        logger.error("payment_method_selection_emit_failed", error=str(e), session_id=session_id)
+
+
+def emit_payment_success(
+    session_id: str,
+    order_id: str,
+    order_number: str,
+    amount: float,
+    payment_id: str,
+    order_type: str = "takeaway",
+    quick_replies: List[Dict[str, str]] = None
+):
+    """
+    Emit payment success confirmation card with quick replies for next actions.
+
+    Args:
+        session_id: The session ID
+        order_id: Order UUID
+        order_number: Order invoice number (e.g., ORD-ABC123)
+        amount: Payment amount
+        payment_id: Razorpay payment ID
+        order_type: dine_in or takeaway
+        quick_replies: Next action buttons (View Receipt, Track Order, etc.)
+
+    Example:
+        emit_payment_success(
+            session_id="sess_123",
+            order_id="ab2a4a30-e7e5-42bb-b736-ab72c538c78a",
+            order_number="ORD-EB85D444",
+            amount=270.0,
+            payment_id="pay_S0ZryXDgxz1p2z",
+            order_type="takeaway",
+            quick_replies=[
+                {"label": "📄 View Receipt", "action": "view_receipt"},
+                {"label": "📦 Track Order", "action": "track_order"},
+                {"label": "🍽️ Order More", "action": "order_more"}
+            ]
+        )
+    """
+    try:
+        if quick_replies is None:
+            quick_replies = [
+                {"label": "📄 View Receipt", "action": "view_receipt"},
+                {"label": "📦 Track Order", "action": "track_order"},
+                {"label": "🍽️ Order More", "action": "order_more"}
+            ]
+
+        event = PaymentSuccessEvent(
+            order_id=order_id,
+            order_number=order_number,
+            amount=amount,
+            payment_id=payment_id,
+            order_type=order_type,
+            quick_replies=quick_replies
+        )
+
+        # Use thread-safe put for cross-thread operation
+        _put_event_threadsafe(session_id, event)
+
+        logger.info(
+            "payment_success_emitted",
+            session_id=session_id,
+            order_number=order_number,
+            amount=amount,
+            order_type=order_type
+        )
+    except Exception as e:
+        logger.error("payment_success_emit_failed", error=str(e), session_id=session_id)
 
 
 def _get_activity_type_for_tool(tool_name: str) -> str:

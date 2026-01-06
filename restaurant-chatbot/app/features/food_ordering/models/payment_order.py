@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import UUID as UUID_TYPE, JSONB
 
 if TYPE_CHECKING:
     from app.features.food_ordering.models.payment_transaction import PaymentTransaction
+    from app.features.food_ordering.models.order import Order
 
 
 class PaymentOrder(Base):
@@ -44,7 +45,6 @@ class PaymentOrder(Base):
     )
     restaurant_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
-        ForeignKey("restaurant_table.restaurant_id", ondelete="SET NULL"),
         nullable=True
     )
     customer_id: Mapped[Optional[UUID]] = mapped_column(
@@ -80,7 +80,7 @@ class PaymentOrder(Base):
 
     # Additional Info
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    payment_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    payment_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
     # Audit Fields
     created_at: Mapped[datetime] = mapped_column(
@@ -100,6 +100,10 @@ class PaymentOrder(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Relationships
+    order: Mapped[Optional["Order"]] = relationship(
+        "Order",
+        back_populates="payment_order"
+    )
     transactions: Mapped[List["PaymentTransaction"]] = relationship(
         "PaymentTransaction",
         back_populates="payment_order",
