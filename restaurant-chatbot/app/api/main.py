@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse
 
 from app.core.config import config
 from app.api.middleware.logging import setup_logging
-from app.api.routes import health, config as config_routes, chat, payment, llm_manager, stream
+from app.api.routes import health, config as config_routes, chat, payment, llm_manager, stream, voice
 
 # Setup structured logging
 setup_logging()
@@ -333,6 +333,7 @@ app.include_router(payment.router, prefix="/api/v1", tags=["payment"])
 # Debug router removed - was using LangGraph orchestrator which is now disabled
 app.include_router(llm_manager.router, prefix="/api/v1", tags=["llm-manager"])  # LLM Manager monitoring
 app.include_router(stream.router, prefix="/api/v1", tags=["ag-ui-streaming"])  # AG-UI SSE streaming
+app.include_router(voice.router, prefix="/api/v1", tags=["voice"])  # Voice chat WebSocket
 
 # ============ TESTING MODULE ROUTES ============
 from app.api.routes import testing

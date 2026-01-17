@@ -48,3 +48,8 @@ pybreaker
 
 # Payment Gateway
 razorpay
+
+# Voice Chat (Speech-to-Text & Text-to-Speech)
+torch
+numpy
+silero-vad
