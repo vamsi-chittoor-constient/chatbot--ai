@@ -109,8 +109,7 @@ class Order(Base):
     # Legacy payment relationship (for backward compatibility with app.shared.models.payment)
     payments: Mapped[List["Payment"]] = relationship(
         "Payment",
-        back_populates="order",
-        foreign_keys="Payment.order_id"
+        back_populates="order"
     )
     # New payment order relationship
     payment_order: Mapped[Optional["PaymentOrder"]] = relationship(
