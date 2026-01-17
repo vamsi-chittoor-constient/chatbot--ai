@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE_ENTITY: float = 0.1
     OPENAI_TEMPERATURE_SUMMARY: float = 0.1
 
+    # Azure OpenAI Configuration (optional alternative to standard OpenAI)
+    USE_AZURE_OPENAI: Optional[bool] = False
+    AZURE_OPENAI_ENDPOINT: Optional[str] = None
+    AZURE_OPENAI_API_KEY: Optional[str] = None
+    AZURE_OPENAI_API_VERSION: Optional[str] = None
+    AZURE_OPENAI_DEPLOYMENT_GPT4O: Optional[str] = None
+    AZURE_OPENAI_DEPLOYMENT_GPT4O_MINI: Optional[str] = None
+    AZURE_GPT4O_RPM_LIMIT: Optional[int] = 500
+    AZURE_GPT4O_TPM_LIMIT: Optional[int] = 50000
+    AZURE_GPT4O_MINI_RPM_LIMIT: Optional[int] = 30000
+    AZURE_GPT4O_MINI_TPM_LIMIT: Optional[int] = 2000000
+    AZURE_BUFFER_PERCENT: Optional[int] = 80
+
     # Multi-Account OpenAI Configuration (20 accounts)
     ACCOUNT_1_API_KEY: Optional[str] = None
     ACCOUNT_1_GPT4O_RPM_LIMIT: int = 500
@@ -235,6 +248,7 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: Optional[str] = None
     RAZORPAY_KEY_SECRET: Optional[str] = None
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
+    PAYMENT_TEST_MODE: Optional[bool] = False
     PAYMENT_LINK_EXPIRY_MINUTES: int = 15
     PAYMENT_MAX_RETRY_ATTEMPTS: int = 3
     PAYMENT_STATUS_POLL_INTERVAL_SECONDS: int = 5
@@ -288,6 +302,9 @@ class Settings(BaseSettings):
     WHATSAPP_API_TOKEN: Optional[str] = None
     WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
     WHATSAPP_BUSINESS_ACCOUNT_ID: Optional[str] = None
+    WHATSAPP_PHONE_NUMBER: Optional[str] = None
+    WHATSAPP_VERIFY_TOKEN: Optional[str] = None
+    WHATSAPP_WEBHOOK_URL: Optional[str] = None
 
     # Email (AWS SES)
     AWS_ACCESS_KEY_ID: Optional[str] = None
