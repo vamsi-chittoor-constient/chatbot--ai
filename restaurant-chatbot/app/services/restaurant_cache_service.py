@@ -79,28 +79,21 @@ class RestaurantCache:
                     try:
                         # Build cache data
                         cache_data = {
-                            "restaurant_id": restaurant.id,
+                            "restaurant_id": str(restaurant.id),
                             "name": restaurant.name,
                             "description": restaurant.description,
                             "address": restaurant.address,
                             "phone": restaurant.phone,
                             "email": restaurant.email,
-                            "api_key": restaurant.api_key,
-                            "business_hours": restaurant.business_hours,
-                            "policies": restaurant.policies,
+                            "settings": restaurant.settings or {},
+                            "opening_time": restaurant.opening_time.isoformat() if restaurant.opening_time else None,
+                            "closing_time": restaurant.closing_time.isoformat() if restaurant.closing_time else None,
+                            "is_open": restaurant.is_open,
                             "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
                             "updated_at": restaurant.updated_at.isoformat() if restaurant.updated_at else None
                         }
 
-                        # Store in Redis with 24-hour TTL (cache by API key)
-                        cache_key = f"{self.key_prefix}{restaurant.api_key}"
-                        await self.cache_service.set(
-                            key=cache_key,
-                            value=json.dumps(cache_data),
-                            ttl=self.cache_ttl
-                        )
-
-                        # Also cache by restaurant ID for lookups by ID
+                        # Store in Redis with 24-hour TTL (cache by restaurant ID)
                         id_cache_key = f"{self.id_key_prefix}{restaurant.id}"
                         await self.cache_service.set(
                             key=id_cache_key,
@@ -113,8 +106,7 @@ class RestaurantCache:
                         logger.info(
                             "restaurant_config_cached",
                             restaurant_id=restaurant.id,
-                            restaurant_name=restaurant.name,
-                            api_key_prefix=restaurant.api_key[:8]
+                            restaurant_name=restaurant.name
                         )
 
                     except Exception as e:
@@ -149,95 +141,20 @@ class RestaurantCache:
 
     async def get_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
         """
-        Get restaurant configuration by API key.
+        DEPRECATED: API key authentication removed from schema.
+        Use get_by_id() instead.
 
-        Flow:
-        1. Check Redis cache
-        2. If cache miss, query database
-        3. Populate cache for next request
-        4. Return restaurant data
-
-        Args:
-            api_key: Restaurant API key
-
-        Returns:
-            Restaurant configuration dict or None if not found
+        The api_key field was removed in migration 13. Restaurant auth is now
+        handled differently (single restaurant, no multi-tenant api_key auth).
         """
-        cache_key = f"{self.key_prefix}{api_key}"
-
-        try:
-            # Try to get from cache first
-            cached_data = await self.cache_service.get(cache_key)
-
-            if cached_data:
-                logger.debug(
-                    "restaurant_config_cache_hit",
-                    api_key_prefix=api_key[:8]
-                )
-                return json.loads(cached_data)
-
-            # Cache miss - query database
-            logger.info(
-                "restaurant_config_cache_miss",
-                api_key_prefix=api_key[:8]
-            )
-
-            async with get_db_session() as session:
-                query = select(Restaurant).where(Restaurant.api_key == api_key)
-                result = await session.execute(query)
-                restaurant = result.scalar_one_or_none()
-
-                if not restaurant:
-                    logger.warning(
-                        "restaurant_config_not_found",
-                        api_key_prefix=api_key[:8]
-                    )
-                    return None
-
-                # Build cache data
-                cache_data = {
-                    "restaurant_id": restaurant.id,
-                    "name": restaurant.name,
-                    "description": restaurant.description,
-                    "address": restaurant.address,
-                    "phone": restaurant.phone,
-                    "email": restaurant.email,
-                    "api_key": restaurant.api_key,
-                    "business_hours": restaurant.business_hours,
-                    "policies": restaurant.policies,
-                    "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
-                    "updated_at": restaurant.updated_at.isoformat() if restaurant.updated_at else None
-                }
-
-                # Populate cache for next request
-                try:
-                    await self.cache_service.set(
-                        key=cache_key,
-                        value=json.dumps(cache_data),
-                        ttl=self.cache_ttl
-                    )
-                except Exception as cache_error:
-                    logger.warning(
-                        "restaurant_config_cache_set_failed",
-                        api_key_prefix=api_key[:8],
-                        error=str(cache_error)
-                    )
-
-                logger.info(
-                    "restaurant_config_cached_from_db",
-                    restaurant_id=restaurant.id,
-                    restaurant_name=restaurant.name
-                )
-
-                return cache_data
-
-        except Exception as e:
-            logger.error(
-                "restaurant_config_fetch_error",
-                api_key_prefix=api_key[:8],
-                error=str(e)
-            )
-            return None
+        logger.warning(
+            "get_by_api_key_deprecated",
+            message="API key authentication is deprecated. Use get_by_id() instead."
+        )
+        raise NotImplementedError(
+            "API key authentication removed. Restaurant.api_key field no longer exists. "
+            "Use get_by_id() instead."
+        )
 
     async def get_by_id(self, restaurant_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -288,30 +205,23 @@ class RestaurantCache:
 
                 # Build cache data
                 cache_data = {
-                    "restaurant_id": restaurant.id,
+                    "restaurant_id": str(restaurant.id),
                     "name": restaurant.name,
                     "description": restaurant.description,
                     "address": restaurant.address,
                     "phone": restaurant.phone,
                     "email": restaurant.email,
-                    "api_key": restaurant.api_key,
-                    "business_hours": restaurant.business_hours,
-                    "policies": restaurant.policies,
+                    "settings": restaurant.settings or {},
+                    "opening_time": restaurant.opening_time.isoformat() if restaurant.opening_time else None,
+                    "closing_time": restaurant.closing_time.isoformat() if restaurant.closing_time else None,
+                    "is_open": restaurant.is_open,
                     "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
                     "updated_at": restaurant.updated_at.isoformat() if restaurant.updated_at else None
                 }
 
-                # Populate cache for next request (cache by both ID and API key)
+                # Populate cache for next request (cache by ID)
                 await self.cache_service.set(
                     key=cache_key,
-                    value=json.dumps(cache_data),
-                    ttl=self.cache_ttl
-                )
-
-                # Also cache by API key
-                api_key_cache_key = f"{self.key_prefix}{restaurant.api_key}"
-                await self.cache_service.set(
-                    key=api_key_cache_key,
                     value=json.dumps(cache_data),
                     ttl=self.cache_ttl
                 )
@@ -332,50 +242,44 @@ class RestaurantCache:
             )
             return None
 
-    async def refresh_restaurant(self, api_key: str) -> bool:
+    async def refresh_restaurant(self, restaurant_id: str) -> bool:
         """
         Manually refresh a specific restaurant's cache.
         Called when restaurant config is updated.
 
         Args:
-            api_key: Restaurant API key
+            restaurant_id: Restaurant ID
 
         Returns:
             True if successful, False otherwise
         """
         try:
             async with get_db_session() as session:
-                query = select(Restaurant).where(Restaurant.api_key == api_key)
+                query = select(Restaurant).where(Restaurant.id == restaurant_id)
                 result = await session.execute(query)
                 restaurant = result.scalar_one_or_none()
 
                 if not restaurant:
-                    logger.warning("restaurant_config_refresh_not_found", api_key_prefix=api_key[:8])
+                    logger.warning("restaurant_config_refresh_not_found", restaurant_id=restaurant_id)
                     return False
 
                 # Build cache data
                 cache_data = {
-                    "restaurant_id": restaurant.id,
+                    "restaurant_id": str(restaurant.id),
                     "name": restaurant.name,
                     "description": restaurant.description,
                     "address": restaurant.address,
                     "phone": restaurant.phone,
                     "email": restaurant.email,
-                    "api_key": restaurant.api_key,
-                    "business_hours": restaurant.business_hours,
-                    "policies": restaurant.policies,
+                    "settings": restaurant.settings or {},
+                    "opening_time": restaurant.opening_time.isoformat() if restaurant.opening_time else None,
+                    "closing_time": restaurant.closing_time.isoformat() if restaurant.closing_time else None,
+                    "is_open": restaurant.is_open,
                     "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
                     "updated_at": restaurant.updated_at.isoformat() if restaurant.updated_at else None
                 }
 
-                # Update cache (both by API key and ID)
-                cache_key = f"{self.key_prefix}{api_key}"
-                await self.cache_service.set(
-                    key=cache_key,
-                    value=json.dumps(cache_data),
-                    ttl=self.cache_ttl
-                )
-
+                # Update cache by ID
                 id_cache_key = f"{self.id_key_prefix}{restaurant.id}"
                 await self.cache_service.set(
                     key=id_cache_key,
@@ -392,28 +296,28 @@ class RestaurantCache:
                 return True
 
         except Exception as e:
-            logger.error("restaurant_config_refresh_error", api_key_prefix=api_key[:8], error=str(e))
+            logger.error("restaurant_config_refresh_error", restaurant_id=restaurant_id, error=str(e))
             return False
 
-    async def invalidate_restaurant(self, api_key: str) -> bool:
+    async def invalidate_restaurant(self, restaurant_id: str) -> bool:
         """
         Remove restaurant from cache.
 
         Args:
-            api_key: Restaurant API key
+            restaurant_id: Restaurant ID
 
         Returns:
             True if successful
         """
         try:
-            cache_key = f"{self.key_prefix}{api_key}"
+            cache_key = f"{self.id_key_prefix}{restaurant_id}"
             await self.cache_service.delete(cache_key)
 
-            logger.info("restaurant_config_invalidated", api_key_prefix=api_key[:8])
+            logger.info("restaurant_config_invalidated", restaurant_id=restaurant_id)
             return True
 
         except Exception as e:
-            logger.error("restaurant_config_invalidation_error", api_key_prefix=api_key[:8], error=str(e))
+            logger.error("restaurant_config_invalidation_error", restaurant_id=restaurant_id, error=str(e))
             return False
 
 
