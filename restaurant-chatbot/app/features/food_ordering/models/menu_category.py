@@ -37,9 +37,9 @@ class MenuCategory(Base):
         ForeignKey("restaurant_table.restaurant_id", ondelete="CASCADE"),
         nullable=True
     )
-    menu_parent_category_id: Mapped[Optional[UUID]] = mapped_column(
+    menu_section_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
-        ForeignKey("menu_categories.menu_category_id", ondelete="CASCADE"),
+        ForeignKey("menu_sections.menu_section_id", ondelete="CASCADE"),
         nullable=True
     )
     menu_category_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -69,19 +69,7 @@ class MenuCategory(Base):
 
     # Relationships
     # restaurant: Mapped["Restaurant"] = relationship("Restaurant", back_populates="menu_categories")
-    # Self-referencing relationship for parent category
-    parent_category: Mapped[Optional["MenuCategory"]] = relationship(
-        "MenuCategory",
-        remote_side=[menu_category_id],
-        back_populates="child_categories",
-        foreign_keys=[menu_parent_category_id]
-    )
-    child_categories: Mapped[List["MenuCategory"]] = relationship(
-        "MenuCategory",
-        back_populates="parent_category",
-        cascade="all, delete-orphan",
-        foreign_keys=[menu_parent_category_id]
-    )
+    # section: Mapped[Optional["MenuSection"]] = relationship("MenuSection", back_populates="categories")
     sub_categories: Mapped[List["MenuSubCategory"]] = relationship(
         "MenuSubCategory",
         back_populates="category",
@@ -98,7 +86,7 @@ class MenuCategory(Base):
             name='check_category_status'
         ),
         Index('idx_menu_categories_restaurant', 'restaurant_id', postgresql_where=text('is_deleted = false')),
-        Index('idx_menu_categories_parent', 'menu_parent_category_id', postgresql_where=text('is_deleted = false')),
+        Index('idx_menu_categories_section', 'menu_section_id', postgresql_where=text('is_deleted = false')),
         Index('idx_menu_categories_status', 'menu_category_status', postgresql_where=text('is_deleted = false')),
         Index('idx_menu_categories_rank', 'menu_category_rank', postgresql_where=text('is_deleted = false')),
         {'extend_existing': True}

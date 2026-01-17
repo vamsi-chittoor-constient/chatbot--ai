@@ -3,11 +3,15 @@ Database Migration Runner
 =========================
 Automatically runs SQL migrations from db/ directory on application startup.
 
+Migration Strategy (Hybrid Approach):
+- Docker handles: 01-schema.sql, 02-data.sql, 03-app-tables.sql (initial setup)
+- App handles: 04+ migrations (incremental changes)
+
 Features:
-- Runs migrations in numerical order (01-*, 02-*, 03-*, etc.)
+- Runs migrations in numerical order (04-*, 05-*, 06-*, etc.)
 - Tracks which migrations have been run
 - Idempotent - safe to run multiple times
-- Skips already-run migrations
+- Skips already-run migrations and Docker-managed migrations (01-03)
 """
 import os
 from pathlib import Path
@@ -50,9 +54,11 @@ async def run_migrations():
                 logger.warning("migrations_skipped", reason="db directory not found")
                 return
 
+            # Skip init.sql and Docker-managed migrations (01-03)
+            # Docker handles initial schema setup, app handles incremental migrations (04+)
             migration_files = sorted([
                 f for f in db_dir.glob("*.sql")
-                if f.name not in ['init.sql']  # Skip init.sql
+                if f.name not in ['init.sql', '01-schema.sql', '02-data.sql', '03-app-tables.sql']
             ])
 
             if not migration_files:

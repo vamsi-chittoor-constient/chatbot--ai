@@ -174,22 +174,25 @@ class RestaurantConfigRequest(BaseModel):
 
 
 class RestaurantConfigResponse(BaseModel):
-    """Response model for restaurant configuration"""
+    """Response model for restaurant configuration (matches restaurant_config table)"""
     model_config = ConfigDict(from_attributes=True)
 
-    id: str = Field(..., description="System branch identifier (PK) - Used in foreign keys")
-    restaurant_id: Optional[str] = Field(None, description="Restaurant chain/brand identifier")
-    branch_id: Optional[str] = Field(None, description="Human-readable branch identifier")
+    id: str = Field(..., description="Restaurant configuration ID (UUID)")
     name: str = Field(..., description="Restaurant name")
-    branch_name: Optional[str] = Field(None, description="Branch-specific display name")
-    branch_code: Optional[str] = Field(None, description="Short branch code")
-    description: Optional[str] = Field(None, description="Description")
-    address: Optional[str] = Field(None, description="Address")
+    description: Optional[str] = Field(None, description="Restaurant description")
+    address: Optional[str] = Field(None, description="Restaurant address")
     phone: Optional[str] = Field(None, description="Phone number")
     email: Optional[str] = Field(None, description="Email address")
-    business_hours: Dict[str, Any] = Field(..., description="Business hours")
-    policies: Optional[Dict[str, Any]] = Field(None, description="Policies")
-    settings: Optional[Dict[str, Any]] = Field(None, description="Settings")
+    website: Optional[str] = Field(None, description="Website URL")
+    logo_url: Optional[str] = Field(None, description="Logo image URL")
+    timezone: Optional[str] = Field(None, description="Timezone")
+    currency: Optional[str] = Field(None, description="Currency code")
+    tax_rate: Optional[Decimal] = Field(None, description="Tax rate percentage")
+    service_charge_rate: Optional[Decimal] = Field(None, description="Service charge percentage")
+    opening_time: Optional[str] = Field(None, description="Opening time")
+    closing_time: Optional[str] = Field(None, description="Closing time")
+    is_open: Optional[bool] = Field(None, description="Whether restaurant is currently open")
+    settings: Optional[Dict[str, Any]] = Field(None, description="Additional settings (includes business_hours and policies)")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 

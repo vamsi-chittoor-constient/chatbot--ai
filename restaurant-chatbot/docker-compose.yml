@@ -107,7 +107,7 @@ services:
       - app-logs:/app/logs
 
   # ===========================================================================
-  # PostgreSQL Database (Port 5432)
+  # PostgreSQL Database (Port 5433)
   # ===========================================================================
   postgres:
     image: postgres:15-alpine
@@ -118,9 +118,10 @@ services:
       - POSTGRES_PASSWORD=admin123
       - POSTGRES_DB=restaurant_ai
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Docker handles initial schema setup (01-03), app handles incremental migrations (04+)
       - ./db/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
       - ./db/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./db/02-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro

@@ -9,6 +9,8 @@ Models in this file:
 - Table
 """
 
+from uuid import UUID
+
 from app.shared.models.base import (
     Base, func, datetime, Optional, List,
     String, Text, DateTime, Boolean, JSON, Integer,
@@ -18,6 +20,7 @@ from app.shared.models.base import (
     UserStatus, BookingStatus, OrderStatus, PaymentStatus,
     MessageDirection, MessageChannel, ComplaintStatus
 )
+from sqlalchemy.dialects.postgresql import UUID as UUID_TYPE
 
 
 class Restaurant(Base):
@@ -27,7 +30,7 @@ class Restaurant(Base):
     """
     __tablename__ = "restaurant_config"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[UUID] = mapped_column(UUID_TYPE(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -76,7 +79,7 @@ class Table(Base):
     __tablename__ = "tables"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    restaurant_id: Mapped[str] = mapped_column(String(20), ForeignKey("restaurant_config.id"))
+    restaurant_id: Mapped[UUID] = mapped_column(UUID_TYPE(as_uuid=True), ForeignKey("restaurant_config.id"))
     table_number: Mapped[str] = mapped_column(String(20), nullable=False)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     location: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
