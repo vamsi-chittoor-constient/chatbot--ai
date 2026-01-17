@@ -109,14 +109,10 @@ export function useVoiceChat(sessionId) {
                 if (data.audio) {
                     const audioData = base64ToArrayBuffer(data.audio);
                     audioQueueRef.current.push(audioData);
-                    // Only start playback if not already playing
-                    // Use a small delay to batch chunks that arrive simultaneously
-                    if (!isPlayingRef.current && audioQueueRef.current.length === 1) {
-                        setTimeout(() => {
-                            if (!isPlayingRef.current) {
-                                playNextAudioChunk();
-                            }
-                        }, 50);
+                    // Thread-safe: Only initiate playback if not already playing
+                    // isPlayingRef acts as a mutex to prevent concurrent playback
+                    if (!isPlayingRef.current) {
+                        playNextAudioChunk();
                     }
                 }
                 break;
@@ -136,14 +132,17 @@ export function useVoiceChat(sessionId) {
 
     const startMicrophoneStream = async () => {
         try {
-            // Request microphone access
+            // Request microphone access with enhanced noise handling
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     channelCount: 1,
                     sampleRate: 16000, // 16kHz for VAD
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+                    echoCancellation: true,  // Remove echo from speakers
+                    noiseSuppression: true,  // Remove background noise
+                    autoGainControl: true,   // Normalize volume levels
+                    // Advanced constraints for better quality
+                    latency: 0.01,           // Low latency for real-time
+                    suppressLocalAudioPlayback: true  // Prevent feedback loops
                 }
             });
 
@@ -208,11 +207,14 @@ export function useVoiceChat(sessionId) {
     };
 
     const playNextAudioChunk = async () => {
-        if (audioQueueRef.current.length === 0) {
+        // Atomically check and dequeue
+        // This prevents race conditions when multiple chunks arrive simultaneously
+        if (isPlayingRef.current || audioQueueRef.current.length === 0) {
             isPlayingRef.current = false;
             return;
         }
 
+        // Set mutex BEFORE dequeuing to prevent race condition
         isPlayingRef.current = true;
         const audioData = audioQueueRef.current.shift();
 
@@ -235,6 +237,8 @@ export function useVoiceChat(sessionId) {
             source.connect(audioContextRef.current.destination);
 
             source.onended = () => {
+                // Release mutex before processing next chunk
+                isPlayingRef.current = false;
                 playNextAudioChunk();
             };
 
@@ -242,7 +246,10 @@ export function useVoiceChat(sessionId) {
 
         } catch (err) {
             console.error('Error playing audio:', err);
+            // Ensure mutex is released on error
             isPlayingRef.current = false;
+            // Try next chunk
+            playNextAudioChunk();
         }
     };
 

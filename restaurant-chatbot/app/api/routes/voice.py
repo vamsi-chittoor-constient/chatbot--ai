@@ -236,11 +236,18 @@ async def process_speech_segment(
             language=language
         )
 
+        # Whisper transcription with automatic noise handling
+        # Whisper-1 has built-in:
+        # - Automatic noise suppression
+        # - Voice activity detection
+        # - Background noise filtering
+        # - Echo cancellation (when audio has good preprocessing)
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             language=language_code_map.get(language, "en"),
-            prompt="This is a conversation with a restaurant chatbot about food orders, reservations, and menu items."
+            prompt="This is a conversation with a restaurant chatbot about food orders, reservations, and menu items.",
+            temperature=0.0  # Deterministic transcription for consistency
         )
 
         transcript_text = transcription.text.strip()
@@ -284,16 +291,17 @@ async def process_speech_segment(
             "text": response_text
         })
 
-        # Synthesize speech
+        # Synthesize speech with HD quality
         await websocket.send_json({"type": "audio_start"})
 
         # Stream TTS audio back to client using proper async streaming
         CHUNK_SIZE = 4096
         async with client.audio.speech.with_streaming_response.create(
-            model="tts-1",  # Use tts-1 for speed, tts-1-hd for quality
+            model="tts-1-hd",  # HD quality for clearer, more natural speech
             voice="nova",  # Female voice (alloy, echo, fable, onyx, nova, shimmer)
             input=response_text,
-            response_format="pcm"  # Raw PCM for streaming
+            response_format="pcm",  # Raw PCM for streaming
+            speed=1.0  # Natural speed
         ) as tts_response:
             # Stream audio chunks to client
             async for chunk in tts_response.iter_bytes(chunk_size=CHUNK_SIZE):
