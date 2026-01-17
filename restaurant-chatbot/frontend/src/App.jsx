@@ -16,6 +16,7 @@ import {
   SessionModal,
   PaymentMethodCard,
   PaymentSuccessCard,
+  VoiceModeUI,
 } from './components'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
@@ -200,13 +201,15 @@ function ChatInterface() {
   const [selectedLanguage, setSelectedLanguage] = useState("English")
   const {
     connect: connectVoice,
-    startRecording,
-    stopRecording,
+    toggleVoiceMode,
+    voiceModeEnabled,
     isRecording: isVoiceRecording,
-    isProcessing: isVoiceProcessing, // New
+    isProcessing: isVoiceProcessing,
     isUserSpeaking,
+    isAISpeaking,
     isConnected: isVoiceConnected,
-    transcript // Get realtime transcript
+    transcript,
+    responseText
   } = useVoiceChat("session_" + Math.random().toString(36).substr(2, 9)) // Simple session ID for prototype
 
   // Auto-connect voice when language changes or session is ready
@@ -217,16 +220,6 @@ function ChatInterface() {
       connectVoice(selectedLanguage);
     }
   }, [sessionReady, selectedLanguage, connectVoice]);
-
-  // Effect: When transcript updates, show it as a temporary "Assistant is speaking..." bubble or append to messages
-  // For V1 Prototype: We just log it or show it in the input area.
-  // Ideally, we want to push a new message when transcript finishes.
-  useEffect(() => {
-    if (transcript) {
-      // In a real app, we'd debounce this and push to 'messages'
-      console.log("Realtime Transcript:", transcript);
-    }
-  }, [transcript]);
 
 
   return (
@@ -276,26 +269,6 @@ function ChatInterface() {
           {console.log('Rendering messages array, length:', messages.length, 'types:', messages.map(m => m.type))}
           {messages.map(renderMessage)}
 
-          {/* Realtime Voice Transcript (Streaming Bubble) */}
-          {transcript && (
-            <div className="flex justify-start mb-4 animate-pulse">
-              <div className="bg-chat-secondary rounded-2xl rounded-tl-sm px-5 py-3.5 max-w-[80%] text-white shadow-sm border border-chat-border/50">
-                <p className="text-[15px] leading-relaxed opacity-90 whitespace-pre-wrap">{transcript}</p>
-              </div>
-            </div>
-          )}
-
-          {/* User Speaking Indicator */}
-          {isUserSpeaking && !transcript && (
-            <div className="flex justify-start mb-4">
-              <div className="flex items-center gap-2 text-gray-400 text-sm">
-                <span className="w-2 h-2 bg-accent rounded-full animate-pulse"></span>
-                User is speaking...
-              </div>
-            </div>
-          )}
-
-
           {/* Activity Indicator */}
           {activity && <ActivityIndicator message={activity} />}
         </div>
@@ -307,13 +280,24 @@ function ChatInterface() {
         disabled={status !== 'connected' || isStreaming || showSessionModal}
 
         // Voice Props
-        isRecording={isVoiceRecording}
-        isProcessing={isVoiceProcessing}
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
+        onToggleVoiceMode={toggleVoiceMode}
+        voiceModeActive={voiceModeEnabled}
         selectedLanguage={selectedLanguage}
         onLanguageChange={setSelectedLanguage}
       />
+
+      {/* Voice Mode Overlay */}
+      {voiceModeEnabled && (
+        <VoiceModeUI
+          isRecording={isVoiceRecording}
+          isProcessing={isVoiceProcessing}
+          isUserSpeaking={isUserSpeaking}
+          isAISpeaking={isAISpeaking}
+          onExitVoiceMode={toggleVoiceMode}
+          transcript={transcript}
+          responseText={responseText}
+        />
+      )}
     </div>
   )
 }
