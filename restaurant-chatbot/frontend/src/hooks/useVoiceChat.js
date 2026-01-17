@@ -19,15 +19,16 @@ export function useVoiceChat(sessionId) {
     const isPlayingRef = useRef(false);
     const voiceModeEnabledRef = useRef(false);
 
-    // Get WebSocket URL from environment or default
-    const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000').replace('/ws', '');
-
     const connect = useCallback((language = 'English') => {
         if (socketRef.current?.readyState === WebSocket.OPEN) {
             socketRef.current.close();
         }
 
-        const wsUrl = `${WS_URL}/ws/voice/${sessionId}?language=${encodeURIComponent(language)}`;
+        // Use same pattern as useWebSocket - construct URL from window.location
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        // Backend WebSocket endpoint is at /api/v1/ws/voice/{session_id}
+        const wsUrl = `${protocol}//${host}/api/v1/ws/voice/${sessionId}?language=${encodeURIComponent(language)}`;
         console.log('Connecting to voice WebSocket:', wsUrl);
 
         try {
