@@ -49,7 +49,8 @@ class Payment(Base):
                                                server_default=func.now())
 
     # Relationships
-    order: Mapped["Order"] = relationship("Order", back_populates="payments")
+    # Commented out back_populates since Order.payments relationship is disabled
+    order: Mapped["Order"] = relationship("Order")
 
     __table_args__ = (
         Index('idx_payments_order', 'order_id'),
