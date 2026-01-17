@@ -196,6 +196,16 @@ function aguiReducer(state, action) {
       // Mark auth forms as ephemeral so they don't persist in chat history
       const isAuthForm = ['phone_auth', 'login_otp', 'name_collection'].includes(action.payload.form_type)
 
+      // Check if form of same type already exists to prevent duplicates
+      const existingFormIndex = state.messages.findIndex(
+        msg => msg.type === 'form' && msg.data?.formType === action.payload.form_type
+      )
+
+      // If form already exists, don't add duplicate
+      if (existingFormIndex !== -1) {
+        return state
+      }
+
       return {
         ...state,
         messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
