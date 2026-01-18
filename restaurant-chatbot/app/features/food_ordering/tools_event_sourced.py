@@ -113,14 +113,15 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             cart = loop.run_until_complete(update_cart())
             loop.close()
 
-            # Return final human message (NO LLM needed!)
-            item_count = cart['item_count']
-            total = cart['total']
+            # Return final human message with LLM formatting
+            from app.core.llm_formatter import format_item_added
 
-            if item_count == 1:
-                return f"Added {quantity}x {item_name} to your cart! Anything else?"
-            else:
-                return f"Added {quantity}x {item_name}! You have {item_count} items (₹{total:.2f} total). Anything else?"
+            return format_item_added(
+                item_name=item_name,
+                quantity=quantity,
+                cart_total=cart['total'],
+                item_count=cart['item_count']
+            )
 
         except Exception as e:
             logger.error("add_to_cart_failed", error=str(e), session_id=session_id)
@@ -161,17 +162,10 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             cart = loop.run_until_complete(get_cart())
             loop.close()
 
-            if not cart['items']:
-                return "Your cart is empty. Browse our menu to get started!"
+            # Return formatted cart view with LLM
+            from app.core.llm_formatter import format_cart_view
 
-            # Format cart items
-            items_list = []
-            for item in cart['items']:
-                item_total = item['quantity'] * item['price']
-                items_list.append(f"{item['quantity']}x {item['item_name']} (₹{item_total:.2f})")
-
-            items_str = ", ".join(items_list)
-            return f"Your cart: {items_str}. Total: ₹{cart['total']:.2f}. Ready to checkout?"
+            return format_cart_view(cart)
 
         except Exception as e:
             logger.error("view_cart_failed", error=str(e), session_id=session_id)
@@ -228,7 +222,13 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             if not cart:
                 return f"'{item}' is not in your cart."
 
-            return f"Removed {found_item['name']} from your cart. {len(cart['items'])} items remaining."
+            # Return formatted removal confirmation with LLM
+            from app.core.llm_formatter import format_item_removed
+
+            return format_item_removed(
+                item_name=found_item['name'],
+                remaining_items=len(cart['items'])
+            )
 
         except Exception as e:
             logger.error("remove_from_cart_failed", error=str(e), session_id=session_id)
@@ -287,11 +287,11 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Emit menu card to frontend
             emit_menu_data(session_id, items[:50], meal_period)
 
-            # Return final message
-            if query:
-                return f"[MENU DISPLAYED] Found {len(items)} items for '{query}'. Browse and let me know what you'd like!"
-            else:
-                return f"[MENU DISPLAYED] Here's our menu! Browse and let me know what catches your eye."
+            # Return formatted menu results with LLM
+            from app.core.llm_formatter import format_menu_results
+
+            formatted_msg = format_menu_results(items, query, meal_period)
+            return f"[MENU DISPLAYED] {formatted_msg}"
 
         except Exception as e:
             logger.error("search_menu_failed", error=str(e), session_id=session_id)
