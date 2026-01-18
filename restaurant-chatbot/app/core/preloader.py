@@ -73,7 +73,7 @@ class MenuPreloader:
         try:
             pool = await get_async_pool()
             async with pool.acquire() as conn:
-                # Load menu items with meal types and cuisines
+                # Load menu items with meal types, cuisines, and categories
                 rows = await conn.fetch("""
                     SELECT
                         mi.menu_item_id as id,
@@ -85,7 +85,9 @@ class MenuPreloader:
                         ARRAY_AGG(DISTINCT mt.meal_type_name)
                             FILTER (WHERE mt.meal_type_name IS NOT NULL) as meal_types,
                         ARRAY_AGG(DISTINCT c.cuisine_name)
-                            FILTER (WHERE c.cuisine_name IS NOT NULL) as cuisines
+                            FILTER (WHERE c.cuisine_name IS NOT NULL) as cuisines,
+                        ARRAY_AGG(DISTINCT mc.menu_category_name)
+                            FILTER (WHERE mc.menu_category_name IS NOT NULL) as categories
                     FROM menu_item mi
                     LEFT JOIN menu_item_availability_schedule mas
                         ON mi.menu_item_id = mas.menu_item_id
@@ -100,6 +102,12 @@ class MenuPreloader:
                     LEFT JOIN cuisines c
                         ON micm.cuisine_id = c.cuisine_id
                         AND c.is_deleted = FALSE
+                    LEFT JOIN menu_item_category_mapping mcm
+                        ON mi.menu_item_id = mcm.menu_item_id
+                        AND mcm.is_deleted = FALSE
+                    LEFT JOIN menu_categories mc
+                        ON mcm.menu_category_id = mc.menu_category_id
+                        AND mc.is_deleted = FALSE
                     WHERE mi.is_deleted = FALSE
                     AND mi.menu_item_status = 'active'
                     GROUP BY mi.menu_item_id, mi.menu_item_name, mi.menu_item_price,
@@ -117,7 +125,8 @@ class MenuPreloader:
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
                         "meal_types": list(row['meal_types']) if row['meal_types'] else [],
-                        "cuisines": list(row['cuisines']) if row['cuisines'] else []
+                        "cuisines": list(row['cuisines']) if row['cuisines'] else [],
+                        "category": row['categories'][0] if row['categories'] and len(row['categories']) > 0 else "Other"
                     }
                     for row in rows
                 ]
