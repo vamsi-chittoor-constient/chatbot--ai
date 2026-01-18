@@ -62,7 +62,7 @@ export const VoiceModeUI = ({
   const config = stateConfig[state]
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center">
+    <div className="flex-1 flex items-center justify-center bg-chat-bg">
       <div className="max-w-md w-full mx-4">
         {/* Main Voice UI Card */}
         <div className={`${config.bgColor} border-2 ${config.borderColor} rounded-3xl p-8 transition-all duration-300`}>
