@@ -200,11 +200,13 @@ export const MenuCard = ({ data, onAddToCart }) => {
               {/* Items */}
               {isExpanded && (
                 <div className="px-3 py-2 space-y-2">
-                  {categoryItems.map((item) => {
+                  {categoryItems.map((item, index) => {
                     const qty = selectedItems[item.name] || 0
+                    // Use id if available, otherwise use category + index for unique key
+                    const itemKey = item.id || item.menu_item_id || `${category}-${index}`
                     return (
                       <div
-                        key={item.name}
+                        key={itemKey}
                         className={`flex items-center justify-between p-2 rounded-lg transition-all ${
                           qty > 0 ? 'bg-green-900/30 border border-green-700/50' : 'bg-chat-bg hover:bg-gray-700/50'
                         }`}
