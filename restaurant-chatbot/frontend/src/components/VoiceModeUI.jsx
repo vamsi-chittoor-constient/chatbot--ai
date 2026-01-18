@@ -52,8 +52,8 @@ export const VoiceModeUI = ({
     },
     idle: {
       icon: <Mic size={48} className="text-gray-500" />,
-      title: 'Ready',
-      subtitle: 'Waiting...',
+      title: '🎤 Voice Mode Ready',
+      subtitle: 'Start speaking to interact...',
       bgColor: 'bg-gray-800',
       borderColor: 'border-gray-600'
     }
