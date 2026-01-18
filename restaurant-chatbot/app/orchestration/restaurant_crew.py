@@ -259,16 +259,15 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
     )
 
     # ========================================================================
-    # FOOD ORDERING AGENT
+    # FOOD ORDERING AGENT - Event-Sourced Tools
     # ========================================================================
+    # Import event-sourced tools (SQL-based state, zero token context)
+    from app.features.food_ordering.tools_event_sourced import create_event_sourced_tools
+
+    # Import remaining legacy tools (not yet migrated to event-sourced pattern)
     from app.features.food_ordering.crew_agent import (
-        create_search_menu_tool,
-        create_add_to_cart_tool,
-        create_view_cart_tool,
-        create_remove_from_cart_tool,
         create_checkout_tool,
         create_cancel_order_tool,
-        create_clear_cart_tool,
         create_update_quantity_tool,
         create_set_special_instructions_tool,
         create_get_item_details_tool,
@@ -277,7 +276,6 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_get_order_history_tool,
         create_get_order_receipt_tool,
         create_filter_by_cuisine_tool,
-        # create_show_popular_items_tool,  # DISABLED - Popular items feature removed
         # Payment tools
         create_initiate_payment_tool,
         create_verify_payment_otp_tool,
@@ -292,15 +290,15 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_complaint_status_tool,
     )
 
-    # Create ALL tools (will be stored in crew for RAG filtering on each request)
+    # Create event-sourced tools (search_menu, add_to_cart, view_cart, remove_from_cart)
+    event_sourced_tools = create_event_sourced_tools(session_id, customer_id)
+
+    # Create ALL tools (event-sourced + legacy tools)
     all_food_tools = [
-        create_search_menu_tool(session_id),
-        create_add_to_cart_tool(session_id),
-        create_view_cart_tool(session_id),
-        create_remove_from_cart_tool(session_id),
+        *event_sourced_tools,  # Event-sourced: search_menu, add_to_cart, view_cart, remove_from_cart
+        # Legacy tools (not yet migrated):
         create_checkout_tool(session_id),
         create_cancel_order_tool(session_id),
-        create_clear_cart_tool(session_id),
         create_update_quantity_tool(session_id),
         create_set_special_instructions_tool(session_id),
         create_get_item_details_tool(session_id),

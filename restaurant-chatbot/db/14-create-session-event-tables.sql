@@ -19,14 +19,14 @@ CREATE TABLE IF NOT EXISTS session_events (
     user_id UUID,  -- NULL for anonymous sessions
     event_type VARCHAR(50) NOT NULL,  -- 'item_viewed', 'item_added', 'item_removed', 'cart_cleared', 'checkout', etc.
     event_data JSONB NOT NULL,  -- Flexible structure per event type
-    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    -- Indexes for fast queries
-    INDEX idx_session_events_session_id (session_id),
-    INDEX idx_session_events_timestamp (timestamp),
-    INDEX idx_session_events_type (event_type),
-    INDEX idx_session_events_session_time (session_id, timestamp DESC)
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Indexes for session_events
+CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_timestamp ON session_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_session_events_session_time ON session_events(session_id, timestamp DESC);
 
 COMMENT ON TABLE session_events IS 'Complete event log of all session activity - event sourcing pattern';
 COMMENT ON COLUMN session_events.event_type IS 'Event types: item_viewed, item_added, item_removed, item_updated, cart_cleared, checkout_started, order_placed, payment_initiated, etc.';
@@ -48,11 +48,12 @@ CREATE UNLOGGED TABLE IF NOT EXISTS session_cart (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,  -- Soft delete for audit trail
 
     PRIMARY KEY (session_id, item_id),
-    FOREIGN KEY (item_id) REFERENCES menu_item(menu_item_id) ON DELETE CASCADE,
-
-    INDEX idx_session_cart_session_id (session_id),
-    INDEX idx_session_cart_active (session_id, is_active)
+    FOREIGN KEY (item_id) REFERENCES menu_item(menu_item_id) ON DELETE CASCADE
 );
+
+-- Indexes for session_cart
+CREATE INDEX IF NOT EXISTS idx_session_cart_session_id ON session_cart(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_cart_active ON session_cart(session_id, is_active);
 
 COMMENT ON TABLE session_cart IS 'Current cart state - materialized view updated by add/remove events';
 COMMENT ON COLUMN session_cart.is_active IS 'FALSE when removed (soft delete for history), TRUE for current items';
@@ -79,12 +80,13 @@ CREATE UNLOGGED TABLE IF NOT EXISTS session_state (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    FOREIGN KEY (user_id) REFERENCES customer(customer_id) ON DELETE SET NULL,
-    FOREIGN KEY (last_mentioned_item_id) REFERENCES menu_item(menu_item_id) ON DELETE SET NULL,
-
-    INDEX idx_session_state_last_activity (last_activity_at DESC),
-    INDEX idx_session_state_user_id (user_id)
+    FOREIGN KEY (user_id) REFERENCES customer_profile_table(customer_id) ON DELETE SET NULL,
+    FOREIGN KEY (last_mentioned_item_id) REFERENCES menu_item(menu_item_id) ON DELETE SET NULL
 );
+
+-- Indexes for session_state
+CREATE INDEX IF NOT EXISTS idx_session_state_last_activity ON session_state(last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_state_user_id ON session_state(user_id);
 
 COMMENT ON TABLE session_state IS 'Session conversation state and flow tracking - updated by events';
 COMMENT ON COLUMN session_state.current_step IS 'Current conversation step: browsing, ordering, awaiting_quantity, checkout, payment';
@@ -100,9 +102,11 @@ CREATE UNLOGGED TABLE IF NOT EXISTS session_preferences (
     preference_value TEXT NOT NULL,
     set_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    PRIMARY KEY (session_id, preference_key),
-    INDEX idx_session_preferences_session_id (session_id)
+    PRIMARY KEY (session_id, preference_key)
 );
+
+-- Indexes for session_preferences
+CREATE INDEX IF NOT EXISTS idx_session_preferences_session_id ON session_preferences(session_id);
 
 COMMENT ON TABLE session_preferences IS 'User preferences expressed during session: dietary restrictions, favorite items, etc.';
 
@@ -171,7 +175,7 @@ CREATE OR REPLACE FUNCTION get_session_history(p_session_id VARCHAR, p_limit INT
 RETURNS TABLE (
     event_type VARCHAR,
     event_data JSONB,
-    timestamp TIMESTAMPTZ
+    event_timestamp TIMESTAMPTZ
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -278,10 +282,11 @@ CREATE UNLOGGED TABLE IF NOT EXISTS session_checkout (
     delivery_address JSONB,  -- For delivery orders
     table_number INT,  -- For dine-in orders
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ,
-
-    INDEX idx_session_checkout_started (started_at DESC)
+    completed_at TIMESTAMPTZ
 );
+
+-- Indexes for session_checkout
+CREATE INDEX IF NOT EXISTS idx_session_checkout_started ON session_checkout(started_at DESC);
 
 COMMENT ON TABLE session_checkout IS 'Checkout flow state - UNLOGGED for speed, OK to lose on crash';
 
@@ -297,12 +302,13 @@ CREATE TABLE IF NOT EXISTS session_payment_intent (
     status VARCHAR(20) NOT NULL,  -- 'created' | 'processing' | 'completed' | 'failed' | 'cancelled'
     metadata JSONB,  -- Gateway-specific data
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    INDEX idx_payment_intent_session_id (session_id),
-    INDEX idx_payment_intent_gateway_order_id (gateway_order_id),
-    INDEX idx_payment_intent_status (status)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Indexes for session_payment_intent
+CREATE INDEX IF NOT EXISTS idx_payment_intent_session_id ON session_payment_intent(session_id);
+CREATE INDEX IF NOT EXISTS idx_payment_intent_gateway_order_id ON session_payment_intent(gateway_order_id);
+CREATE INDEX IF NOT EXISTS idx_payment_intent_status ON session_payment_intent(status);
 
 COMMENT ON TABLE session_payment_intent IS 'Payment intent tracking - LOGGED for financial audit';
 
