@@ -196,6 +196,28 @@ class RestaurantConfigResponse(BaseModel):
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        """Convert UUID to string"""
+        if v is None:
+            return None
+        from uuid import UUID
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    @field_validator('opening_time', 'closing_time', mode='before')
+    @classmethod
+    def convert_time_to_str(cls, v):
+        """Convert datetime.time to string (HH:MM:SS format)"""
+        if v is None:
+            return None
+        import datetime
+        if isinstance(v, datetime.time):
+            return v.isoformat()
+        return v
+
 
 # ============================================================================
 # Email & Communication Logging
