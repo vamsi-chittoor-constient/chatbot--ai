@@ -84,8 +84,6 @@ class MenuPreloader:
                         mi.menu_item_is_recommended as is_recommended,
                         ARRAY_AGG(DISTINCT mt.meal_type_name)
                             FILTER (WHERE mt.meal_type_name IS NOT NULL) as meal_types,
-                        ARRAY_AGG(DISTINCT c.cuisine_name)
-                            FILTER (WHERE c.cuisine_name IS NOT NULL) as cuisines,
                         ARRAY_AGG(DISTINCT mc.menu_category_name)
                             FILTER (WHERE mc.menu_category_name IS NOT NULL) as categories
                     FROM menu_item mi
@@ -96,12 +94,6 @@ class MenuPreloader:
                     LEFT JOIN meal_type mt
                         ON mas.meal_type_id = mt.meal_type_id
                         AND mt.is_deleted = FALSE
-                    LEFT JOIN menu_item_cuisine_mapping micm
-                        ON mi.menu_item_id = micm.menu_item_id
-                        AND micm.is_deleted = FALSE
-                    LEFT JOIN cuisines c
-                        ON micm.cuisine_id = c.cuisine_id
-                        AND c.is_deleted = FALSE
                     LEFT JOIN menu_item_category_mapping mcm
                         ON mi.menu_item_id = mcm.menu_item_id
                         AND mcm.is_deleted = FALSE
@@ -125,7 +117,6 @@ class MenuPreloader:
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
                         "meal_types": list(row['meal_types']) if row['meal_types'] else [],
-                        "cuisines": list(row['cuisines']) if row['cuisines'] else [],
                         "category": row['categories'][0] if row['categories'] and len(row['categories']) > 0 else "Other"
                     }
                     for row in rows

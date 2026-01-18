@@ -101,7 +101,7 @@ class SessionEventTracker:
         from app.core.db_pool import AsyncDBConnection
 
         async with AsyncDBConnection() as db:
-            result = await db.fetch_one(
+            result = await db.fetchrow(
                 """
                 INSERT INTO session_events (session_id, user_id, event_type, event_data)
                 VALUES ($1, $2, $3, $4)
@@ -209,7 +209,7 @@ class SessionEventTracker:
 
         async with AsyncDBConnection() as db:
             # Get item name for event log
-            result = await db.fetch_one(
+            result = await db.fetchrow(
                 """
                 SELECT item_name, quantity, price
                 FROM session_cart
@@ -253,7 +253,7 @@ class SessionEventTracker:
 
         async with AsyncDBConnection() as db:
             # Get current state for event log
-            result = await db.fetch_one(
+            result = await db.fetchrow(
                 """
                 SELECT item_name, quantity, price
                 FROM session_cart
@@ -320,14 +320,14 @@ class SessionEventTracker:
         from app.core.db_pool import AsyncDBConnection
 
         async with AsyncDBConnection() as db:
-            items = await db.fetch_all(
+            items = await db.fetch(
                 """
                 SELECT * FROM get_session_cart($1)
                 """,
                 self.session_id
             )
 
-            total = await db.fetch_one(
+            total = await db.fetchrow(
                 """
                 SELECT get_cart_total($1) as total
                 """,
@@ -346,7 +346,7 @@ class SessionEventTracker:
         from app.core.db_pool import AsyncDBConnection
 
         async with AsyncDBConnection() as db:
-            result = await db.fetch_one(
+            result = await db.fetchrow(
                 """
                 SELECT last_mentioned_item_id, last_mentioned_item_name
                 FROM session_state
@@ -367,7 +367,7 @@ class SessionEventTracker:
         from app.core.db_pool import AsyncDBConnection
 
         async with AsyncDBConnection() as db:
-            events = await db.fetch_all(
+            events = await db.fetch(
                 """
                 SELECT * FROM get_session_history($1, $2)
                 """,
