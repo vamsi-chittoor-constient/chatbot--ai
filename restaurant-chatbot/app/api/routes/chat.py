@@ -557,29 +557,31 @@ async def chat_endpoint(
 
         # If not authenticated and AUTH_REQUIRED, start phone auth flow
         if not is_authenticated and config.AUTH_REQUIRED:
-            logger.info(
-                "Starting phone authentication flow",
-                session_id=session_id
-            )
+            # Check if auth is already in progress for this session (avoid duplicate forms on reconnect)
+            existing_auth_state = websocket_manager.connection_metadata.get(session_id, {}).get("auth_state")
+            if existing_auth_state and existing_auth_state not in ("authenticated", None):
+                logger.info(
+                    "Auth already in progress, skipping duplicate form",
+                    session_id=session_id,
+                    auth_state=existing_auth_state
+                )
+                # Don't emit a new form - just continue to the message loop
+            else:
+                logger.info(
+                    "Starting phone authentication flow",
+                    session_id=session_id
+                )
 
-            # First send a greeting message before the form
-            # greeting_msg = f"Welcome to {restaurant['name']}! To serve you better, please enter your mobile number."
-            # await websocket_manager.send_message(
-            #     session_id=session_id,
-            #     message=greeting_msg,
-            #     message_type="ai_response"
-            # )
+                # Emit phone auth form request
+                auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
 
-            # Emit phone auth form request
-            auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
+                # Store auth state in connection metadata
+                if session_id in websocket_manager.connection_metadata:
+                    websocket_manager.connection_metadata[session_id]["auth_state"] = "awaiting_phone"
+                    websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
 
-            # Store auth state in connection metadata
-            if session_id in websocket_manager.connection_metadata:
-                websocket_manager.connection_metadata[session_id]["auth_state"] = "awaiting_phone"
-                websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
-
-            # Forward the form request to WebSocket
-            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                # Forward the form request to WebSocket
+                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
             # Wait for phone auth form response
             while not is_authenticated:
