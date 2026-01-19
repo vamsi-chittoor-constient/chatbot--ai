@@ -68,6 +68,21 @@ class EntityGraph:
             return self.displayed_menu[position - 1]
         return None
 
+    def get_context_summary(self) -> str:
+        """
+        Get a brief summary of the current context state.
+        Used for initial crew context without a specific query.
+        """
+        parts = []
+        if self.last_mentioned_item:
+            parts.append(f"Last item: {self.last_mentioned_item}")
+        if self.displayed_menu:
+            parts.append(f"Menu shown: {len(self.displayed_menu)} items")
+        cart_items = _get_cart_items_from_redis(self.session_id)
+        if cart_items:
+            parts.append(f"Cart: {len(cart_items)} items")
+        return " | ".join(parts) if parts else "New conversation"
+
     def get_relevant_context(self, user_query: str) -> str:
         """
         RAG-based context retrieval - only include entities relevant to user query.
