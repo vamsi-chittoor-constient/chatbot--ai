@@ -234,8 +234,8 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Get current meal period for filtering
             meal_period = get_current_meal_period()
 
-            # Search menu (in-memory, fast)
-            items = preloader.search(query, meal_period=meal_period, strict_meal_filter=False)
+            # Search menu (in-memory, fast) - strict filter to only show items available now
+            items = preloader.search(query, meal_period=meal_period, strict_meal_filter=True)
 
             if not items:
                 return f"No items found for '{query}'. Try a different search?"
