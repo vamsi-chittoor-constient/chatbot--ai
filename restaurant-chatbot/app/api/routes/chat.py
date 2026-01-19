@@ -447,13 +447,27 @@ async def chat_endpoint(
     # MULTI-TENANT AUTHENTICATION (Phase 1 - Restaurant API Key)
     # ========================================================================
     # AUTHENTICATION DISABLED FOR TESTING - Accept all connections
-    restaurant = {
-        "restaurant_id": "test_restaurant_001",
-        "name": "Test Restaurant",
-        "api_key": api_key or "test_key",
-        "status": "active"
-    }
-    
+    # Get actual restaurant from database for proper foreign key references
+    from app.tools.database.restaurant_tools import GetRestaurantTool
+    get_restaurant_tool = GetRestaurantTool()
+    restaurant_result = await get_restaurant_tool.execute()
+
+    if restaurant_result.status.value == "success" and restaurant_result.data:
+        restaurant = {
+            "restaurant_id": str(restaurant_result.data.get("id")),
+            "name": restaurant_result.data.get("name", "Test Restaurant"),
+            "api_key": api_key or "test_key",
+            "status": "active"
+        }
+    else:
+        # Fallback for testing without database
+        restaurant = {
+            "restaurant_id": "test_restaurant_001",
+            "name": "Test Restaurant",
+            "api_key": api_key or "test_key",
+            "status": "active"
+        }
+
     logger.info(
         "WebSocket connection accepted (auth bypassed for testing)",
         session_id=session_id,
