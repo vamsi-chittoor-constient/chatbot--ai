@@ -58,9 +58,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         """
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         from app.core.preloader import get_menu_preloader
-        from app.core.session_events import get_session_tracker
-        from app.core.db_pool import AsyncDBConnection
-        import asyncio
+        from app.core.session_events import get_sync_session_tracker
 
         # Emit activity indicator for frontend
         emit_tool_activity(session_id, "add_to_cart")
@@ -86,32 +84,23 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             item_name = found_item['name']
             price = float(found_item['price'])
 
-            # Event-sourced update (async)
-            async def update_cart():
-                tracker = get_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+            # Use sync tracker (thread-safe for CrewAI)
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
 
-                # Add to cart (logs event + updates state)
-                cart = await tracker.add_to_cart(
-                    item_id=item_id,
-                    item_name=item_name,
-                    quantity=quantity,
-                    price=price
-                )
+            # Add to cart (logs event + updates state)
+            cart = tracker.add_to_cart(
+                item_id=item_id,
+                item_name=item_name,
+                quantity=quantity,
+                price=price
+            )
 
-                # Emit cart update to frontend (AGUI callback)
-                emit_cart_data(
-                    session_id,
-                    cart['items'],
-                    cart['total']
-                )
-
-                return cart
-
-            # Run async operation synchronously (tool context)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            cart = loop.run_until_complete(update_cart())
-            loop.close()
+            # Emit cart update to frontend (AGUI callback)
+            emit_cart_data(
+                session_id,
+                cart['items'],
+                cart['total']
+            )
 
             # Return final human message with LLM formatting
             from app.core.llm_formatter import format_item_added
@@ -142,25 +131,17 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             Final message: "Your cart: 2x Margherita (₹400), 1x Coke (₹50). Total: ₹450"
         """
         from app.core.agui_events import emit_tool_activity, emit_cart_data
-        from app.core.session_events import get_session_tracker
-        import asyncio
+        from app.core.session_events import get_sync_session_tracker
 
         emit_tool_activity(session_id, "view_cart")
 
         try:
-            async def get_cart():
-                tracker = get_session_tracker(session_id, UUID(customer_id) if customer_id else None)
-                cart = await tracker.get_cart_summary()
+            # Use sync tracker (thread-safe for CrewAI)
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+            cart = tracker.get_cart_summary()
 
-                # Emit cart card to frontend
-                emit_cart_data(session_id, cart['items'], cart['total'])
-
-                return cart
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            cart = loop.run_until_complete(get_cart())
-            loop.close()
+            # Emit cart card to frontend
+            emit_cart_data(session_id, cart['items'], cart['total'])
 
             # Return formatted cart view with LLM
             from app.core.llm_formatter import format_cart_view
@@ -188,8 +169,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         """
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         from app.core.preloader import get_menu_preloader
-        from app.core.session_events import get_session_tracker
-        import asyncio
+        from app.core.session_events import get_sync_session_tracker
 
         emit_tool_activity(session_id, "remove_from_cart")
 
@@ -203,24 +183,15 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
 
             item_id = UUID(found_item['id'])
 
-            async def remove():
-                tracker = get_session_tracker(session_id, UUID(customer_id) if customer_id else None)
-                cart = await tracker.remove_from_cart(item_id)
+            # Use sync tracker (thread-safe for CrewAI)
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+            cart = tracker.remove_from_cart(item_id)
 
-                if not cart.get('success', False):
-                    return None
-
-                # Emit updated cart
-                emit_cart_data(session_id, cart['items'], cart['total'])
-                return cart
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            cart = loop.run_until_complete(remove())
-            loop.close()
-
-            if not cart:
+            if not cart.get('success', False):
                 return f"'{item}' is not in your cart."
+
+            # Emit updated cart
+            emit_cart_data(session_id, cart['items'], cart['total'])
 
             # Return formatted removal confirmation with LLM
             from app.core.llm_formatter import format_item_removed
@@ -251,8 +222,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         """
         from app.core.agui_events import emit_tool_activity, emit_menu_data
         from app.core.preloader import get_menu_preloader, get_current_meal_period
-        from app.core.session_events import get_session_tracker, EventType
-        import asyncio
+        from app.core.session_events import get_sync_session_tracker, EventType
 
         emit_tool_activity(session_id, "search_menu")
 
@@ -270,19 +240,13 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             if not items:
                 return f"No items found for '{query}'. Try a different search?"
 
-            # Log event
-            async def log_and_update():
-                tracker = get_session_tracker(session_id, UUID(customer_id) if customer_id else None)
-                await tracker.log_event(EventType.MENU_VIEWED, {
-                    'query': query,
-                    'result_count': len(items),
-                    'meal_period': meal_period
-                })
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(log_and_update())
-            loop.close()
+            # Log event using sync tracker (thread-safe for CrewAI)
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+            tracker.log_event(EventType.MENU_VIEWED, {
+                'query': query,
+                'result_count': len(items),
+                'meal_period': meal_period
+            })
 
             # Emit menu card to frontend
             emit_menu_data(session_id, items[:50], meal_period)

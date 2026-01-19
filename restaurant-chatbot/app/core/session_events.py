@@ -412,9 +412,209 @@ class SessionEventTracker:
 
 
 # ============================================================================
+# SYNC SESSION TRACKER (for CrewAI tools running in threads)
+# ============================================================================
+
+class SyncSessionEventTracker:
+    """
+    Synchronous version of session tracker for use in CrewAI tools.
+
+    CrewAI tools run in threads and cannot use asyncpg (which is event-loop bound).
+    This uses psycopg2 which is thread-safe.
+    """
+
+    def __init__(self, session_id: str, user_id: Optional[UUID] = None):
+        self.session_id = session_id
+        self.user_id = user_id
+
+    def log_event(self, event_type: str, event_data: Dict[str, Any]) -> UUID:
+        """Log an event using sync connection."""
+        from app.core.db_pool import SyncDBConnection
+        import uuid
+
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO session_events (session_id, user_id, event_type, event_data)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING event_id
+                    """,
+                    (
+                        self.session_id,
+                        str(self.user_id) if self.user_id else None,
+                        event_type,
+                        json.dumps(event_data)
+                    )
+                )
+                event_id = cur.fetchone()[0]
+                conn.commit()
+
+        logger.info(
+            "session_event_logged_sync",
+            session_id=self.session_id,
+            event_type=event_type,
+            event_id=str(event_id)
+        )
+        return event_id
+
+    def add_to_cart(
+        self,
+        item_id: UUID,
+        item_name: str,
+        quantity: int,
+        price: float,
+        special_instructions: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Add item to cart using sync connection."""
+        from app.core.db_pool import SyncDBConnection
+
+        # Log event
+        self.log_event(EventType.ITEM_ADDED, {
+            'item_id': str(item_id),
+            'item_name': item_name,
+            'quantity': quantity,
+            'price': price,
+            'special_instructions': special_instructions
+        })
+
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                # Upsert cart item
+                cur.execute(
+                    """
+                    INSERT INTO session_cart (
+                        session_id, item_id, item_name, quantity, price, special_instructions
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (session_id, item_id)
+                    DO UPDATE SET
+                        quantity = session_cart.quantity + EXCLUDED.quantity,
+                        special_instructions = COALESCE(EXCLUDED.special_instructions, session_cart.special_instructions),
+                        updated_at = NOW(),
+                        is_active = TRUE
+                    """,
+                    (
+                        self.session_id,
+                        str(item_id),
+                        item_name,
+                        quantity,
+                        price,
+                        special_instructions
+                    )
+                )
+
+                # Update session state
+                cur.execute(
+                    """
+                    INSERT INTO session_state (
+                        session_id, user_id, last_mentioned_item_id, last_mentioned_item_name
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (session_id)
+                    DO UPDATE SET
+                        last_mentioned_item_id = EXCLUDED.last_mentioned_item_id,
+                        last_mentioned_item_name = EXCLUDED.last_mentioned_item_name,
+                        updated_at = NOW(),
+                        last_activity_at = NOW()
+                    """,
+                    (
+                        self.session_id,
+                        str(self.user_id) if self.user_id else None,
+                        str(item_id),
+                        item_name
+                    )
+                )
+                conn.commit()
+
+        return self.get_cart_summary()
+
+    def remove_from_cart(self, item_id: UUID) -> Dict[str, Any]:
+        """Remove item from cart using sync connection."""
+        from app.core.db_pool import SyncDBConnection
+
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                # Get item info for event log
+                cur.execute(
+                    """
+                    SELECT item_name, quantity, price
+                    FROM session_cart
+                    WHERE session_id = %s AND item_id = %s AND is_active = TRUE
+                    """,
+                    (self.session_id, str(item_id))
+                )
+                result = cur.fetchone()
+
+                if not result:
+                    return {"success": False, "message": "Item not in cart"}
+
+                item_name, quantity, price = result
+
+                # Log event
+                self.log_event(EventType.ITEM_REMOVED, {
+                    'item_id': str(item_id),
+                    'item_name': item_name,
+                    'quantity': quantity,
+                    'price': float(price)
+                })
+
+                # Soft delete
+                cur.execute(
+                    """
+                    UPDATE session_cart
+                    SET is_active = FALSE, updated_at = NOW()
+                    WHERE session_id = %s AND item_id = %s
+                    """,
+                    (self.session_id, str(item_id))
+                )
+                conn.commit()
+
+        return self.get_cart_summary()
+
+    def get_cart_summary(self) -> Dict[str, Any]:
+        """Get cart summary using sync connection."""
+        from app.core.db_pool import SyncDBConnection
+
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                # Get cart items
+                cur.execute(
+                    """
+                    SELECT * FROM get_session_cart(%s)
+                    """,
+                    (self.session_id,)
+                )
+                columns = [desc[0] for desc in cur.description] if cur.description else []
+                items = [dict(zip(columns, row)) for row in cur.fetchall()]
+
+                # Get total
+                cur.execute(
+                    """
+                    SELECT get_cart_total(%s) as total
+                    """,
+                    (self.session_id,)
+                )
+                total_row = cur.fetchone()
+                total = float(total_row[0]) if total_row and total_row[0] else 0.0
+
+        return {
+            "success": True,
+            "items": items,
+            "total": total,
+            "item_count": len(items)
+        }
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
 def get_session_tracker(session_id: str, user_id: Optional[UUID] = None) -> SessionEventTracker:
-    """Get session event tracker instance."""
+    """Get async session event tracker instance."""
     return SessionEventTracker(session_id, user_id)
+
+
+def get_sync_session_tracker(session_id: str, user_id: Optional[UUID] = None) -> SyncSessionEventTracker:
+    """Get sync session event tracker for use in CrewAI tools (threaded context)."""
+    return SyncSessionEventTracker(session_id, user_id)
