@@ -86,11 +86,17 @@ export const useWebSocket = (onEvent) => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          console.log('WS Raw:', data.message_type, data)
+          console.log('🔵 WS MESSAGE RECEIVED:', data.message_type, data)
 
           // Extract AGUI event from nested structure
           // Check both metadata and debug_metadata for agui data
           const agui = data.debug_metadata?.agui || data.metadata?.agui
+
+          // Debug: Log FORM_REQUEST specifically
+          if (agui?.type === 'FORM_REQUEST') {
+            console.log('🟢 AUTH FORM RECEIVED:', agui.form_type, agui)
+          }
+
           if (data.message_type === 'agui_event' && agui) {
             // Track if we received streaming text via AGUI
             if (agui.type === 'TEXT_MESSAGE_START') {

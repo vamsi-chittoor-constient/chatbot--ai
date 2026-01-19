@@ -20,8 +20,80 @@ from crewai.tools import tool
 from typing import Optional
 from uuid import UUID
 import structlog
+import re
 
 logger = structlog.get_logger(__name__)
+
+
+# ============================================================================
+# ORDINAL RESOLUTION - Resolve "option 1", "first one", etc.
+# ============================================================================
+
+def resolve_ordinal_reference(item_text: str, tracker) -> Optional[str]:
+    """
+    Resolve ordinal references like "option 1", "first", "#2" to actual item names.
+
+    Uses the last MENU_VIEWED event from session_events to map ordinals to items.
+
+    Args:
+        item_text: User input like "option 1", "amla juice option 1", "first one"
+        tracker: SyncSessionEventTracker instance
+
+    Returns:
+        Resolved item name if ordinal found, None otherwise
+    """
+    text = item_text.lower().strip()
+
+    # Patterns to detect ordinal references
+    ordinal_patterns = [
+        # "option 1", "option 2" - most common
+        (r'option\s*(\d+)', lambda m: int(m.group(1))),
+        # "#1", "#2"
+        (r'#\s*(\d+)', lambda m: int(m.group(1))),
+        # "number 1", "number 2"
+        (r'number\s*(\d+)', lambda m: int(m.group(1))),
+        # "1st", "2nd", "3rd", "4th"
+        (r'(\d+)(?:st|nd|rd|th)\b', lambda m: int(m.group(1))),
+        # Plain numbers at end: "amla juice 1"
+        (r'\b(\d+)$', lambda m: int(m.group(1))),
+        # Word ordinals
+        (r'\b(first|1st)\b', lambda m: 1),
+        (r'\b(second|2nd)\b', lambda m: 2),
+        (r'\b(third|3rd)\b', lambda m: 3),
+        (r'\b(fourth|4th)\b', lambda m: 4),
+        (r'\b(fifth|5th)\b', lambda m: 5),
+    ]
+
+    ordinal_index = None
+    for pattern, extractor in ordinal_patterns:
+        match = re.search(pattern, text)
+        if match:
+            ordinal_index = extractor(match)
+            break
+
+    if ordinal_index is None:
+        return None
+
+    # Get last search results from event store
+    last_items = tracker.get_last_search_results()
+    if not last_items:
+        logger.debug("ordinal_resolution_no_items", text=item_text)
+        return None
+
+    # Convert to 0-based index
+    idx = ordinal_index - 1
+    if 0 <= idx < len(last_items):
+        resolved_name = last_items[idx]['name']
+        logger.info(
+            "ordinal_resolved",
+            original=item_text,
+            ordinal=ordinal_index,
+            resolved_name=resolved_name
+        )
+        return resolved_name
+
+    logger.debug("ordinal_out_of_range", text=item_text, ordinal=ordinal_index, items_count=len(last_items))
+    return None
 
 
 # ============================================================================
@@ -34,6 +106,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
 
     Tools are stateless - all state comes from SQL queries.
     Tools return final human-friendly messages (no LLM reformatting needed).
+    Ordinal references ("option 1") are resolved via event store queries.
     """
 
     @tool("add_to_cart")
@@ -71,12 +144,19 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             if quantity > 50:
                 return "That's a lot! Maximum 50 per item. Contact us for bulk orders."
 
+            # Use sync tracker (thread-safe for CrewAI)
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+
+            # Try to resolve ordinal reference first ("option 1", "first one", etc.)
+            resolved_item_name = resolve_ordinal_reference(item, tracker)
+            item_to_find = resolved_item_name if resolved_item_name else item.strip()
+
             # Find item in menu (preloader - sync, fast)
             preloader = get_menu_preloader()
             if not preloader.is_loaded:
                 return "Menu is loading, please try again in a moment."
 
-            found_item = preloader.find_item(item.strip())
+            found_item = preloader.find_item(item_to_find)
             if not found_item:
                 return f"I couldn't find '{item}' on our menu. Try searching first?"
 
@@ -84,10 +164,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             item_name = found_item['name']
             price = float(found_item['price'])
 
-            # Use sync tracker (thread-safe for CrewAI)
-            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
-
-            # Add to cart (logs event + updates state)
+            # Add to cart (logs event + updates state) - tracker already created above
             cart = tracker.add_to_cart(
                 item_id=item_id,
                 item_name=item_name,
@@ -245,12 +322,15 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 if not items:
                     return f"No items available for {meal_period} right now. Try a different search?"
 
-                # Log event
+                # Log event with items for ordinal resolution ("option 1", "first one")
                 tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+                # Store minimal item data for resolution
+                items_for_event = [{'id': i['id'], 'name': i['name'], 'price': i.get('price', 0)} for i in items[:20]]
                 tracker.log_event(EventType.MENU_VIEWED, {
                     'query': query,
                     'result_count': len(items),
-                    'meal_period': meal_period
+                    'meal_period': meal_period,
+                    'items': items_for_event  # For resolving "option 1", "second one", etc.
                 })
 
                 # Emit menu card to frontend
@@ -292,14 +372,20 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 # Sort: available items first
                 items_with_availability.sort(key=lambda x: (not x["is_available_now"], x["name"]))
 
-                # Log event
+                # Log event with items for ordinal resolution ("option 1", "first one")
                 tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+                # Store minimal item data for resolution (only available items for ordering)
+                items_for_event = [
+                    {'id': i['id'], 'name': i['name'], 'price': i.get('price', 0)}
+                    for i in items_with_availability if i.get('is_available_now', True)
+                ]
                 tracker.log_event(EventType.MENU_VIEWED, {
                     'query': query,
                     'result_count': len(items_with_availability),
                     'meal_period': meal_period,
                     'available_count': available_count,
-                    'unavailable_count': unavailable_count
+                    'unavailable_count': unavailable_count,
+                    'items': items_for_event  # For resolving "option 1", "second one", etc.
                 })
 
                 # Emit SearchResultsCard

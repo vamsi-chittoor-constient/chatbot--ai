@@ -81,6 +81,10 @@ async def voice_chat_websocket(
         language=language
     )
 
+    # Register voice mode for this session - events will be routed to this WebSocket
+    from app.core.agui_events import set_voice_mode
+    set_voice_mode(session_id, websocket)
+
     # Load VAD model
     vad_model = get_vad_model()
 
@@ -182,6 +186,13 @@ async def voice_chat_websocket(
             exc_info=True
         )
     finally:
+        # Clean up voice mode registration
+        try:
+            from app.core.agui_events import set_voice_mode
+            set_voice_mode(session_id, None)  # Disable voice mode
+        except:
+            pass
+
         try:
             await websocket.close()
         except:
@@ -376,11 +387,26 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                     "agui": {"type": "ACTIVITY_END"}
                 }))
 
+            def emit_full_text(self, text: str, chunk_size: int = 1):
+                """Emit full text - for voice mode we don't stream, just pass through"""
+                # Voice mode handles text differently (TTS), so we just store it
+                pass  # Text is returned directly, not streamed via AGUI
+
+            def emit_quick_replies(self, options):
+                """Emit quick reply options"""
+                asyncio.create_task(self.ws.send_json({
+                    "type": "agui_event",
+                    "agui": {
+                        "type": "QUICK_REPLIES",
+                        "options": options
+                    }
+                }))
+
             def emit_run_error(self, error: str):
                 pass  # Errors handled separately
 
-            def emit_run_finished(self):
-                pass  # Optional
+            def emit_run_finished(self, response: str = None):
+                pass  # Optional - voice mode handles response via TTS
 
         emitter = VoiceWebSocketEmitter(websocket)
 

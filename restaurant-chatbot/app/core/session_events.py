@@ -605,6 +605,39 @@ class SyncSessionEventTracker:
             "item_count": len(items)
         }
 
+    def get_last_search_results(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get the items from the last MENU_VIEWED event.
+
+        Used to resolve ordinal references like "option 1", "first one", etc.
+        Returns the items list from the most recent search/menu view.
+        """
+        from app.core.db_pool import SyncDBConnection
+
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT event_data
+                    FROM session_events
+                    WHERE session_id = %s AND event_type = %s
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                    """,
+                    (self.session_id, EventType.MENU_VIEWED)
+                )
+                result = cur.fetchone()
+
+                if not result:
+                    return None
+
+                event_data = result[0]
+                if isinstance(event_data, str):
+                    event_data = json.loads(event_data)
+
+                # Return items list if stored in event
+                return event_data.get('items', None)
+
 
 # ============================================================================
 # HELPER FUNCTIONS

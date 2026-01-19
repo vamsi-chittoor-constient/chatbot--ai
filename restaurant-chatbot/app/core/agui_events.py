@@ -27,6 +27,90 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+# ============================================================================
+# VOICE MODE ISOLATION
+# ============================================================================
+# When voice mode is active for a session, events are routed to the voice
+# WebSocket instead of the chat queue. This keeps the two systems isolated.
+
+_VOICE_MODE_SESSIONS: Dict[str, Any] = {}  # session_id -> websocket
+
+
+def set_voice_mode(session_id: str, websocket=None):
+    """
+    Enable or disable voice mode for a session.
+
+    Args:
+        session_id: The session ID
+        websocket: The voice WebSocket connection (None to disable)
+    """
+    if websocket is not None:
+        _VOICE_MODE_SESSIONS[session_id] = websocket
+        logger.debug("voice_mode_enabled", session_id=session_id)
+    else:
+        _VOICE_MODE_SESSIONS.pop(session_id, None)
+        logger.debug("voice_mode_disabled", session_id=session_id)
+
+
+def is_voice_mode(session_id: str) -> bool:
+    """Check if voice mode is active for a session."""
+    return session_id in _VOICE_MODE_SESSIONS
+
+
+def get_voice_websocket(session_id: str):
+    """Get the voice WebSocket for a session (if in voice mode)."""
+    return _VOICE_MODE_SESSIONS.get(session_id)
+
+
+async def _emit_to_voice_websocket(session_id: str, event_type: str, data: Dict[str, Any]):
+    """Send an event through the voice WebSocket."""
+    ws = get_voice_websocket(session_id)
+    if ws is None:
+        return False
+
+    try:
+        import asyncio
+        # Send as AGUI event through voice WebSocket
+        asyncio.create_task(ws.send_json({
+            "type": "agui_event",
+            "agui": {
+                "type": event_type,
+                **data
+            }
+        }))
+        return True
+    except Exception as e:
+        logger.debug("voice_websocket_emit_failed", session_id=session_id, error=str(e))
+        return False
+
+
+def _emit_to_voice_websocket_sync(session_id: str, event_type: str, data: Dict[str, Any]):
+    """Send an event through the voice WebSocket (sync wrapper)."""
+    ws = get_voice_websocket(session_id)
+    if ws is None:
+        return False
+
+    try:
+        import asyncio
+        # Schedule the send on the event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                ws.send_json({
+                    "type": "agui_event",
+                    "agui": {
+                        "type": event_type,
+                        **data
+                    }
+                }),
+                loop
+            )
+        return True
+    except Exception as e:
+        logger.debug("voice_websocket_emit_sync_failed", session_id=session_id, error=str(e))
+        return False
+
+
 class EventType(str, Enum):
     """AG-UI Event Types"""
     # Lifecycle
@@ -1294,10 +1378,18 @@ def emit_tool_activity(session_id: str, tool_name: str):
         session_id: The session ID
         tool_name: Internal tool name (will be converted to user-friendly message)
     """
-    try:
-        message = TOOL_ACTIVITY_MESSAGES.get(tool_name, "Working on that...")
-        activity_type = _get_activity_type_for_tool(tool_name)
+    message = TOOL_ACTIVITY_MESSAGES.get(tool_name, "Working on that...")
+    activity_type = _get_activity_type_for_tool(tool_name)
 
+    # Route to voice WebSocket if in voice mode
+    if is_voice_mode(session_id):
+        _emit_to_voice_websocket_sync(session_id, "ACTIVITY_START", {
+            "activity_type": activity_type,
+            "message": message
+        })
+        return
+
+    try:
         event = ActivityStartEvent(
             activity_type=activity_type,
             message=message
@@ -1330,6 +1422,14 @@ def emit_cart_data(session_id: str, items: List[Dict[str, Any]], total: float):
         items: List of cart items with name, quantity, price
         total: Cart total amount
     """
+    # Route to voice WebSocket if in voice mode
+    if is_voice_mode(session_id):
+        _emit_to_voice_websocket_sync(session_id, "CART_DATA", {
+            "items": items,
+            "total": total
+        })
+        return
+
     try:
         event = CartDataEvent(
             items=items,
@@ -1366,6 +1466,17 @@ def emit_order_data(session_id: str, order_id: str, items: List[Dict[str, Any]],
         status: Order status (confirmed, preparing, ready, etc.)
         order_type: dine_in or take_away
     """
+    # Route to voice WebSocket if in voice mode
+    if is_voice_mode(session_id):
+        _emit_to_voice_websocket_sync(session_id, "ORDER_DATA", {
+            "order_id": order_id,
+            "items": items,
+            "total": total,
+            "status": status,
+            "order_type": order_type
+        })
+        return
+
     try:
         event = OrderDataEvent(
             order_id=order_id,
@@ -1403,6 +1514,18 @@ def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: Lis
         current_meal_period: Current meal period (Breakfast, Lunch, Dinner) for default tab
         show_meal_filters: Whether to show breakfast/lunch/dinner tabs (False for filtered views)
     """
+    # Route to voice WebSocket if in voice mode
+    if is_voice_mode(session_id):
+        if categories is None:
+            categories = list(set(item.get("category", "Other") for item in items))
+            categories.sort()
+        _emit_to_voice_websocket_sync(session_id, "MENU_DATA", {
+            "items": items,
+            "categories": categories,
+            "current_meal_period": current_meal_period
+        })
+        return
+
     try:
         # Extract unique categories if not provided
         if categories is None:
@@ -1461,6 +1584,17 @@ def emit_search_results(
         available_count: Number of items available now
         unavailable_count: Number of items NOT available now
     """
+    # Route to voice WebSocket if in voice mode
+    if is_voice_mode(session_id):
+        _emit_to_voice_websocket_sync(session_id, "SEARCH_RESULTS", {
+            "query": query,
+            "items": items,
+            "current_meal_period": current_meal_period,
+            "available_count": available_count,
+            "unavailable_count": unavailable_count
+        })
+        return
+
     try:
         event = SearchResultsEvent(
             query=query,

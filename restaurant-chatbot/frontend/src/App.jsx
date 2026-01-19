@@ -45,6 +45,8 @@ function ChatInterface() {
   // Stable event handler that checks sessionReady via ref (doesn't cause reconnection)
   // Auth form events (phone_auth, login_otp, name_collection) are always processed to ensure auth flow works
   const stableEventHandler = useCallback((event) => {
+    console.log('🔶 stableEventHandler called:', event.type, event.form_type || '')
+
     // Always process auth-related forms (even before session modal is dismissed)
     const isAuthForm = event.type === 'FORM_REQUEST' &&
       (event.form_type === 'phone_auth' || event.form_type === 'login_otp' || event.form_type === 'name_collection')
@@ -55,17 +57,23 @@ function ChatInterface() {
     // Always process payment-related events
     const isPaymentEvent = event.type === 'PAYMENT_METHOD_SELECTION'
 
+    console.log('🔶 Event flags:', { isAuthForm, isAuthFormDismiss, isPaymentEvent, sessionReady: sessionReadyRef.current })
+
     if (isAuthForm || isAuthFormDismiss || isPaymentEvent || sessionReadyRef.current) {
+      console.log('🟢 Processing event:', event.type)
       handleEvent(event)
       // If auth form is received, auto-dismiss session modal and mark session ready
       if (isAuthForm && !sessionReadyRef.current) {
+        console.log('🟢 Auth form received, setting sessionReady=true')
         setShowSessionModal(false)
         setSessionReady(true)
       }
+    } else {
+      console.log('🔴 Event BLOCKED - sessionReady is false and not an auth event')
     }
   }, [handleEvent])
 
-  const { status, sendMessage, sendFormResponse } = useWebSocket(stableEventHandler)
+  const { status, sessionId, sendMessage, sendFormResponse } = useWebSocket(stableEventHandler)
 
   // Check for recent session on mount
   useEffect(() => {
@@ -120,13 +128,16 @@ function ChatInterface() {
     sendFormResponse(formType, data)
   }, [sendFormResponse])
 
-  // Handle adding items from MenuCard
+  // Handle adding items from MenuCard/SearchResultsCard
+  // Uses form_response to bypass LLM and directly call add_to_cart tool
   const handleAddToCart = useCallback((items) => {
-    // Build a single message with all items
-    const itemList = items.map(item => `${item.quantity} ${item.name}`).join(', ')
-    const message = `Add to cart: ${itemList}`
-    sendMessage(message)
-  }, [sendMessage])
+    // Send as structured form_response for direct processing (no LLM interpretation)
+    sendFormResponse('direct_add_to_cart', { items })
+
+    // Also show user message for context
+    const itemList = items.map(item => `${item.quantity}x ${item.name}`).join(', ')
+    addUserMessage(`Adding to cart: ${itemList}`)
+  }, [sendFormResponse, addUserMessage])
 
   // Handle payment method selection
   const handlePaymentMethodSelect = useCallback((methodAction) => {
@@ -216,7 +227,7 @@ function ChatInterface() {
     isConnected: isVoiceConnected,
     transcript,
     responseText
-  } = useVoiceChat("session_" + Math.random().toString(36).substr(2, 9)) // Simple session ID for prototype
+  } = useVoiceChat(sessionId) // Use same session ID as chat WebSocket
 
   // Auto-connect voice when language changes or session is ready
   useEffect(() => {

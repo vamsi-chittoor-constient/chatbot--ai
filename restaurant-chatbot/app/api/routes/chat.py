@@ -619,6 +619,7 @@ async def chat_endpoint(
                     session_id=session_id,
                     metadata_exists=session_id in websocket_manager.connection_metadata
                 )
+                print(f"[DEBUG] Starting phone auth flow for session: {session_id}")
 
                 try:
                     # Set auth state BEFORE emitting form (prevents duplicate on reconnect)
@@ -628,14 +629,17 @@ async def chat_endpoint(
                     # Emit phone auth form request
                     auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
                     logger.info("Phone auth form emitted", session_id=session_id, form_id=auth_form_id)
+                    print(f"[DEBUG] Phone auth form emitted for session: {session_id}, form_id: {auth_form_id}")
 
                     # Store form ID in connection metadata
                     if session_id in websocket_manager.connection_metadata:
                         websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
 
                     # Forward the form request to WebSocket
+                    print(f"[DEBUG] About to stream form events for session: {session_id}")
                     await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
                     logger.info("Form events streamed to WebSocket", session_id=session_id)
+                    print(f"[DEBUG] Form events streamed to WebSocket for session: {session_id}")
                 except Exception as e:
                     logger.error("Error in auth flow", session_id=session_id, error=str(e), exc_info=True)
 
@@ -1021,6 +1025,56 @@ async def chat_endpoint(
                 except json.JSONDecodeError:
                     # Handle plain text messages
                     user_message = raw_message
+
+                # ========================================================================
+                # DIRECT ADD-TO-CART HANDLER (bypasses LLM for UI card interactions)
+                # ========================================================================
+                if isinstance(message_data, dict) and message_data.get("type") == "form_response":
+                    form_type = message_data.get("form_type")
+                    form_data = message_data.get("data", {})
+
+                    if form_type == "direct_add_to_cart":
+                        # Direct add-to-cart from UI cards - bypass LLM entirely
+                        items = form_data.get("items", [])
+                        if items:
+                            from app.features.food_ordering.tools_event_sourced import create_event_sourced_tools
+                            from app.core.agui_events import AGUIEventEmitter
+
+                            # Get user_id from connection metadata
+                            customer_id = None
+                            if session_id in websocket_manager.connection_metadata:
+                                customer_id = websocket_manager.connection_metadata[session_id].get("user_id")
+
+                            # Create tools for this session
+                            tools = create_event_sourced_tools(session_id, customer_id)
+                            add_to_cart_tool = tools[0]  # First tool is add_to_cart
+
+                            # Add each item
+                            results = []
+                            for item in items:
+                                item_name = item.get("name", "")
+                                quantity = item.get("quantity", 1)
+                                if item_name and quantity > 0:
+                                    try:
+                                        result = add_to_cart_tool.run(item=item_name, quantity=quantity)
+                                        results.append(result)
+                                    except Exception as e:
+                                        logger.error("direct_add_to_cart_failed", error=str(e), item=item_name)
+                                        results.append(f"Failed to add {item_name}")
+
+                            # Stream any AGUI events (cart updates, etc.)
+                            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                            # Send the final response
+                            final_response = results[-1] if results else "No items added"
+                            await websocket_manager.send_message_with_metadata(
+                                session_id=session_id,
+                                message=final_response,
+                                message_type="ai_response",
+                                metadata={"direct_action": "add_to_cart"}
+                            )
+                            continue  # Skip normal message processing
+                # ========================================================================
 
                 # Check rate limit before processing
                 is_allowed, messages_remaining = websocket_manager.check_rate_limit(session_id)
