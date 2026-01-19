@@ -254,8 +254,9 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Return formatted menu results with LLM
             from app.core.llm_formatter import format_menu_results
 
-            formatted_msg = format_menu_results(items, query, meal_period)
-            return f"[MENU DISPLAYED] {formatted_msg}"
+            # Don't pass meal_period to formatter - it confuses the LLM into saying
+            # "available all day" when items may have specific availability
+            return format_menu_results(items, query)
 
         except Exception as e:
             logger.error("search_menu_failed", error=str(e), session_id=session_id)
