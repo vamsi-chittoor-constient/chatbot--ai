@@ -822,119 +822,129 @@ async def chat_endpoint(
         # - Tier 1 (Anonymous): Generic welcome with service overview
         # - Tier 2 (Device): Welcome back message
         # - Tier 3 (Authenticated): Fully personalized with name, favorites, history
-        try:
-            from app.services.identity_service import identity_service
-            from app.ai_services.welcome_service import welcome_service
-            from app.utils.welcome import get_time_based_greeting, get_restaurant_name
 
-            # If already authenticated via phone auth flow, use that info
-            if is_authenticated and authenticated_user_name:
-                tier = 3
-                user_name = authenticated_user_name
-                personalization = {}
-            else:
-                # Recognize user using multi-tier identity system
-                recognition_result = await identity_service.recognize_user(
-                    device_id=device_id,
-                    session_token=session_token
-                )
-
-                tier = recognition_result.get("tier", 1)
-                user_name = recognition_result.get("user_name")
-                personalization = recognition_result.get("personalization", {})
-
-            logger.info(
-                "User recognized for welcome",
-                session_id=session_id,
-                tier=tier,
-                user_name=user_name,
-                has_user_name=bool(user_name),
-                has_device_id=bool(device_id),
-                has_session_token=bool(session_token)
-            )
-
-            # Get restaurant name from authenticated restaurant and time-based greeting
-            restaurant_name = restaurant["name"]
-            time_greeting = get_time_based_greeting()
-
-            # Emit starting activity for welcome generation
-            # This masks the LLM latency with a "Setting up..." status
-            from app.core.agui_events import AGUIEventEmitter
-            welcome_emitter = AGUIEventEmitter(session_id)
-            welcome_emitter.emit_activity("thinking", "Setting up your personal waiter...")
-            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
-
-            # Check for existing cart items (Ghost Cart Fix)
-            has_cart_items = False
-            try:
-                from app.core.redis import get_cart_sync
-                cart_data = get_cart_sync(session_id)
-                has_cart_items = bool(cart_data.get("items"))
-                if has_cart_items:
-                    logger.info("welcome_generating_with_cart_items", session_id=session_id)
-            except Exception as e:
-                logger.warning(f"Failed to check cart for welcome: {str(e)}")
+        # Check if welcome was already sent for this session (prevent duplicates on reconnect)
+        welcome_already_sent = websocket_manager.connection_metadata.get(session_id, {}).get("welcome_sent", False)
+        if welcome_already_sent:
+            logger.info("welcome_skipped_already_sent", session_id=session_id)
+        else:
+            # Mark welcome as sent BEFORE sending to prevent race conditions
+            if session_id in websocket_manager.connection_metadata:
+                websocket_manager.connection_metadata[session_id]["welcome_sent"] = True
 
             try:
-                # Generate AI-powered welcome message
-                welcome_msg = await welcome_service.generate_welcome(
+                from app.services.identity_service import identity_service
+                from app.ai_services.welcome_service import welcome_service
+                from app.utils.welcome import get_time_based_greeting, get_restaurant_name
+
+                # If already authenticated via phone auth flow, use that info
+                if is_authenticated and authenticated_user_name:
+                    tier = 3
+                    user_name = authenticated_user_name
+                    personalization = {}
+                else:
+                    # Recognize user using multi-tier identity system
+                    recognition_result = await identity_service.recognize_user(
+                        device_id=device_id,
+                        session_token=session_token
+                    )
+
+                    tier = recognition_result.get("tier", 1)
+                    user_name = recognition_result.get("user_name")
+                    personalization = recognition_result.get("personalization", {})
+
+                logger.info(
+                    "User recognized for welcome",
+                    session_id=session_id,
                     tier=tier,
-                    restaurant_name=restaurant_name,
-                    time_greeting=time_greeting,
                     user_name=user_name,
-                    personalization=personalization,
-                    has_cart_items=has_cart_items
+                    has_user_name=bool(user_name),
+                    has_device_id=bool(device_id),
+                    has_session_token=bool(session_token)
                 )
-            finally:
-                # Clear the activity status
-                welcome_emitter.emit_activity_end()
+
+                # Get restaurant name from authenticated restaurant and time-based greeting
+                restaurant_name = restaurant["name"]
+                time_greeting = get_time_based_greeting()
+
+                # Emit starting activity for welcome generation
+                # This masks the LLM latency with a "Setting up..." status
+                from app.core.agui_events import AGUIEventEmitter
+                welcome_emitter = AGUIEventEmitter(session_id)
+                welcome_emitter.emit_activity("thinking", "Setting up your personal waiter...")
                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
 
-            await websocket_manager.send_message(
-                session_id=session_id,
-                message=welcome_msg,
-                message_type="ai_response"
-            )
+                # Check for existing cart items (Ghost Cart Fix)
+                has_cart_items = False
+                try:
+                    from app.core.redis import get_cart_sync
+                    cart_data = get_cart_sync(session_id)
+                    has_cart_items = bool(cart_data.get("items"))
+                    if has_cart_items:
+                        logger.info("welcome_generating_with_cart_items", session_id=session_id)
+                except Exception as e:
+                    logger.warning(f"Failed to check cart for welcome: {str(e)}")
 
-            # Store welcome message for adding to conversation history
-            if session_id in websocket_manager.connection_metadata:
-                websocket_manager.connection_metadata[session_id]["welcome_msg"] = welcome_msg
+                try:
+                    # Generate AI-powered welcome message
+                    welcome_msg = await welcome_service.generate_welcome(
+                        tier=tier,
+                        restaurant_name=restaurant_name,
+                        time_greeting=time_greeting,
+                        user_name=user_name,
+                        personalization=personalization,
+                        has_cart_items=has_cart_items
+                    )
+                finally:
+                    # Clear the activity status
+                    welcome_emitter.emit_activity_end()
+                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
 
-            logger.info(
-                "AI-powered welcome sent",
-                session_id=session_id,
-                tier=tier,
-                message_length=len(welcome_msg)
-            )
-
-        except Exception as e:
-            # Fallback welcome message if AI generation fails
-            logger.error(f"Failed to generate AI welcome for session {session_id}: {str(e)}")
-
-            # Use authenticated name if available
-            if is_authenticated and authenticated_user_name:
-                fallback_msg = (
-                    f"Hello {authenticated_user_name}! Welcome back to our restaurant. I'm your AI assistant, "
-                    "and I can help you browse our menu, place an order for dine-in or takeout, make a reservation, "
-                    "or answer any questions. What would you like to do?"
+                await websocket_manager.send_message(
+                    session_id=session_id,
+                    message=welcome_msg,
+                    message_type="ai_response"
                 )
-            else:
-                fallback_msg = (
-                    "Hello! Welcome to our restaurant. I'm your AI assistant, and I can help you "
-                    "browse our menu, place an order for dine-in or takeout, make a reservation, "
-                    "or answer any questions about our restaurant. What would you like to do?"
+
+                # Store welcome message for adding to conversation history
+                if session_id in websocket_manager.connection_metadata:
+                    websocket_manager.connection_metadata[session_id]["welcome_msg"] = welcome_msg
+
+                logger.info(
+                    "AI-powered welcome sent",
+                    session_id=session_id,
+                    tier=tier,
+                    message_length=len(welcome_msg)
                 )
-            await websocket_manager.send_message(
-                session_id=session_id,
-                message=fallback_msg,
-                message_type="ai_response"
-            )
 
-            # Store fallback welcome message for adding to conversation history
-            if session_id in websocket_manager.connection_metadata:
-                websocket_manager.connection_metadata[session_id]["welcome_msg"] = fallback_msg
+            except Exception as e:
+                # Fallback welcome message if AI generation fails
+                logger.error(f"Failed to generate AI welcome for session {session_id}: {str(e)}")
 
-            logger.warning(f"Used fallback welcome message for session {session_id}")
+                # Use authenticated name if available
+                if is_authenticated and authenticated_user_name:
+                    fallback_msg = (
+                        f"Hello {authenticated_user_name}! Welcome back to our restaurant. I'm your AI assistant, "
+                        "and I can help you browse our menu, place an order for dine-in or takeout, make a reservation, "
+                        "or answer any questions. What would you like to do?"
+                    )
+                else:
+                    fallback_msg = (
+                        "Hello! Welcome to our restaurant. I'm your AI assistant, and I can help you "
+                        "browse our menu, place an order for dine-in or takeout, make a reservation, "
+                        "or answer any questions about our restaurant. What would you like to do?"
+                    )
+                await websocket_manager.send_message(
+                    session_id=session_id,
+                    message=fallback_msg,
+                    message_type="ai_response"
+                )
+
+                # Store fallback welcome message for adding to conversation history
+                if session_id in websocket_manager.connection_metadata:
+                    websocket_manager.connection_metadata[session_id]["welcome_msg"] = fallback_msg
+
+                logger.warning(f"Used fallback welcome message for session {session_id}")
         # ========================================================================
 
         # Main message loop
