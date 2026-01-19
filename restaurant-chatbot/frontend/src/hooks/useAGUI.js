@@ -113,6 +113,24 @@ function aguiReducer(state, action) {
         }],
       }
 
+    case 'SEARCH_RESULTS':
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'search_results'), {
+          id: Date.now(),
+          role: 'system',
+          type: 'search_results',
+          data: {
+            query: action.payload.query,
+            items: action.payload.items,
+            currentMealPeriod: action.payload.current_meal_period,
+            availableCount: action.payload.available_count,
+            unavailableCount: action.payload.unavailable_count,
+          },
+          timestamp: new Date(),
+        }],
+      }
+
     case 'ORDER_DATA':
       return {
         ...state,

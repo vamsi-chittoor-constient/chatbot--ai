@@ -220,7 +220,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message: "[MENU DISPLAYED] Browse the menu and let me know what you'd like!"
         """
-        from app.core.agui_events import emit_tool_activity, emit_menu_data
+        from app.core.agui_events import emit_tool_activity, emit_menu_data, emit_search_results
         from app.core.preloader import get_menu_preloader, get_current_meal_period
         from app.core.session_events import get_sync_session_tracker, EventType
 
@@ -234,29 +234,113 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Get current meal period for filtering
             meal_period = get_current_meal_period()
 
-            # Search menu (in-memory, fast) - strict filter to only show items available now
-            items = preloader.search(query, meal_period=meal_period, strict_meal_filter=True)
+            # Differentiate between browsing and searching:
+            # - Browsing (empty/generic query): use MenuCard with meal filters
+            # - Searching (specific query): use SearchResultsCard with availability info
+            is_browsing = not query or query.lower() in ["", "all", "show all", "everything", "menu", "show menu"]
 
-            if not items:
-                return f"No items found for '{query}'. Try a different search?"
+            if is_browsing:
+                # Browsing: strict filter to current meal period, use MenuCard
+                items = preloader.search(query, meal_period=meal_period, strict_meal_filter=True)
+                if not items:
+                    return f"No items available for {meal_period} right now. Try a different search?"
 
-            # Log event using sync tracker (thread-safe for CrewAI)
-            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
-            tracker.log_event(EventType.MENU_VIEWED, {
-                'query': query,
-                'result_count': len(items),
-                'meal_period': meal_period
-            })
+                # Log event
+                tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+                tracker.log_event(EventType.MENU_VIEWED, {
+                    'query': query,
+                    'result_count': len(items),
+                    'meal_period': meal_period
+                })
 
-            # Emit menu card to frontend
-            emit_menu_data(session_id, items[:50], meal_period)
+                # Emit menu card to frontend
+                emit_menu_data(session_id, items[:50], meal_period)
 
-            # Return formatted menu results with LLM
-            from app.core.llm_formatter import format_menu_results
+                # Return formatted menu results
+                from app.core.llm_formatter import format_menu_results
+                return format_menu_results(items, query)
 
-            # Don't pass meal_period to formatter - it confuses the LLM into saying
-            # "available all day" when items may have specific availability
-            return format_menu_results(items, query)
+            else:
+                # Searching: find ALL matching items, use SearchResultsCard
+                all_matching_items = preloader.search(query, meal_period=None)
+
+                if not all_matching_items:
+                    return f"No items found for '{query}'. Try a different search?"
+
+                # Check availability for each item
+                def check_available(item):
+                    meal_types = item.get("meal_types", [])
+                    if isinstance(meal_types, str):
+                        meal_types = [mt.strip() for mt in meal_types.split(",")]
+                    return meal_period in meal_types or "All Day" in meal_types
+
+                # Add is_available_now field to each item
+                items_with_availability = []
+                available_count = 0
+                unavailable_count = 0
+
+                for item in all_matching_items[:20]:  # Limit to 20 items
+                    is_avail = check_available(item)
+                    item_copy = dict(item)
+                    item_copy["is_available_now"] = is_avail
+                    items_with_availability.append(item_copy)
+                    if is_avail:
+                        available_count += 1
+                    else:
+                        unavailable_count += 1
+
+                # Sort: available items first
+                items_with_availability.sort(key=lambda x: (not x["is_available_now"], x["name"]))
+
+                # Log event
+                tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+                tracker.log_event(EventType.MENU_VIEWED, {
+                    'query': query,
+                    'result_count': len(items_with_availability),
+                    'meal_period': meal_period,
+                    'available_count': available_count,
+                    'unavailable_count': unavailable_count
+                })
+
+                # Emit SearchResultsCard
+                emit_search_results(
+                    session_id=session_id,
+                    query=query,
+                    items=items_with_availability,
+                    current_meal_period=meal_period,
+                    available_count=available_count,
+                    unavailable_count=unavailable_count
+                )
+
+                # Build response message with upselling
+                # Human-friendly meal period name
+                period_display = meal_period if meal_period != "All Day" else "late night"
+
+                if available_count > 0 and unavailable_count > 0:
+                    return f"I found {len(items_with_availability)} '{query}' options! {available_count} available now, {unavailable_count} at other times. Which one would you like?"
+                elif available_count > 0:
+                    if available_count == 1:
+                        return f"I found {items_with_availability[0]['name']}! Would you like to add it to your cart?"
+                    return f"I found {available_count} '{query}' options available now. Which one would you like?"
+                else:
+                    # No items available now - ALSO show menu card with available items (upselling)
+                    available_items = preloader.search("", meal_period=meal_period, strict_meal_filter=True)
+
+                    if available_items:
+                        # Emit SECOND card: MenuCard with currently available items
+                        emit_menu_data(session_id, available_items[:30], meal_period)
+
+                    # Get meal periods from first unavailable item for better messaging
+                    first_item_meals = items_with_availability[0].get("meal_types", []) if items_with_availability else []
+                    if isinstance(first_item_meals, str):
+                        first_item_meals = [m.strip() for m in first_item_meals.split(",")]
+                    available_times = " & ".join([m for m in first_item_meals if m != "All Day"]) or "other times"
+
+                    # Build response that drives action
+                    if available_items:
+                        return f"I found {unavailable_count} '{query}' options - they're available during {available_times}! 👆 Check the timings above. Meanwhile, here's what's available now 👇 - want to explore?"
+                    else:
+                        return f"I found {unavailable_count} '{query}' options, but they're only available during {available_times}. Check the card above to see when you can order them!"
 
         except Exception as e:
             logger.error("search_menu_failed", error=str(e), session_id=session_id)

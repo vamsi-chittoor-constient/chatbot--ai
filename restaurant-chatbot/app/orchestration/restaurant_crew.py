@@ -376,7 +376,7 @@ When customer complains about food quality, service, wait time, or other issues:
         allow_delegation=True,
         respect_context_window=True,
         cache=False,
-        max_iter=1,  # Tool output is final - no LLM iterations
+        max_iter=3,  # Need at least 2: one to call tool, one to process result
         max_retry_limit=1,
         reasoning=False,  # Disabled for speed
         memory=False,  # Disabled - uses Redis for state

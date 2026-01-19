@@ -67,6 +67,7 @@ class EventType(str, Enum):
     CART_DATA = "CART_DATA"
     ORDER_DATA = "ORDER_DATA"
     MENU_DATA = "MENU_DATA"
+    SEARCH_RESULTS = "SEARCH_RESULTS"  # For search results with availability info
     QUICK_REPLIES = "QUICK_REPLIES"
     PAYMENT_LINK = "PAYMENT_LINK"
     PAYMENT_METHOD_SELECTION = "PAYMENT_METHOD_SELECTION"
@@ -206,6 +207,22 @@ class MenuDataEvent(AGUIEvent):
     current_meal_period: str = ""  # Breakfast, Lunch, Dinner, or All Day
     show_meal_filters: bool = True  # Show breakfast/lunch/dinner tabs (False for filtered views)
     show_popular_tab: bool = False  # Popular items feature disabled
+
+
+@dataclass
+class SearchResultsEvent(AGUIEvent):
+    """
+    Emitted with search results showing items with availability info.
+
+    Used when user searches for specific items (e.g., "parota").
+    Shows all matching items with per-item availability status.
+    """
+    type: EventType = EventType.SEARCH_RESULTS
+    query: str = ""  # What the user searched for
+    items: List[Dict[str, Any]] = field(default_factory=list)  # Items with is_available_now, meal_types
+    current_meal_period: str = ""  # Current meal period (Breakfast, Lunch, Dinner)
+    available_count: int = 0  # How many items are available now
+    unavailable_count: int = 0  # How many items are NOT available now
 
 
 @dataclass
@@ -1418,6 +1435,54 @@ def emit_menu_data(session_id: str, items: List[Dict[str, Any]], categories: Lis
         )
     except Exception as e:
         logger.debug("menu_data_emit_failed", error=str(e))
+
+
+def emit_search_results(
+    session_id: str,
+    query: str,
+    items: List[Dict[str, Any]],
+    current_meal_period: str,
+    available_count: int,
+    unavailable_count: int
+):
+    """
+    Emit search results with per-item availability info.
+
+    Used when user searches for specific items (e.g., "parota").
+    Each item should have:
+    - name, price, category, meal_types
+    - is_available_now: bool (computed before calling)
+
+    Args:
+        session_id: The session ID
+        query: What the user searched for
+        items: List of items with availability info
+        current_meal_period: Current meal period
+        available_count: Number of items available now
+        unavailable_count: Number of items NOT available now
+    """
+    try:
+        event = SearchResultsEvent(
+            query=query,
+            items=items,
+            current_meal_period=current_meal_period,
+            available_count=available_count,
+            unavailable_count=unavailable_count
+        )
+
+        _put_event_threadsafe(session_id, event)
+
+        logger.debug(
+            "search_results_emitted",
+            session_id=session_id,
+            query=query,
+            items_count=len(items),
+            available=available_count,
+            unavailable=unavailable_count,
+            meal_period=current_meal_period
+        )
+    except Exception as e:
+        logger.debug("search_results_emit_failed", error=str(e))
 
 
 def emit_quick_replies(session_id: str, replies: List[Dict[str, str]]):

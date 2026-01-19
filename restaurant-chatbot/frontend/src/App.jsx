@@ -18,6 +18,7 @@ import {
   PaymentSuccessCard,
   VoiceModeUI,
 } from './components'
+import { SearchResultsCard } from './components/SearchResultsCard'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
 
@@ -141,6 +142,8 @@ function ChatInterface() {
         return <CartCard key={message.id} data={message.data} onCheckout={handleCheckout} />
       case 'menu':
         return <MenuCard key={message.id} data={message.data} onAddToCart={handleAddToCart} />
+      case 'search_results':
+        return <SearchResultsCard key={message.id} data={message.data} onAddToCart={handleAddToCart} />
       case 'order':
         return <OrderCard key={message.id} data={message.data} />
       case 'payment_method_selection':

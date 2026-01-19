@@ -198,8 +198,9 @@ class WebSocketManager:
             )
 
             del self.active_connections[session_id]
-            if session_id in self.connection_metadata:
-                del self.connection_metadata[session_id]
+            # DON'T delete connection_metadata on disconnect!
+            # Keep it for reconnects so auth_state, user_id, etc. are preserved
+            # Metadata will be overwritten/merged on next connect() call
 
     async def send_message(self, session_id: str, message: str, message_type: str = "ai_response"):
         """Send message to specific WebSocket connection"""
@@ -571,31 +572,72 @@ async def chat_endpoint(
 
         # If not authenticated and AUTH_REQUIRED, start phone auth flow
         if not is_authenticated and config.AUTH_REQUIRED:
-            # Check if auth is already in progress for this session (avoid duplicate forms on reconnect)
+            # Check if auth is already in progress or completed for this session
             existing_auth_state = websocket_manager.connection_metadata.get(session_id, {}).get("auth_state")
-            if existing_auth_state and existing_auth_state not in ("authenticated", None):
+
+            # If already authenticated via preserved metadata, skip auth flow entirely
+            # BUT only trust it if we have a valid user_id (prevents stale auth after hard refresh)
+            preserved_user_id = websocket_manager.connection_metadata.get(session_id, {}).get("user_id")
+            preserved_user_name = websocket_manager.connection_metadata.get(session_id, {}).get("user_name")
+
+            if existing_auth_state == "authenticated" and preserved_user_id:
+                # Valid preserved auth - skip form entirely
+                logger.info(
+                    "User already authenticated via preserved metadata, skipping auth flow",
+                    session_id=session_id,
+                    user_id=preserved_user_id
+                )
+                is_authenticated = True
+                authenticated_user_id = preserved_user_id
+                authenticated_user_name = preserved_user_name
+                # Skip the form emission entirely - no elif/else needed
+            elif existing_auth_state == "authenticated" and not preserved_user_id:
+                # Stale auth state without user_id - clear it and show form
+                logger.warning(
+                    "Stale auth state found without user_id, clearing and showing form",
+                    session_id=session_id
+                )
+                if session_id in websocket_manager.connection_metadata:
+                    websocket_manager.connection_metadata[session_id]["auth_state"] = "awaiting_phone"
+
+                # Emit phone auth form request
+                auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
+                if session_id in websocket_manager.connection_metadata:
+                    websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
+                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+            elif existing_auth_state and existing_auth_state not in (None,):
+                # Auth in progress (awaiting_phone, awaiting_otp, etc.) - skip duplicate form
                 logger.info(
                     "Auth already in progress, skipping duplicate form",
                     session_id=session_id,
                     auth_state=existing_auth_state
                 )
-                # Don't emit a new form - just continue to the message loop
+                # Don't emit a new form - just continue to the auth loop
             else:
                 logger.info(
                     "Starting phone authentication flow",
-                    session_id=session_id
+                    session_id=session_id,
+                    metadata_exists=session_id in websocket_manager.connection_metadata
                 )
 
-                # Emit phone auth form request
-                auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
+                try:
+                    # Set auth state BEFORE emitting form (prevents duplicate on reconnect)
+                    if session_id in websocket_manager.connection_metadata:
+                        websocket_manager.connection_metadata[session_id]["auth_state"] = "awaiting_phone"
 
-                # Store auth state in connection metadata
-                if session_id in websocket_manager.connection_metadata:
-                    websocket_manager.connection_metadata[session_id]["auth_state"] = "awaiting_phone"
-                    websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
+                    # Emit phone auth form request
+                    auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
+                    logger.info("Phone auth form emitted", session_id=session_id, form_id=auth_form_id)
 
-                # Forward the form request to WebSocket
-                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                    # Store form ID in connection metadata
+                    if session_id in websocket_manager.connection_metadata:
+                        websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
+
+                    # Forward the form request to WebSocket
+                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                    logger.info("Form events streamed to WebSocket", session_id=session_id)
+                except Exception as e:
+                    logger.error("Error in auth flow", session_id=session_id, error=str(e), exc_info=True)
 
             # Wait for phone auth form response
             while not is_authenticated:
