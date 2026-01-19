@@ -733,7 +733,8 @@ async def chat_endpoint(
                             from app.features.user_management.tools.otp_tools import create_user
                             create_result = await create_user(
                                 phone_number=auth_phone,
-                                full_name=user_name
+                                full_name=user_name,
+                                restaurant_id=restaurant["restaurant_id"]
                             )
 
                             if create_result.get("success"):

@@ -37,6 +37,11 @@ class User(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()")
     )
+    restaurant_id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False),
+        ForeignKey("restaurant.id"),
+        nullable=False
+    )
     phone_number: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

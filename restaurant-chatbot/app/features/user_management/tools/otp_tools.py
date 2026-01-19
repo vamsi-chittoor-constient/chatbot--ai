@@ -222,7 +222,8 @@ async def check_user_exists(
 async def create_user(
     phone_number: str,
     full_name: str,
-    email: Optional[str] = None
+    email: Optional[str] = None,
+    restaurant_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create a new user account.
@@ -231,6 +232,7 @@ async def create_user(
         phone_number: User's phone number
         full_name: User's full name
         email: User's email (optional)
+        restaurant_id: Restaurant ID for multi-tenant support (required)
 
     Returns:
         Dict with success status and user data
@@ -239,7 +241,8 @@ async def create_user(
         logger.info(
             "Creating new user",
             phone=phone_number,
-            name=full_name
+            name=full_name,
+            restaurant_id=restaurant_id
         )
 
         create_tool = CreateUserTool()
@@ -247,7 +250,8 @@ async def create_user(
             phone_number=phone_number,
             full_name=full_name,
             email=email,
-            is_anonymous=False
+            is_anonymous=False,
+            restaurant_id=restaurant_id
         )
 
         if result.status != ToolStatus.SUCCESS:
