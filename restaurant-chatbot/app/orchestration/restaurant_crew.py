@@ -291,7 +291,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
     )
 
     # Create event-sourced tools (search_menu, add_to_cart, view_cart, remove_from_cart)
-    event_sourced_tools = create_event_sourced_tools(session_id, customer_id)
+    event_sourced_tools = create_event_sourced_tools(session_id)
 
     # Create ALL tools (event-sourced + legacy tools)
     all_food_tools = [
