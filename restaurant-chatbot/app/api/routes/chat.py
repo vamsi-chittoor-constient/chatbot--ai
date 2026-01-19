@@ -84,6 +84,15 @@ class WebSocketManager:
             raise
 
         self.active_connections[session_id] = websocket
+
+        # Preserve important state from previous connection (for reconnects)
+        existing_metadata = self.connection_metadata.get(session_id, {})
+        preserved_keys = [
+            "welcome_sent", "auth_state", "user_id", "user_name", "phone_number",
+            "auth_phone", "auth_form_id", "otp_form_id", "name_form_id", "welcome_msg"
+        ]
+        preserved_state = {k: existing_metadata[k] for k in preserved_keys if k in existing_metadata}
+
         metadata = {
             "connected_at": get_ist_timestamp(),
             "last_activity": datetime.now(timezone.utc),  # Track last activity for cleanup
@@ -92,8 +101,13 @@ class WebSocketManager:
                 "port": websocket.client.port if websocket.client else "unknown"
             },
             "messages_sent": 0,
-            "messages_received": 0
+            "messages_received": 0,
+            **preserved_state  # Restore preserved state from previous connection
         }
+
+        # Log if this is a reconnect with preserved state
+        if preserved_state:
+            logger.info("websocket_reconnect_state_preserved", session_id=session_id, preserved_keys=list(preserved_state.keys()))
 
         # ============ MULTI-TENANT SUPPORT ============
         # Store restaurant info for multi-tenant operations
