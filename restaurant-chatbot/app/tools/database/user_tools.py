@@ -106,8 +106,7 @@ class CreateUserTool(ToolBase):
                     email=email,
                     full_name=kwargs.get('full_name'),
                     password_hash=kwargs.get('password_hash'),
-                    is_anonymous=kwargs.get('is_anonymous', True),
-                    restaurant_id=kwargs.get('restaurant_id')
+                    is_anonymous=kwargs.get('is_anonymous', True)
                     # status will use the default from the model (UserStatus.ACTIVE)
                 )
 
