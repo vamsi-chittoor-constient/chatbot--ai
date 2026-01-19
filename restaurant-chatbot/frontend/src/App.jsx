@@ -48,10 +48,13 @@ function ChatInterface() {
     const isAuthForm = event.type === 'FORM_REQUEST' &&
       (event.form_type === 'phone_auth' || event.form_type === 'login_otp' || event.form_type === 'name_collection')
 
+    // Always process FORM_DISMISS for auth forms (needed to dismiss phone form after submission)
+    const isAuthFormDismiss = event.type === 'FORM_DISMISS'
+
     // Always process payment-related events
     const isPaymentEvent = event.type === 'PAYMENT_METHOD_SELECTION'
 
-    if (isAuthForm || isPaymentEvent || sessionReadyRef.current) {
+    if (isAuthForm || isAuthFormDismiss || isPaymentEvent || sessionReadyRef.current) {
       handleEvent(event)
       // If auth form is received, auto-dismiss session modal and mark session ready
       if (isAuthForm && !sessionReadyRef.current) {
