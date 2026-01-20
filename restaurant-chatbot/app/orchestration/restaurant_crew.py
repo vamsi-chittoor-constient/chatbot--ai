@@ -84,7 +84,7 @@ def clean_crew_response(raw_response: str) -> str:
         return cleaned
 
     logger.warning("crew_response_extraction_failed", raw_response=response[:200])
-    return "I'm processing your request. Could you please try again?"
+    return "I didn't quite catch that. Could you say that again? You can ask me about the menu, place an order, or make a reservation."
 
 
 def _build_conversation_context(
