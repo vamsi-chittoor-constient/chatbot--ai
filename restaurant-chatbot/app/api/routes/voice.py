@@ -257,15 +257,33 @@ async def process_speech_segment(
         # - Voice activity detection
         # - Background noise filtering
         # - Echo cancellation (when audio has good preprocessing)
+        # NOTE: Removed prompt parameter - Whisper sometimes echoes the prompt when audio is unclear
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             language=language_code_map.get(language, "en"),
-            prompt="This is a conversation with a restaurant chatbot about food orders, reservations, and menu items.",
             temperature=0.0  # Deterministic transcription for consistency
         )
 
         transcript_text = transcription.text.strip()
+
+        # Filter out known garbage patterns (Whisper artifacts)
+        garbage_patterns = [
+            "This is a conversation with a restaurant",
+            "Thank you for watching",
+            "Thanks for watching",
+            "Please subscribe",
+            "Like and subscribe",
+        ]
+        for pattern in garbage_patterns:
+            if pattern.lower() in transcript_text.lower():
+                logger.warning(
+                    "voice_garbage_transcript_filtered",
+                    session_id=session_id,
+                    transcript=transcript_text
+                )
+                await websocket.send_json({"type": "processing_end"})
+                return
 
         if not transcript_text:
             await websocket.send_json({"type": "processing_end"})
