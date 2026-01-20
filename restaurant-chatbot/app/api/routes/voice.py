@@ -230,7 +230,7 @@ async def process_speech_segment(
         # Combine audio chunks
         combined_audio = b''.join(speech_buffer)
 
-        if len(combined_audio) < 8000:  # Less than 0.5 seconds at 16kHz (16000 samples/sec * 0.5 sec * 2 bytes/sample)
+        if len(combined_audio) < 16000:  # Less than 0.5 seconds at 16kHz mono (16000 Hz * 0.5 sec * 2 bytes = 16000)
             logger.debug(
                 "voice_segment_too_short",
                 session_id=session_id,
@@ -269,12 +269,20 @@ async def process_speech_segment(
         # - Voice activity detection
         # - Background noise filtering
         # - Echo cancellation (when audio has good preprocessing)
-        # NOTE: Removed prompt parameter - Whisper sometimes echoes the prompt when audio is unclear
+        #
+        # Using vocabulary hint prompt (not a sentence that could be echoed)
+        # This helps Whisper recognize Indian food items and restaurant terms
+        vocabulary_hint = (
+            "dosa, idli, vada, sambar, chutney, masala dosa, parota, paratha, biryani, "
+            "paneer, butter chicken, naan, roti, dal, tandoori, tikka, korma, vindaloo, "
+            "lassi, chai, menu, cart, order, checkout, table, reservation, booking"
+        )
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             language=language_code_map.get(language, "en"),
-            temperature=0.0  # Deterministic transcription for consistency
+            prompt=vocabulary_hint,  # Vocabulary hint improves recognition of food terms
+            temperature=0.2  # Slight temperature helps with unclear audio
         )
 
         transcript_text = transcription.text.strip()
