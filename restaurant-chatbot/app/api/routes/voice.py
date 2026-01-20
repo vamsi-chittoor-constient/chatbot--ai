@@ -96,6 +96,8 @@ async def voice_chat_websocket(
     audio_buffer = []  # List of PCM chunks
     speech_buffer = []  # Buffer for detected speech
     is_speaking = False
+    # Mutable state container for sharing between main loop and background tasks
+    state = {"is_processing": False}
     SAMPLE_RATE = 16000  # Silero VAD works best at 16kHz
     VAD_CHUNK_SIZE = 512  # Silero VAD chunk size (32ms at 16kHz)
 
@@ -155,17 +157,23 @@ async def voice_chat_websocket(
 
                             # Process speech segment in background task
                             # This keeps the WebSocket loop alive for continuous conversation
-                            if speech_buffer:
+                            # Only process if not already processing (prevents duplicate responses)
+                            if speech_buffer and not state["is_processing"]:
+                                state["is_processing"] = True
                                 # Create background task for processing
                                 asyncio.create_task(
                                     process_speech_segment(
                                         websocket,
                                         speech_buffer.copy(),  # Copy buffer to avoid race conditions
                                         session_id,
-                                        language
+                                        language,
+                                        state  # Pass state to reset is_processing when done
                                     )
                                 )
                                 speech_buffer = []
+                            elif state["is_processing"]:
+                                # Accumulate more audio while processing
+                                logger.debug("Accumulating speech while processing", session_id=session_id)
 
             except WebSocketDisconnect:
                 logger.info("voice_websocket_disconnected", session_id=session_id)
@@ -207,7 +215,8 @@ async def process_speech_segment(
     websocket: WebSocket,
     speech_buffer: list,
     session_id: str,
-    language: str
+    language: str,
+    state: dict = None
 ):
     """
     Process detected speech segment:
@@ -228,6 +237,9 @@ async def process_speech_segment(
                 length=len(combined_audio),
                 threshold=8000
             )
+            # Reset state before returning
+            if state is not None:
+                state["is_processing"] = False
             return  # Too short, probably noise
 
         # Convert PCM to WAV format for Whisper (16kHz is fine for Whisper)
@@ -283,10 +295,14 @@ async def process_speech_segment(
                     transcript=transcript_text
                 )
                 await websocket.send_json({"type": "processing_end"})
+                if state is not None:
+                    state["is_processing"] = False
                 return
 
         if not transcript_text:
             await websocket.send_json({"type": "processing_end"})
+            if state is not None:
+                state["is_processing"] = False
             return
 
         logger.info(
@@ -360,6 +376,11 @@ async def process_speech_segment(
             "message": "Failed to process audio"
         })
         await websocket.send_json({"type": "processing_end"})
+    finally:
+        # Reset processing state to allow new requests
+        if state is not None:
+            state["is_processing"] = False
+            logger.debug("Processing state reset", session_id=session_id)
 
 
 async def process_with_chat_agent(text: str, session_id: str, websocket: WebSocket) -> str:
@@ -370,7 +391,7 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
     try:
         # Import chat processing
         from app.orchestration.restaurant_crew import process_with_agui_streaming
-        from app.core.agui_events import AGUIEventEmitter
+        from app.core.agui_events import AGUIEventEmitter, set_voice_mode, flush_pending_events, get_event_queue
         from app.services.session_manager import get_session_manager
 
         # Get session data
@@ -383,6 +404,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         # Get conversation history from session metadata
         conversation_history = session.metadata.get("conversation_history", []) if session.metadata else []
         user_id = session.user_id
+
+        # Enable voice mode ONLY during processing (not on connect)
+        # This routes tool events (SEARCH_RESULTS, MENU_DATA) to voice WebSocket
+        set_voice_mode(session_id, websocket)
 
         # Create a real emitter that forwards ALL AGUI events through WebSocket
         # Voice mode needs full interactive experience: forms, menus, cards, etc.
@@ -432,14 +457,37 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
 
         emitter = VoiceWebSocketEmitter(websocket)
 
-        # Process with agent
-        response, _ = await process_with_agui_streaming(
-            user_message=text,
-            session_id=session_id,
-            conversation_history=conversation_history,
-            emitter=emitter,
-            user_id=user_id
-        )
+        try:
+            # Process with agent
+            response, _ = await process_with_agui_streaming(
+                user_message=text,
+                session_id=session_id,
+                conversation_history=conversation_history,
+                emitter=emitter,
+                user_id=user_id
+            )
+
+            # Flush any remaining staged events to voice WebSocket
+            # (events staged in thread pool before voice_mode was checked)
+            flush_pending_events(session_id)
+
+            # Also drain the queue and forward to voice WebSocket
+            # (in case events were queued before voice_mode was set)
+            queue = get_event_queue(session_id)
+            while not queue.empty():
+                try:
+                    event = queue.get_nowait()
+                    await websocket.send_json({
+                        "type": "agui_event",
+                        "agui": event.to_dict() if hasattr(event, 'to_dict') else {"type": event.type.value, **event.__dict__}
+                    })
+                except:
+                    break
+
+        finally:
+            # CRITICAL: Disable voice mode after processing
+            # This ensures chat mode gets events when not in voice processing
+            set_voice_mode(session_id, None)
 
         # Update conversation history
         conversation_history.append(f"User: {text}")
