@@ -53,6 +53,12 @@ export const useWebSocket = (onEvent) => {
   const receivedStreamingRef = useRef(false)  // Track if we received AGUI streaming
 
   const connect = useCallback(() => {
+    // Prevent duplicate connections (important for React StrictMode)
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+      console.log('WebSocket already connected or connecting, skipping duplicate connection')
+      return
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     // Backend WebSocket endpoint is at /api/v1/chat/{session_id}

@@ -81,9 +81,13 @@ async def voice_chat_websocket(
         language=language
     )
 
-    # Register voice mode for this session - events will be routed to this WebSocket
+    # NOTE: Do NOT set voice_mode on connection!
+    # Voice mode should only be active when user is actually speaking/using voice.
+    # Setting it on connect steals ALL events from chat queue (SEARCH_RESULTS, MENU_DATA, etc.)
+    # which breaks the chat UI cards.
+    # Voice mode will be set when voice_start message is received.
     from app.core.agui_events import set_voice_mode
-    set_voice_mode(session_id, websocket)
+    # set_voice_mode(session_id, websocket)  # DISABLED - was breaking chat cards
 
     # Load VAD model
     vad_model = get_vad_model()

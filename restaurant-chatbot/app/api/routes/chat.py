@@ -606,13 +606,32 @@ async def chat_endpoint(
                     websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
             elif existing_auth_state and existing_auth_state not in (None,):
-                # Auth in progress (awaiting_phone, awaiting_otp, etc.) - skip duplicate form
+                # Auth in progress on reconnect - RE-EMIT the form since frontend lost it
                 logger.info(
-                    "Auth already in progress, skipping duplicate form",
+                    "Auth in progress on reconnect, re-emitting form",
                     session_id=session_id,
                     auth_state=existing_auth_state
                 )
-                # Don't emit a new form - just continue to the auth loop
+
+                if existing_auth_state == "awaiting_phone":
+                    auth_form_id = auth_emitter.emit_phone_auth_form(restaurant["name"])
+                    if session_id in websocket_manager.connection_metadata:
+                        websocket_manager.connection_metadata[session_id]["auth_form_id"] = auth_form_id
+                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                elif existing_auth_state == "awaiting_otp":
+                    auth_phone = websocket_manager.connection_metadata.get(session_id, {}).get("auth_phone")
+                    if auth_phone:
+                        otp_form_id = auth_emitter.emit_login_otp_form(auth_phone)
+                        if session_id in websocket_manager.connection_metadata:
+                            websocket_manager.connection_metadata[session_id]["otp_form_id"] = otp_form_id
+                        await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                elif existing_auth_state == "awaiting_name":
+                    auth_phone = websocket_manager.connection_metadata.get(session_id, {}).get("auth_phone")
+                    if auth_phone:
+                        name_form_id = auth_emitter.emit_name_collection_form(auth_phone)
+                        if session_id in websocket_manager.connection_metadata:
+                            websocket_manager.connection_metadata[session_id]["name_form_id"] = name_form_id
+                        await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
             else:
                 logger.info(
                     "Starting phone authentication flow",
@@ -885,7 +904,17 @@ async def chat_endpoint(
 
         # Check if welcome was already sent for this session (prevent duplicates on reconnect)
         welcome_already_sent = websocket_manager.connection_metadata.get(session_id, {}).get("welcome_sent", False)
-        if welcome_already_sent:
+        preserved_welcome_msg = websocket_manager.connection_metadata.get(session_id, {}).get("welcome_msg")
+
+        if welcome_already_sent and preserved_welcome_msg:
+            # Re-send the preserved welcome message on reconnect
+            logger.info("welcome_resent_on_reconnect", session_id=session_id, message_length=len(preserved_welcome_msg))
+            await websocket_manager.send_message(
+                session_id=session_id,
+                message=preserved_welcome_msg,
+                message_type="ai_response"
+            )
+        elif welcome_already_sent:
             logger.info("welcome_skipped_already_sent", session_id=session_id)
         else:
             # Mark welcome as sent BEFORE sending to prevent race conditions

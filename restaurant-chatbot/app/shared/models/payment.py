@@ -92,7 +92,10 @@ class PaymentOrder(Base):
                                                server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    order: Mapped["Order"] = relationship("Order", back_populates="payment_order")
+    # NOTE: Removed back_populates="payment_order" because Order.payment_order
+    # references the PaymentOrder from app.features.food_ordering.models.payment_order,
+    # not this one. Having back_populates here causes SQLAlchemy mapper conflict.
+    order: Mapped["Order"] = relationship("Order")
     user: Mapped[Optional["User"]] = relationship("User", back_populates="payment_orders")  # Optional since user_id can be null
     payment_transactions: Mapped[List["PaymentTransaction"]] = relationship("PaymentTransaction", back_populates="payment_order")
     retry_attempts: Mapped[List["PaymentRetryAttempt"]] = relationship("PaymentRetryAttempt", back_populates="payment_order")

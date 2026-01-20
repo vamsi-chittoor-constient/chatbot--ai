@@ -464,6 +464,16 @@ _EVENT_QUEUES: Dict[str, asyncio.Queue] = {}
 # Store event loops for thread-safe operations
 _EVENT_LOOPS: Dict[str, asyncio.AbstractEventLoop] = {}
 
+# ============================================================================
+# THREAD-SAFE STAGING AREA FOR TOOL EVENTS
+# ============================================================================
+# Tool events (SEARCH_RESULTS, MENU_DATA) are emitted from sync contexts
+# (CrewAI tools in thread pool). Instead of using call_soon_threadsafe which
+# can race with RUN_FINISHED, we stage events here and flush them explicitly.
+import threading
+_PENDING_EVENTS: Dict[str, List["AGUIEvent"]] = {}  # session_id -> list of events
+_PENDING_LOCK = threading.Lock()
+
 
 def get_event_queue(session_id: str) -> asyncio.Queue:
     """Get or create event queue for session."""
@@ -487,27 +497,52 @@ def clear_event_queue(session_id: str):
 
 def _put_event_threadsafe(session_id: str, event: "AGUIEvent"):
     """
-    Thread-safe put operation for asyncio.Queue.
+    Thread-safe staging of events for later flush.
 
     Called from sync contexts (like CrewAI tools running in thread pool).
-    Uses call_soon_threadsafe to schedule the put on the correct event loop.
+    Events are staged in _PENDING_EVENTS and flushed explicitly before RUN_FINISHED.
+    This guarantees tool events (SEARCH_RESULTS, MENU_DATA) reach the queue
+    before RUN_FINISHED, preventing race conditions.
+    """
+    with _PENDING_LOCK:
+        if session_id not in _PENDING_EVENTS:
+            _PENDING_EVENTS[session_id] = []
+        _PENDING_EVENTS[session_id].append(event)
+        # INFO level for visibility during testing
+        logger.info("event_staged", session_id=session_id, event_type=event.type.value,
+                    pending_count=len(_PENDING_EVENTS[session_id]))
+
+
+def flush_pending_events(session_id: str) -> int:
+    """
+    Flush all pending tool events to the queue. MUST be called before RUN_FINISHED.
+
+    This function is called from async context (process_with_agui_streaming)
+    and synchronously moves all staged events into the asyncio.Queue.
+
+    Returns:
+        Number of events flushed
     """
     queue = get_event_queue(session_id)
+    flushed_count = 0
 
-    # Try to get the event loop for this session
-    loop = _EVENT_LOOPS.get(session_id)
+    with _PENDING_LOCK:
+        events = _PENDING_EVENTS.pop(session_id, [])
 
-    if loop is not None and loop.is_running():
-        # Schedule put on the correct event loop (thread-safe)
-        loop.call_soon_threadsafe(queue.put_nowait, event)
-        logger.debug("event_scheduled_threadsafe", session_id=session_id, event_type=event.type.value)
-    else:
-        # Fallback: try direct put (may work if we're in the same thread)
+    for event in events:
         try:
             queue.put_nowait(event)
-            logger.debug("event_put_direct", session_id=session_id, event_type=event.type.value)
+            flushed_count += 1
+            logger.info("event_flushed", session_id=session_id, event_type=event.type.value)
         except Exception as e:
-            logger.error("event_put_failed", session_id=session_id, error=str(e))
+            logger.error("event_flush_failed", session_id=session_id, event_type=event.type.value, error=str(e))
+
+    if flushed_count > 0:
+        logger.info("events_flushed_total", session_id=session_id, count=flushed_count)
+    else:
+        logger.info("no_events_to_flush", session_id=session_id)
+
+    return flushed_count
 
 
 class AGUIEventEmitter:

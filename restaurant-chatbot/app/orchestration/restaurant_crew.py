@@ -851,6 +851,15 @@ async def process_with_agui_streaming(
         # (redundant safety - already called at line 758, but ensures it's sent after streaming)
         emitter.emit_activity_end()
 
+        # CRITICAL: Flush all pending tool events BEFORE RUN_FINISHED
+        # Tool events (SEARCH_RESULTS, MENU_DATA) are emitted from sync contexts (thread pool)
+        # and staged in _PENDING_EVENTS. This flush guarantees they're in the queue
+        # before RUN_FINISHED, eliminating the race condition.
+        from app.core.agui_events import flush_pending_events
+        flushed = flush_pending_events(session_id)
+        if flushed > 0:
+            logger.debug("tool_events_flushed_before_run_finished", session_id=session_id, count=flushed)
+
         # Emit run finished
         emitter.emit_run_finished(response)
 
@@ -872,6 +881,11 @@ async def process_with_agui_streaming(
         )
 
         emitter.emit_activity_end()
+
+        # Flush any pending tool events before error
+        from app.core.agui_events import flush_pending_events
+        flush_pending_events(session_id)
+
         emitter.emit_run_error(str(e))
 
         fallback_response = (

@@ -462,11 +462,11 @@ class UnifiedLLMManager:
                 )
                 continue
 
-            # Get rate limits for this account
-            gpt4o_rpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_RPM_LIMIT", "500"))
-            gpt4o_tpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_TPM_LIMIT", "30000"))
-            gpt4o_mini_rpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_MINI_RPM_LIMIT", "500"))
-            gpt4o_mini_tpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_MINI_TPM_LIMIT", "200000"))
+            # Get rate limits for this account (defaults are Tier 2 limits)
+            gpt4o_rpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_RPM_LIMIT", "5000"))
+            gpt4o_tpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_TPM_LIMIT", "450000"))
+            gpt4o_mini_rpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_MINI_RPM_LIMIT", "5000"))
+            gpt4o_mini_tpm = int(os.getenv(f"ACCOUNT_{account_num}_GPT4O_MINI_TPM_LIMIT", "2000000"))
             buffer_percent = int(os.getenv(f"ACCOUNT_{account_num}_BUFFER_PERCENT", "80"))
 
             # Create account provider
@@ -515,10 +515,10 @@ class UnifiedLLMManager:
                     account = LLMAccountProvider(
                         account_number=1,
                         api_key=fallback_api_key,
-                        gpt4o_rpm=500,
-                        gpt4o_tpm=30000,
-                        gpt4o_mini_rpm=500,
-                        gpt4o_mini_tpm=200000,
+                        gpt4o_rpm=5000,
+                        gpt4o_tpm=450000,
+                        gpt4o_mini_rpm=5000,
+                        gpt4o_mini_tpm=2000000,
                         buffer_percent=80
                     )
 
