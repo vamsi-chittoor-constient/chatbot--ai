@@ -424,9 +424,9 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
 
                     # Build response that drives action
                     if available_items:
-                        return f"I found {unavailable_count} '{query}' options - they're available during {available_times}! 👆 Check the timings above. Meanwhile, here's what's available now 👇 - want to explore?"
+                        return f"I found {unavailable_count} '{query}' options - they're available during {available_times}. Meanwhile, here's what's available now - want to explore?"
                     else:
-                        return f"I found {unavailable_count} '{query}' options, but they're only available during {available_times}. Check the card above to see when you can order them!"
+                        return f"I found {unavailable_count} '{query}' options, but they're only available during {available_times}. Check the card above to see when you can order them."
 
         except Exception as e:
             logger.error("search_menu_failed", error=str(e), session_id=session_id)
