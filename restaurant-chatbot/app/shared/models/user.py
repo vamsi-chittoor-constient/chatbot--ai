@@ -79,6 +79,8 @@ class User(Base):
     # waitlist_entries: Mapped[List["Waitlist"]] = relationship("Waitlist", back_populates="user")
     message_logs: Mapped[List["MessageLog"]] = relationship("MessageLog", back_populates="user")
     email_logs: Mapped[List["EmailLog"]] = relationship("EmailLog", back_populates="user")
+    # Note: Commented out due to duplicate PaymentOrder class names in codebase
+    # (app.shared.models.payment.PaymentOrder vs app.features.food_ordering.models.payment_order.PaymentOrder)
     # payment_orders: Mapped[List["PaymentOrder"]] = relationship("PaymentOrder", back_populates="user")
     # payment_transactions: Mapped[List["PaymentTransaction"]] = relationship("PaymentTransaction", back_populates="user")
     # abandoned_carts: Mapped[List["AbandonedCart"]] = relationship("AbandonedCart", back_populates="user")

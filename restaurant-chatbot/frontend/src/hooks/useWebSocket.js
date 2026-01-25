@@ -51,13 +51,24 @@ export const useWebSocket = (onEvent) => {
   const wsRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
   const receivedStreamingRef = useRef(false)  // Track if we received AGUI streaming
+  const mountedRef = useRef(true)  // Track if component is mounted
+  const connectionIdRef = useRef(0)  // Track connection ID to ignore stale callbacks
 
   const connect = useCallback(() => {
-    // Prevent duplicate connections (important for React StrictMode)
+    // Prevent duplicate connections
     if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
       console.log('WebSocket already connected or connecting, skipping duplicate connection')
       return
     }
+
+    // Don't connect if component was unmounted (StrictMode cleanup)
+    if (!mountedRef.current) {
+      console.log('Component unmounted, skipping connection')
+      return
+    }
+
+    // Increment connection ID to invalidate any pending callbacks from old connections
+    const currentConnectionId = ++connectionIdRef.current
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
@@ -71,11 +82,21 @@ export const useWebSocket = (onEvent) => {
       wsRef.current = ws
 
       ws.onopen = () => {
+        // Ignore if this is a stale connection or component unmounted
+        if (connectionIdRef.current !== currentConnectionId || !mountedRef.current) {
+          console.log('Stale or unmounted WebSocket connection, closing')
+          ws.close()
+          return
+        }
         setStatus('connected')
         console.log('WebSocket connected')
       }
 
       ws.onclose = () => {
+        // Only reconnect if this is the current connection and still mounted
+        if (connectionIdRef.current !== currentConnectionId || !mountedRef.current) {
+          return
+        }
         setStatus('disconnected')
         console.log('WebSocket disconnected')
         // Reconnect after 3 seconds
@@ -85,11 +106,18 @@ export const useWebSocket = (onEvent) => {
       }
 
       ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        setStatus('error')
+        if (connectionIdRef.current === currentConnectionId && mountedRef.current) {
+          console.error('WebSocket error:', error)
+          setStatus('error')
+        }
       }
 
       ws.onmessage = (event) => {
+        // Ignore messages from stale connections
+        if (connectionIdRef.current !== currentConnectionId || !mountedRef.current) {
+          return
+        }
+
         try {
           const data = JSON.parse(event.data)
           console.log('🔵 WS MESSAGE RECEIVED:', data.message_type, data)
@@ -147,30 +175,39 @@ export const useWebSocket = (onEvent) => {
       }
     } catch (error) {
       console.error('Failed to create WebSocket:', error)
-      setStatus('error')
+      if (mountedRef.current) {
+        setStatus('error')
+      }
     }
   }, [sessionId, onEvent])
 
   useEffect(() => {
+    // Reset mounted flag for new mount (handles StrictMode remount)
+    mountedRef.current = true
     connect()
 
     return () => {
+      // Mark as unmounted FIRST to prevent any pending callbacks
+      mountedRef.current = false
+
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
         wsRef.current.close()
+        wsRef.current = null
       }
     }
   }, [connect])
 
-  const sendMessage = useCallback((message) => {
+  const sendMessage = useCallback((message, language = 'English') => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       updateLastActivity()  // Track activity on message send
       wsRef.current.send(JSON.stringify({
         type: 'user_message',
         content: message,
         session_id: sessionId,
+        language: language,  // Pass language preference for response
       }))
       return true
     }

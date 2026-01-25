@@ -11,11 +11,17 @@ export const FormCard = ({ data, onSubmit, onCancel }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    console.log('FormCard submit:', { formType, formData, onSubmit: typeof onSubmit })
+    console.error('🔥 FormCard submit triggered via form onSubmit')
+    console.log('FormCard submit details:', { formType, formData, onSubmit: typeof onSubmit })
     if (onSubmit) {
-      onSubmit(formType, formData)
+      try {
+        onSubmit(formType, formData)
+        console.error('🔥 onSubmit prop executed successfully')
+      } catch (err) {
+        console.error('🔥 CRITICAL: Error executing onSubmit prop:', err)
+      }
     } else {
-      console.error('FormCard: onSubmit prop is not defined!')
+      console.error('🔥 CRITICAL: FormCard: onSubmit prop is not defined!')
     }
   }
 
@@ -124,7 +130,7 @@ export const FormCard = ({ data, onSubmit, onCancel }) => {
         <div className={`flex gap-3 ${showCancel ? '' : 'flex-col'}`}>
           <button
             type="submit"
-            onClick={() => console.log('Submit button clicked')}
+            onClick={() => console.error('🔥 Submit button CLICKED manually')}
             className="flex-1 py-3 bg-accent hover:bg-accent-hover text-white font-semibold rounded-lg transition-colors"
           >
             {getSubmitLabel()}

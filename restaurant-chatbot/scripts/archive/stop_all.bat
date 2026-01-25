@@ -5,13 +5,27 @@ echo Stopping All Services
 echo ========================================
 echo.
 echo This will stop:
-echo - Backend API (Python)
-echo - Frontend Dev Server (Node.js)
+echo - Backend API (Python) on port 8000
+echo - Frontend Dev Server (Node.js) on port 3000
 echo - Redis Server
 echo - MongoDB Server
 echo.
 echo Press any key to continue or Ctrl+C to cancel...
 pause > nul
+
+echo.
+echo [INFO] Killing processes on port 8000 (Backend)...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do (
+    echo Killing PID %%a
+    taskkill /F /PID %%a 2>nul
+)
+
+echo.
+echo [INFO] Killing processes on port 3000 (Frontend)...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :3000 ^| findstr LISTENING') do (
+    echo Killing PID %%a
+    taskkill /F /PID %%a 2>nul
+)
 
 echo.
 echo [INFO] Stopping Backend API (Python)...

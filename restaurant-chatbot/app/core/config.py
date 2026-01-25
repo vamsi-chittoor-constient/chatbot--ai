@@ -363,6 +363,12 @@ class Settings(BaseSettings):
     # Sticky Routing (Pin sessions to specific API accounts for consistency)
     ENABLE_STICKY_ROUTING: bool = False
 
+    # Voice Activity Detection (VAD) Settings
+    VAD_ENGINE: str = "silero"  # silero, ten, or webrtc
+    VAD_SPEECH_THRESHOLD: float = 0.6  # Probability above which speech is detected
+    VAD_SILENCE_THRESHOLD: float = 0.3  # Probability below which silence is detected
+    VAD_SILENCE_FRAMES: int = 60  # Consecutive silent frames (~2 seconds) before ending speech
+
     # Logging
     LOG_LEVEL: str = "INFO"
 

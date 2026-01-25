@@ -798,6 +798,39 @@ Extract entities as JSON."""
             "requires_clarification": confidence < 0.5
         }
 
+    async def translate_query(self, text: str, target_language: str = "English") -> str:
+        """
+        Translate query to target language (default: English) for better RAG retrieval.
+        Uses a lightweight, fast prompt specifically for search query translation.
+        """
+        if not text or len(text.strip()) < 2:
+            return text
+
+        # Simple prompt for direct translation
+        system_prompt = f"Translate the following text to {target_language}. Return ONLY the translation, no explanation."
+        
+        try:
+            # Call via unified LLM manager
+            response = await self._call_openai_api(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ],
+                model=self.entity_model,  # Use cheap/fast model (gpt-4o-mini)
+                temperature=0.0
+            )
+            
+            content = response.choices[0].message.content
+            if content:
+                translation = content.strip()
+                logger.debug("query_translated", original=text, translation=translation, target=target_language)
+                return translation
+            return text
+            
+        except Exception as e:
+            logger.error(f"Translation failed: {str(e)}")
+            return text
+
     async def health_check(self) -> bool:
         """
         Test LLM Manager connectivity and availability

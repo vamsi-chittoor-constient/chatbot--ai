@@ -27,9 +27,15 @@ FOOD_ORDERING_TOOLS = {
     # =========================================================================
     "search_menu": {
         "name": "search_menu",
-        "description": "Search and browse restaurant menu items with optional filters for query, cuisine, or meal type",
-        "usage": "When customer wants to see menu, browse items, search for specific food, filter by cuisine or meal",
-        "examples": ["show me the menu", "do you have burgers", "what's available", "show breakfast items", "Italian food"],
+        "description": "Search and browse restaurant menu items with optional filters for query, cuisine, or meal type. Use for any food item search.",
+        "usage": "When customer wants to see menu, browse items, search for specific food, asks about any food item, filter by cuisine or meal",
+        "examples": [
+            "show me the menu", "do you have burgers", "what's available", "show breakfast items",
+            "do you have dosa", "do you have idli", "do you have biryani", "do you have paneer",
+            "do you have pizza", "do you have naan", "do you have paratha", "do you have samosa",
+            "is dosa available", "is biryani available", "what food do you have", "any south indian food",
+            "dosa", "idli", "vada", "biryani", "paneer", "tikka", "masala", "korma", "roti", "naan"
+        ],
         "category": "menu_browsing",
         "priority": 10
     },
@@ -55,9 +61,14 @@ FOOD_ORDERING_TOOLS = {
     # =========================================================================
     "add_to_cart": {
         "name": "add_to_cart",
-        "description": "Add menu items to customer's cart with specified quantity",
-        "usage": "When customer wants to add items to cart, order something, or select items",
-        "examples": ["add 2 burgers", "I want pizza", "add to cart", "order chicken"],
+        "description": "Add menu items to customer's cart with specified quantity. Use when customer wants to order any food item.",
+        "usage": "When customer wants to add items to cart, order something, select items, or says 'add X' or 'I want X'",
+        "examples": [
+            "add 2 burgers", "I want pizza", "add to cart", "order chicken",
+            "add dosa", "add 2 dosa", "add masala dosa", "I want idli", "add biryani",
+            "add two masala dosa", "I'll take paneer tikka", "give me 2 naan",
+            "add paratha", "I want samosa", "order 3 vada", "add butter chicken"
+        ],
         "category": "cart_management",
         "priority": 10
     },

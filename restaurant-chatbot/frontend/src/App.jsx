@@ -27,6 +27,7 @@ function ChatInterface() {
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
   const sessionReadyRef = useRef(false)  // Ref to track sessionReady without causing reconnections
+  const [selectedLanguage, setSelectedLanguage] = useState("English")  // Language for chat responses
 
   const {
     messages,
@@ -109,8 +110,8 @@ function ChatInterface() {
   const handleSendMessage = useCallback((message) => {
     addUserMessage(message)
     clearQuickReplies()
-    sendMessage(message)
-  }, [addUserMessage, clearQuickReplies, sendMessage])
+    sendMessage(message, selectedLanguage)  // Pass language for response
+  }, [addUserMessage, clearQuickReplies, sendMessage, selectedLanguage])
 
   // Handle quick reply selection
   const handleQuickReply = useCallback((value) => {
@@ -215,7 +216,6 @@ function ChatInterface() {
   }
 
   // Voice Chat Hook Integration
-  const [selectedLanguage, setSelectedLanguage] = useState("English")
   const {
     connect: connectVoice,
     toggleVoiceMode,

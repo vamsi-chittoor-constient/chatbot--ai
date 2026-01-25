@@ -663,9 +663,18 @@ async def chat_endpoint(
                     logger.error("Error in auth flow", session_id=session_id, error=str(e), exc_info=True)
 
             # Wait for phone auth form response
+            logger.info(
+                "Entering auth response loop",
+                session_id=session_id,
+                is_authenticated=is_authenticated,
+                existing_auth_state=existing_auth_state
+            )
+            print(f"[DEBUG] Entering auth loop - is_authenticated: {is_authenticated}, existing_auth_state: {existing_auth_state}")
             while not is_authenticated:
                 try:
                     raw_message = await websocket.receive_text()
+                    print(f"[DEBUG] Auth loop received raw message: {raw_message[:200]}")
+                    logger.info("auth_loop_message_received", session_id=session_id, message_preview=raw_message[:100])
                     message_data = json.loads(raw_message)
 
                     # Check if this is a form_response
@@ -675,8 +684,10 @@ async def chat_endpoint(
 
                         if form_type == "phone_auth":
                             # Phone number submitted
+                            print(f"[DEBUG] phone_auth form received, form_data: {form_data}")
                             phone_number = form_data.get("phone", "").strip()
                             if not phone_number:
+                                print(f"[DEBUG] phone_number is empty, skipping")
                                 continue
 
                             # Normalize phone number
@@ -692,10 +703,13 @@ async def chat_endpoint(
 
                             # Check if user exists
                             from app.features.user_management.tools.otp_tools import check_user_exists, send_otp
+                            print(f"[DEBUG] Checking if user exists for phone: {phone_number[:6]}****")
                             user_check = await check_user_exists(phone_number=phone_number)
+                            print(f"[DEBUG] check_user_exists result: {user_check}")
 
                             if user_check.get("success") and user_check.get("data", {}).get("exists"):
                                 # Existing user - authenticate directly without OTP
+                                print(f"[DEBUG] Existing user found, authenticating directly")
                                 user_data = user_check["data"]["user"]
                                 is_authenticated = True
                                 authenticated_user_name = user_data.get("full_name") or user_data.get("name")
@@ -707,6 +721,7 @@ async def chat_endpoint(
                                     session_id=session_id,
                                     user_name=authenticated_user_name
                                 )
+                                print(f"[DEBUG] Existing user: {authenticated_user_name} (ID: {authenticated_user_id})")
 
                                 # Update connection metadata
                                 if session_id in websocket_manager.connection_metadata:
@@ -716,8 +731,10 @@ async def chat_endpoint(
                                     websocket_manager.connection_metadata[session_id]["auth_state"] = "authenticated"
 
                                 # Dismiss auth forms
+                                print(f"[DEBUG] Dismissing auth forms and streaming to WebSocket")
                                 auth_emitter.emit_form_dismiss(["phone_auth", "login_otp"])
                                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                                print(f"[DEBUG] Auth forms dismissed, auth complete")
 
                                 # Manage Cart Ownership (Existing User Login)
                                 await manage_cart_ownership(session_id, authenticated_user_id)
@@ -733,10 +750,13 @@ async def chat_endpoint(
 
                             else:
                                 # New user - send OTP for verification
+                                print(f"[DEBUG] New user detected, sending OTP to {phone_number[:6]}****")
                                 otp_result = await send_otp(phone_number=phone_number, purpose="registration")
+                                print(f"[DEBUG] send_otp result: {otp_result}")
 
                                 if otp_result.get("success"):
                                     # Emit both events FIRST, then stream once (fixes race condition)
+                                    print(f"[DEBUG] OTP sent successfully, showing OTP form")
                                     auth_emitter.emit_form_dismiss(["phone_auth"])
                                     otp_form_id = auth_emitter.emit_login_otp_form(phone_number)
 
@@ -748,7 +768,9 @@ async def chat_endpoint(
 
                                     # Stream ALL events at once (dismiss + OTP form)
                                     await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+                                    print(f"[DEBUG] OTP form streamed to WebSocket")
                                 else:
+                                    print(f"[DEBUG] Failed to send OTP: {otp_result.get('message')}")
                                     logger.error(f"Failed to send OTP: {otp_result.get('message')}")
 
                         elif form_type == "login_otp":
@@ -1051,6 +1073,15 @@ async def chat_endpoint(
                     user_message = message_data.get("message") or message_data.get("content") or raw_message
                     device_id = message_data.get("device_id")
                     session_token = message_data.get("session_token")
+
+                    # Extract language preference for response
+                    language = message_data.get("language", "English")
+
+                    # Add language instruction to user message for Hinglish/Tanglish responses
+                    if language == "Hindi":
+                        user_message = f"[RESPOND IN HINGLISH - Use Hindi language but keep food item names, menu terms, prices in English. Example: 'Aapka order mein 2 Masala Dosa add kar diya hai, total ₹250 ho gaya'] {user_message}"
+                    elif language == "Tamil":
+                        user_message = f"[RESPOND IN TANGLISH - Use Tamil language but keep food item names, menu terms, prices in English. Example: 'Ungal order-la 2 Masala Dosa add panniten, total ₹250 aagum'] {user_message}"
                 except json.JSONDecodeError:
                     # Handle plain text messages
                     user_message = raw_message

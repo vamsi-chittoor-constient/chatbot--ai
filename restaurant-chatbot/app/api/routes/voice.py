@@ -1,7 +1,11 @@
 """
 Voice Chat WebSocket API
 Real-time voice interaction with speech-to-text and text-to-speech
-Uses Silero VAD for server-side speech detection
+
+Supports multiple VAD engines via VAD_ENGINE environment variable:
+- silero (default): Best multilingual support (6000+ languages)
+- ten: Lower latency, better accuracy on short pauses
+- webrtc: Lightweight, minimal resources
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from typing import Optional
@@ -10,26 +14,16 @@ import asyncio
 import base64
 import io
 import json
+import os
 import numpy as np
-import torch
 from openai import AsyncOpenAI
-from silero_vad import load_silero_vad
+
+# Import VAD abstraction layer
+from app.services.vad import get_vad, detect_speech, VAD_ENGINE
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
-
-# Global VAD model (loaded once)
-_vad_model = None
-
-def get_vad_model():
-    """Load Silero VAD model (lazy loading)"""
-    global _vad_model
-    if _vad_model is None:
-        logger.info("Loading Silero VAD model...")
-        _vad_model = load_silero_vad()
-        logger.info("Silero VAD model loaded successfully")
-    return _vad_model
 
 # OpenAI client for Whisper (STT) and TTS
 async def get_openai_client():
@@ -89,17 +83,27 @@ async def voice_chat_websocket(
     from app.core.agui_events import set_voice_mode
     # set_voice_mode(session_id, websocket)  # DISABLED - was breaking chat cards
 
-    # Load VAD model
-    vad_model = get_vad_model()
+    # Load VAD model (configurable via VAD_ENGINE env var)
+    vad = get_vad()
+    logger.info(f"Using VAD engine: {VAD_ENGINE}", session_id=session_id)
 
     # Audio buffer for VAD processing
     audio_buffer = []  # List of PCM chunks
     speech_buffer = []  # Buffer for detected speech
     is_speaking = False
+    silence_frames = 0  # Counter for consecutive silent frames (hangover mechanism)
     # Mutable state container for sharing between main loop and background tasks
     state = {"is_processing": False}
-    SAMPLE_RATE = 16000  # Silero VAD works best at 16kHz
-    VAD_CHUNK_SIZE = 512  # Silero VAD chunk size (32ms at 16kHz)
+    SAMPLE_RATE = 16000  # All VAD engines work at 16kHz
+    VAD_CHUNK_SIZE = 512  # Chunk size (32ms at 16kHz)
+
+    # VAD Sensitivity Settings (configurable via env vars)
+    # SPEECH_THRESHOLD: Probability above which speech is detected (default 0.6)
+    # SILENCE_THRESHOLD: Probability below which silence is detected (default 0.3)
+    # SILENCE_FRAMES_REQUIRED: Consecutive silent frames needed to end speech (~500ms default)
+    SPEECH_THRESHOLD = float(os.getenv("VAD_SPEECH_THRESHOLD", "0.6"))
+    SILENCE_THRESHOLD = float(os.getenv("VAD_SILENCE_THRESHOLD", "0.3"))
+    SILENCE_FRAMES_REQUIRED = int(os.getenv("VAD_SILENCE_FRAMES", "15"))
 
     try:
         # Send connection confirmation
@@ -125,19 +129,21 @@ async def voice_chat_websocket(
                     # Decode base64 audio (PCM 16-bit)
                     audio_data = base64.b64decode(message["audio"])
                     audio_buffer.append(audio_data)
-                    logger.debug("Received audio chunk", session_id=session_id, size=len(audio_data))
+                    # Note: Removed per-chunk logging to reduce log spam
 
-                    # Convert to float32 tensor for VAD
+                    # Convert to float32 for VAD (all engines use float32 input)
                     audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
                     audio_float32 = audio_int16.astype(np.float32) / 32768.0
-                    audio_tensor = torch.from_numpy(audio_float32)
 
-                    # Run VAD on chunk
-                    speech_prob = vad_model(audio_tensor, SAMPLE_RATE).item()
+                    # Run VAD on chunk (uses configured engine)
+                    speech_prob = vad.detect_speech(audio_float32, SAMPLE_RATE)
 
-                    # Speech detection threshold (0.7 = 70% confidence for better accuracy)
-                    # Higher threshold reduces false positives from background noise
-                    if speech_prob > 0.7:
+                    # Speech detection with hangover mechanism
+                    # Prevents premature cutoff during brief pauses in speech
+                    if speech_prob > SPEECH_THRESHOLD:
+                        # Speech detected - reset silence counter
+                        silence_frames = 0
+
                         if not is_speaking:
                             # Speech started
                             is_speaking = True
@@ -148,32 +154,40 @@ async def voice_chat_websocket(
                         # Add to speech buffer
                         speech_buffer.append(audio_data)
 
-                    else:
+                    elif speech_prob < SILENCE_THRESHOLD:
+                        # Clear silence detected
                         if is_speaking:
-                            # Speech ended - process the buffer in background
-                            is_speaking = False
-                            await websocket.send_json({"type": "speech_ended"})
-                            logger.debug("Speech ended", session_id=session_id)
+                            # Still collecting speech, but counting silence frames
+                            silence_frames += 1
+                            speech_buffer.append(audio_data)  # Keep buffering during hangover
 
-                            # Process speech segment in background task
-                            # This keeps the WebSocket loop alive for continuous conversation
-                            # Only process if not already processing (prevents duplicate responses)
-                            if speech_buffer and not state["is_processing"]:
-                                state["is_processing"] = True
-                                # Create background task for processing
-                                asyncio.create_task(
-                                    process_speech_segment(
-                                        websocket,
-                                        speech_buffer.copy(),  # Copy buffer to avoid race conditions
-                                        session_id,
-                                        language,
-                                        state  # Pass state to reset is_processing when done
+                            if silence_frames >= SILENCE_FRAMES_REQUIRED:
+                                # Enough silence - speech truly ended
+                                is_speaking = False
+                                silence_frames = 0
+                                await websocket.send_json({"type": "speech_ended"})
+                                logger.debug("Speech ended (after hangover)", session_id=session_id)
+
+                                # Process speech segment in background task
+                                if speech_buffer and not state["is_processing"]:
+                                    state["is_processing"] = True
+                                    asyncio.create_task(
+                                        process_speech_segment(
+                                            websocket,
+                                            speech_buffer.copy(),
+                                            session_id,
+                                            language,
+                                            state
+                                        )
                                     )
-                                )
-                                speech_buffer = []
-                            elif state["is_processing"]:
-                                # Accumulate more audio while processing
-                                logger.debug("Accumulating speech while processing", session_id=session_id)
+                                    speech_buffer = []
+                                elif state["is_processing"]:
+                                    logger.debug("Accumulating speech while processing", session_id=session_id)
+                    else:
+                        # Ambiguous zone (between SILENCE_THRESHOLD and SPEECH_THRESHOLD)
+                        # Keep buffering if speaking, don't increment silence counter
+                        if is_speaking:
+                            speech_buffer.append(audio_data)
 
             except WebSocketDisconnect:
                 logger.info("voice_websocket_disconnected", session_id=session_id)
@@ -230,12 +244,15 @@ async def process_speech_segment(
         # Combine audio chunks
         combined_audio = b''.join(speech_buffer)
 
-        if len(combined_audio) < 16000:  # Less than 0.5 seconds at 16kHz mono (16000 Hz * 0.5 sec * 2 bytes = 16000)
+        # Minimum 1 second of audio to reduce hallucinations (was 0.5s)
+        # At 16kHz mono 16-bit: 16000 Hz * 1 sec * 2 bytes = 32000 bytes
+        MIN_AUDIO_BYTES = 32000
+        if len(combined_audio) < MIN_AUDIO_BYTES:
             logger.debug(
                 "voice_segment_too_short",
                 session_id=session_id,
                 length=len(combined_audio),
-                threshold=8000
+                threshold=MIN_AUDIO_BYTES
             )
             # Reset state before returning
             if state is not None:
@@ -263,29 +280,104 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper transcription with automatic noise handling
-        # Whisper-1 has built-in:
-        # - Automatic noise suppression
-        # - Voice activity detection
-        # - Background noise filtering
-        # - Echo cancellation (when audio has good preprocessing)
-        #
-        # Using vocabulary hint prompt (not a sentence that could be echoed)
-        # This helps Whisper recognize Indian food items and restaurant terms
-        vocabulary_hint = (
-            "dosa, idli, vada, sambar, chutney, masala dosa, parota, paratha, biryani, "
-            "paneer, butter chicken, naan, roti, dal, tandoori, tikka, korma, vindaloo, "
-            "lassi, chai, menu, cart, order, checkout, table, reservation, booking"
-        )
+        # Whisper transcription with language-specific vocabulary hints
+        # Using vocabulary hint in the TARGET language improves accuracy
+        # DO NOT use English hints for Hindi/Tamil - it causes hallucinations!
+
+        # Language-specific vocabulary hints
+        vocabulary_hints = {
+            "English": (
+                "dosa, idli, vada, sambar, chutney, masala dosa, parota, paratha, biryani, "
+                "paneer, butter chicken, naan, roti, dal, tandoori, tikka, korma, vindaloo, "
+                "lassi, chai, menu, cart, order, checkout, table, reservation, booking"
+            ),
+            "Hindi": (
+                "दोसा, इडली, वड़ा, सांभर, चटनी, मसाला डोसा, पराठा, बिरयानी, "
+                "पनीर, बटर चिकन, नान, रोटी, दाल, तंदूरी, टिक्का, कोरमा, "
+                "लस्सी, चाय, मेनू, कार्ट, ऑर्डर, चेकआउट, टेबल, बुकिंग, "
+                "खाना, पीना, दो, तीन, चार, एक, कितना, दीजिए, चाहिए"
+            ),
+            "Tamil": (
+                "தோசை, இட்லி, வடை, சாம்பார், சட்னி, மசாலா தோசை, பரோட்டா, பிரியாணி, "
+                "பன்னீர், நான், ரொட்டி, தால், தந்தூரி, டிக்கா, "
+                "லஸ்ஸி, டீ, மெனு, கார்ட், ஆர்டர், செக்அவுட், டேபிள், புக்கிங், "
+                "சாப்பாடு, இரண்டு, மூன்று, நான்கு, ஒன்று, எவ்வளவு, வேண்டும்"
+            ),
+        }
+
+        # Get language-specific hint (or empty for unsupported languages)
+        vocabulary_hint = vocabulary_hints.get(language, "")
+
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             language=language_code_map.get(language, "en"),
-            prompt=vocabulary_hint,  # Vocabulary hint improves recognition of food terms
-            temperature=0.2  # Slight temperature helps with unclear audio
+            prompt=vocabulary_hint if vocabulary_hint else None,  # Only use hint if available
+            temperature=0.0,  # Lower temperature to reduce hallucinations
         )
 
         transcript_text = transcription.text.strip()
+
+        # =========================================================================
+        # HALLUCINATION FILTERING - Detect infinite loops / repetition
+        # =========================================================================
+        # Whisper sometimes hallucinates by repeating a phrase infinitely on silence
+        # e.g., "Thank you. Thank you. Thank you." or "how many potatoes" x50
+
+        from collections import Counter
+        import re
+
+        # Normalize text for analysis (remove punctuation, lowercase)
+        normalized = re.sub(r'[^\w\s]', ' ', transcript_text.lower())
+        words = normalized.split()
+
+        if len(words) >= 6:
+            # Check 1: Single word repetition (>40% same word = hallucination)
+            word_counts = Counter(words)
+            most_common_word = word_counts.most_common(1)
+            if most_common_word and most_common_word[0][1] > len(words) * 0.4:
+                logger.warning(
+                    "voice_hallucination_word_repetition",
+                    session_id=session_id,
+                    word=most_common_word[0][0],
+                    count=most_common_word[0][1],
+                    total=len(words)
+                )
+                await websocket.send_json({"type": "processing_end"})
+                if state is not None:
+                    state["is_processing"] = False
+                return
+
+            # Check 2: N-gram repetition (2, 3, or 4 word phrases repeated 3+ times)
+            for n in [2, 3, 4]:
+                if len(words) >= n * 3:  # Need at least 3 repetitions
+                    grams = [" ".join(words[i:i+n]) for i in range(len(words)-n+1)]
+                    gram_counts = Counter(grams)
+                    most_common_gram = gram_counts.most_common(1)
+                    if most_common_gram and most_common_gram[0][1] >= 3:
+                        logger.warning(
+                            "voice_hallucination_ngram_repetition",
+                            session_id=session_id,
+                            phrase=most_common_gram[0][0],
+                            count=most_common_gram[0][1],
+                            n=n
+                        )
+                        await websocket.send_json({"type": "processing_end"})
+                        if state is not None:
+                            state["is_processing"] = False
+                        return
+
+            # Check 3: Very long transcripts are suspicious (>100 words from short audio)
+            if len(words) > 100:
+                logger.warning(
+                    "voice_hallucination_too_long",
+                    session_id=session_id,
+                    word_count=len(words)
+                )
+                await websocket.send_json({"type": "processing_end"})
+                if state is not None:
+                    state["is_processing"] = False
+                return
 
         # Filter out known garbage patterns (Whisper artifacts)
         garbage_patterns = [
@@ -294,6 +386,9 @@ async def process_speech_segment(
             "Thanks for watching",
             "Please subscribe",
             "Like and subscribe",
+            "Notes:",
+            "Transcribed by",
+            "Amara.org"
         ]
         for pattern in garbage_patterns:
             if pattern.lower() in transcript_text.lower():
@@ -329,7 +424,8 @@ async def process_speech_segment(
         response_text = await process_with_chat_agent(
             transcript_text,
             session_id,
-            websocket
+            websocket,
+            language=language
         )
 
         # Ensure response_text is a string
@@ -391,10 +487,16 @@ async def process_speech_segment(
             logger.debug("Processing state reset", session_id=session_id)
 
 
-async def process_with_chat_agent(text: str, session_id: str, websocket: WebSocket) -> str:
+async def process_with_chat_agent(text: str, session_id: str, websocket: WebSocket, language: str = "English") -> str:
     """
     Process user's text with the chat agent and return response.
     Voice mode supports full AGUI experience: forms, menus, cards, etc.
+
+    Args:
+        text: User's message (transcribed from voice)
+        session_id: Session identifier
+        websocket: Voice WebSocket for AGUI events
+        language: Response language (English, Hindi, Tamil, etc.)
     """
     try:
         # Import chat processing
@@ -407,11 +509,24 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         session = await session_manager.get_session(session_id)
 
         if not session:
+            if language == "Hindi":
+                return "Maaf kijiye, aapka session nahi mila. Please refresh karke dubara try kijiye."
+            elif language == "Tamil":
+                return "Mannikkavum, ungal session kandupidikka mudiyavillai. Thayavu seidhu refresh seidhu meeNdum muayarchi seyyungal."
             return "I'm sorry, I couldn't find your session. Please refresh and try again."
 
         # Get conversation history from session metadata
         conversation_history = session.metadata.get("conversation_history", []) if session.metadata else []
         user_id = session.user_id
+
+        # Add language instruction to the user message for the agent
+        # This tells the agent to respond in the specified language (Hinglish style)
+        if language == "Hindi":
+            # Prepend language instruction - Hinglish style (Hindi with English food/menu terms)
+            text = f"[RESPOND IN HINGLISH - Use Hindi language but keep food item names, menu terms, prices in English. Example: 'Aapka order mein 2 Masala Dosa add kar diya hai, total ₹250 ho gaya'] {text}"
+        elif language == "Tamil":
+            # Tamil with English terms
+            text = f"[RESPOND IN TANGLISH - Use Tamil language but keep food item names, menu terms, prices in English. Example: 'Ungal order-la 2 Masala Dosa add panniten, total ₹250 aagum'] {text}"
 
         # Enable voice mode ONLY during processing (not on connect)
         # This routes tool events (SEARCH_RESULTS, MENU_DATA) to voice WebSocket
@@ -522,6 +637,12 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
             error=str(e),
             exc_info=True
         )
+        # Return localized error message
+        if language == "Hindi":
+            return "Maaf kijiye, kuch तकनीकी (technical) dikkat aa gayi. Please dobara boliye."
+        elif language == "Tamil":
+            return "Mannikkavum, oru technical problem erpattullathu. Thayavu seidhu meeNdum sollungal."
+        
         return "I'm sorry, I encountered an error processing your request. Please try again."
 
 

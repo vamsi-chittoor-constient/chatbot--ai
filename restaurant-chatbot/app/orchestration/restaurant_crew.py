@@ -554,7 +554,24 @@ async def process_with_restaurant_crew(
     # 🚀 RAG-BASED TOOL RETRIEVAL - Dynamically filter tools per request
     # Convert tools list to dict for RAG
     all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
-    relevant_tools = get_relevant_tools(user_message, all_tools_dict, max_tools=6)
+    
+    # TRANSLATION LAYER FOR RAG:
+    # If query is non-English (or we want to be safe), translate it to English for better retrieval
+    # Tools are indexed in English, so searching in Hindi/Tamil yields poor results.
+    # We use a lightweight LLM call to translate ONLY the search query.
+    rag_query = user_message
+    if any(ord(c) > 127 for c in user_message): # Simple heuristic: contains non-ASCII characters (likely Hindi/Tamil script)
+        try:
+            from app.ai_services.openai_service import OpenAIService
+            openai_service = OpenAIService()
+            # Fast translation to English for search only
+            rag_query = await openai_service.translate_query(user_message, "English")
+            logger.info("rag_query_translated", original=user_message, translated=rag_query)
+        except Exception as e:
+            logger.warning("rag_translation_failed", error=str(e))
+            rag_query = user_message
+
+    relevant_tools = get_relevant_tools(rag_query, all_tools_dict, max_tools=6)
 
     # Update food ordering agent's tools dynamically (cached crew, fresh tools!)
     crew._food_ordering_agent.tools = relevant_tools
@@ -773,7 +790,25 @@ async def process_with_agui_streaming(
         # 🚀 RAG-BASED TOOL RETRIEVAL - Dynamically filter tools per request
         # Convert tools list to dict for RAG
         all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
-        relevant_tools = get_relevant_tools(user_message, all_tools_dict, max_tools=6)
+        
+        # TRANSLATION LAYER FOR RAG:
+        # If query is non-English (or we want to be safe), translate it to English for better retrieval
+        # Tools are indexed in English, so searching in Hindi/Tamil yields poor results.
+        # We use a lightweight LLM call to translate ONLY the search query.
+        rag_query = user_message
+        if any(ord(c) > 127 for c in user_message): # Simple heuristic: contains non-ASCII characters (likely Hindi/Tamil script)
+            try:
+                emitter.emit_activity("thinking", "Translating for tool search...") # Notify user (optional detail)
+                from app.ai_services.openai_service import OpenAIService
+                openai_service = OpenAIService()
+                # Fast translation to English for search only
+                rag_query = await openai_service.translate_query(user_message, "English")
+                logger.info("rag_query_translated", original=user_message, translated=rag_query)
+            except Exception as e:
+                logger.warning("rag_translation_failed", error=str(e))
+                rag_query = user_message
+                
+        relevant_tools = get_relevant_tools(rag_query, all_tools_dict, max_tools=6)
 
         # Update food ordering agent's tools dynamically (cached crew, fresh tools!)
         crew._food_ordering_agent.tools = relevant_tools

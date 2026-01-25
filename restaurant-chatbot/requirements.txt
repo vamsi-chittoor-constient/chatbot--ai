@@ -30,14 +30,13 @@ pydantic-settings
 structlog
 
 # AI/LLM
-openai>=2.15.0
-langchain>=1.2.6
-langchain-openai>=1.1.7
-langchain-core>=1.2.7
-langchain-text-splitters>=1.1.0
-langgraph>=1.0.6
 crewai>=1.8.1
 crewai-tools
+langchain
+langchain-openai
+langchain-core
+langchain-text-splitters
+langgraph
 
 # MongoDB
 pymongo
@@ -53,4 +52,11 @@ razorpay
 # Voice Chat (Speech-to-Text & Text-to-Speech)
 torch
 numpy
-silero-vad
+openai
+
+# Voice Activity Detection (VAD) - Select via VAD_ENGINE env var
+# Default: silero (best multilingual support)
+# Options: silero, ten, webrtc
+silero-vad          # Silero VAD - 6000+ languages, high accuracy
+onnxruntime>=1.17.1 # TEN VAD - low latency, better accuracy on short pauses
+webrtcvad           # WebRTC VAD - lightweight, minimal resources
