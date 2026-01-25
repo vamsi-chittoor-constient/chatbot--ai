@@ -45,6 +45,68 @@ _CREW_CACHE: Dict[str, Crew] = {}
 _CREW_VERSION = 42  # v42: Context preservation fix - search_menu tracks last_mentioned_item + stronger ReAct prompts
 
 
+async def _translate_response(text: str, target_language: str) -> str:
+    """
+    Translate English response to target language (Hinglish/Tanglish).
+    Skips translation if text already contains target language characters.
+
+    Args:
+        text: Response text (may be English or already translated)
+        target_language: Target language (Hindi, Tamil)
+
+    Returns:
+        Translated text, or original if translation not needed/fails
+    """
+    import re
+
+    # Quick check: if text already has Hindi/Tamil characters, skip translation
+    if target_language == "Hindi" and re.search(r'[\u0900-\u097F]', text):
+        return text
+    if target_language == "Tamil" and re.search(r'[\u0B80-\u0BFF]', text):
+        return text
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        if target_language == "Hindi":
+            system_prompt = """Translate to Hinglish (Hindi-English mix). Rules:
+- Use Devanagari for Hindi words
+- Keep English for: food items, numbers, prices (₹), technical terms
+- Be natural and conversational
+- Output ONLY the translation, no explanations"""
+        elif target_language == "Tamil":
+            system_prompt = """Translate to Tanglish (Tamil-English mix). Rules:
+- Use Tamil script for Tamil words
+- Keep English for: food items, numbers, prices (₹), technical terms
+- Be natural and conversational
+- Output ONLY the translation, no explanations"""
+        else:
+            return text
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            temperature=0.3,
+            max_tokens=500
+        )
+
+        translated = response.choices[0].message.content.strip()
+        logger.debug("crew_translation_applied",
+                    original_len=len(text),
+                    translated_len=len(translated),
+                    language=target_language)
+        return translated
+
+    except Exception as e:
+        logger.warning("crew_translation_failed", error=str(e), language=target_language)
+        return text
+
+
 def clean_crew_response(raw_response: str) -> str:
     """
     Extract the final answer from CrewAI output.
@@ -381,7 +443,7 @@ When customer complains about food quality, service, wait time, or other issues:
         allow_delegation=True,
         respect_context_window=True,
         cache=False,
-        max_iter=3,  # Need at least 2: one to call tool, one to process result
+        max_iter=5,  # Need iterations for: parse intent, call tool, process result
         max_retry_limit=1,
         reasoning=False,  # Disabled for speed
         memory=False,  # Disabled - uses Redis for state
@@ -705,7 +767,8 @@ async def process_with_agui_streaming(
     emitter: "AGUIEventEmitter",
     user_id: Optional[str] = None,
     welcome_msg: Optional[str] = None,
-    device_id: Optional[str] = None
+    device_id: Optional[str] = None,
+    language: str = "English"
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Process user message with AG-UI event streaming.
@@ -727,6 +790,7 @@ async def process_with_agui_streaming(
         emitter: AGUIEventEmitter instance for streaming events
         user_id: Optional user identifier
         welcome_msg: Optional welcome message for context
+        language: Response language (English, Hindi, Tamil) for translation
 
     Returns:
         Tuple of (response_text, metadata)
@@ -866,6 +930,15 @@ async def process_with_agui_streaming(
             response = "I apologize, I had trouble processing that request. Could you please try again?"
 
         emitter.emit_activity_end()
+
+        # Translate response if needed (before streaming)
+        logger.info("crew_language_check", session_id=session_id, language=language, will_translate=(language != "English" and language in ["Hindi", "Tamil"]), response_preview=response[:50] if response else "")
+        if language != "English" and language in ["Hindi", "Tamil"]:
+            logger.info("crew_translating_response", session_id=session_id, language=language)
+            response = await _translate_response(response, language)
+            logger.info("crew_translation_done", session_id=session_id, translated_preview=response[:50] if response else "")
+        else:
+            logger.info("crew_skipping_translation", session_id=session_id, reason="language is English or not supported")
 
         # Stream response
         logger.info("restaurant_crew_complete", session_id=session_id, response_length=len(response))

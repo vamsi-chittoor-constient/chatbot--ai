@@ -1284,7 +1284,11 @@ async def emit_cart_data_async(session_id: str, items: List[Dict[str, Any]], tot
         total: Cart total amount
     """
     try:
-        event = CartDataEvent(items=items, total=total)
+        # Sanitize Decimal values to float for JSON serialization
+        sanitized_items = _sanitize_cart_items(items)
+        sanitized_total = _convert_decimal(total)
+
+        event = CartDataEvent(items=sanitized_items, total=sanitized_total)
         queue = get_event_queue(session_id)
         await queue.put(event)
 
@@ -1444,6 +1448,25 @@ def emit_tool_activity(session_id: str, tool_name: str):
         logger.debug("tool_activity_emit_failed", error=str(e))
 
 
+def _convert_decimal(value):
+    """Convert Decimal to float for JSON serialization."""
+    from decimal import Decimal
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def _sanitize_cart_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sanitize cart items by converting Decimal values to float."""
+    sanitized = []
+    for item in items:
+        sanitized_item = {}
+        for key, value in item.items():
+            sanitized_item[key] = _convert_decimal(value)
+        sanitized.append(sanitized_item)
+    return sanitized
+
+
 def emit_cart_data(session_id: str, items: List[Dict[str, Any]], total: float):
     """
     Emit cart data for rich UI display from sync context.
@@ -1457,18 +1480,22 @@ def emit_cart_data(session_id: str, items: List[Dict[str, Any]], total: float):
         items: List of cart items with name, quantity, price
         total: Cart total amount
     """
+    # Sanitize Decimal values to float for JSON serialization
+    sanitized_items = _sanitize_cart_items(items)
+    sanitized_total = _convert_decimal(total)
+
     # Route to voice WebSocket if in voice mode
     if is_voice_mode(session_id):
         _emit_to_voice_websocket_sync(session_id, "CART_DATA", {
-            "items": items,
-            "total": total
+            "items": sanitized_items,
+            "total": sanitized_total
         })
         return
 
     try:
         event = CartDataEvent(
-            items=items,
-            total=total
+            items=sanitized_items,
+            total=sanitized_total
         )
 
         # Use thread-safe put for cross-thread operation
@@ -1501,12 +1528,16 @@ def emit_order_data(session_id: str, order_id: str, items: List[Dict[str, Any]],
         status: Order status (confirmed, preparing, ready, etc.)
         order_type: dine_in or take_away
     """
+    # Sanitize Decimal values to float for JSON serialization
+    sanitized_items = _sanitize_cart_items(items)
+    sanitized_total = _convert_decimal(total)
+
     # Route to voice WebSocket if in voice mode
     if is_voice_mode(session_id):
         _emit_to_voice_websocket_sync(session_id, "ORDER_DATA", {
             "order_id": order_id,
-            "items": items,
-            "total": total,
+            "items": sanitized_items,
+            "total": sanitized_total,
             "status": status,
             "order_type": order_type
         })
@@ -1515,8 +1546,8 @@ def emit_order_data(session_id: str, order_id: str, items: List[Dict[str, Any]],
     try:
         event = OrderDataEvent(
             order_id=order_id,
-            items=items,
-            total=total,
+            items=sanitized_items,
+            total=sanitized_total,
             status=status,
             order_type=order_type
         )

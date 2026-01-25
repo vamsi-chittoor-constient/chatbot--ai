@@ -48,6 +48,70 @@ class ChatResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = {}
 
 
+async def translate_response(text: str, target_language: str) -> str:
+    """
+    Translate English response to target language (Hinglish/Tanglish).
+    Only translates if response appears to be in English.
+
+    Args:
+        text: Response text (may be English or already translated)
+        target_language: Target language (Hindi, Tamil, etc.)
+
+    Returns:
+        Translated text, or original if translation not needed/fails
+    """
+    if target_language == "English" or target_language not in ["Hindi", "Tamil"]:
+        return text
+
+    # Quick check: if text already has Hindi/Tamil characters, skip translation
+    # Hindi: \u0900-\u097F, Tamil: \u0B80-\u0BFF
+    import re
+    if target_language == "Hindi" and re.search(r'[\u0900-\u097F]', text):
+        return text  # Already has Hindi characters
+    if target_language == "Tamil" and re.search(r'[\u0B80-\u0BFF]', text):
+        return text  # Already has Tamil characters
+
+    try:
+        from openai import AsyncOpenAI
+        import os
+
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        if target_language == "Hindi":
+            system_prompt = """Translate to Hinglish (Hindi-English mix). Rules:
+- Use Devanagari for Hindi words
+- Keep English for: food items, numbers, prices (₹), technical terms
+- Be natural and conversational
+- Output ONLY the translation, no explanations"""
+        else:  # Tamil
+            system_prompt = """Translate to Tanglish (Tamil-English mix). Rules:
+- Use Tamil script for Tamil words
+- Keep English for: food items, numbers, prices (₹), technical terms
+- Be natural and conversational
+- Output ONLY the translation, no explanations"""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            temperature=0.3,
+            max_tokens=500
+        )
+
+        translated = response.choices[0].message.content.strip()
+        logger.debug("chat_translation_applied",
+                    original_len=len(text),
+                    translated_len=len(translated),
+                    language=target_language)
+        return translated
+
+    except Exception as e:
+        logger.warning("chat_translation_failed", error=str(e), language=target_language)
+        return text
+
+
 class WebSocketManager:
     """
     Manages WebSocket connections for real-time chat
@@ -1067,6 +1131,7 @@ async def chat_endpoint(
                 # Parse message
                 device_id = None
                 session_token = None
+                language = "English"  # Default language
                 try:
                     message_data = json.loads(raw_message)
                     # Support both "message" and "content" keys for backwards compatibility
@@ -1077,6 +1142,9 @@ async def chat_endpoint(
                     # Extract language preference for response
                     language = message_data.get("language", "English")
 
+                    # DEBUG: Log language received from frontend
+                    logger.info("chat_language_received", session_id=session_id, language=language, raw_message_keys=list(message_data.keys()) if isinstance(message_data, dict) else "not_dict")
+
                     # Add language instruction to user message for Hinglish/Tanglish responses
                     if language == "Hindi":
                         user_message = f"[RESPOND IN HINGLISH - Use Hindi language but keep food item names, menu terms, prices in English. Example: 'Aapka order mein 2 Masala Dosa add kar diya hai, total ₹250 ho gaya'] {user_message}"
@@ -1085,6 +1153,7 @@ async def chat_endpoint(
                 except json.JSONDecodeError:
                     # Handle plain text messages
                     user_message = raw_message
+                    language = "English"
 
                 # ========================================================================
                 # DIRECT ADD-TO-CART HANDLER (bypasses LLM for UI card interactions)
@@ -1125,8 +1194,10 @@ async def chat_endpoint(
                             # Stream any AGUI events (cart updates, etc.)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
-                            # Send the final response
+                            # Send the final response (with translation if needed)
                             final_response = results[-1] if results else "No items added"
+                            if language != "English":
+                                final_response = await translate_response(final_response, language)
                             await websocket_manager.send_message_with_metadata(
                                 session_id=session_id,
                                 message=final_response,
@@ -1188,11 +1259,13 @@ async def chat_endpoint(
                         welcome_msg_from_metadata = websocket_manager.connection_metadata[session_id].get("welcome_msg")
 
                     # Process with testing middleware (streams metadata + saves to MongoDB)
+                    # Capture language in closure for translation
+                    lang = language
                     ai_response, cycle_metadata = await testing_middleware.process_and_log_testing_message(
                         user_message=user_message,
                         session_id=session_id,
                         user_id=tester_id,
-                        process_message_func=lambda msg, sid: process_message_with_ai(msg, sid, device_id, session_token, welcome_msg_from_metadata),
+                        process_message_func=lambda msg, sid: process_message_with_ai(msg, sid, device_id, session_token, welcome_msg_from_metadata, lang),
                         websocket_manager=websocket_manager
                     )
 
@@ -1211,7 +1284,8 @@ async def chat_endpoint(
                         session_id,
                         device_id,
                         session_token,
-                        welcome_msg_from_metadata
+                        welcome_msg_from_metadata,
+                        language=language  # Pass language for translation before AGUI streaming
                     )
 
                     # Clear welcome message after first use
@@ -1235,12 +1309,12 @@ async def chat_endpoint(
                         )
                 # ========================================================================
 
-                # Send AI response with metadata for debugging
-                await websocket_manager.send_message_with_metadata(
-                    session_id=session_id,
-                    message=ai_response,
-                    message_type="ai_response",
-                    metadata=cycle_metadata
+                # NOTE: Response is already streamed via AGUI (TEXT_MESSAGE events) with translation
+                # Do NOT send again via send_message_with_metadata to avoid duplicate messages
+                logger.info(
+                    "ASSISTANT RESPONSE (session: %s...)\n%s",
+                    session_id[:12] if session_id else "unknown",
+                    ai_response[:100] + "..." if len(ai_response) > 100 else ai_response
                 )
 
                 # Get or create conversation and save messages for context
@@ -1413,7 +1487,8 @@ async def process_message_with_ai(
     session_id: str,
     device_id: Optional[str] = None,
     session_token: Optional[str] = None,
-    welcome_msg: Optional[str] = None
+    welcome_msg: Optional[str] = None,
+    language: str = "English"
 ) -> tuple[str, dict]:
     """
     Process user message with Unified Restaurant Crew + AG-UI Streaming.
@@ -1443,7 +1518,8 @@ async def process_message_with_ai(
 
         logger.info(
             "Using Restaurant Crew with AG-UI streaming",
-            session_id=session_id
+            session_id=session_id,
+            language=language  # DEBUG: Trace language through call chain
         )
 
         # Create session manager for conversation history
@@ -1572,7 +1648,8 @@ async def process_message_with_ai(
                 conversation_history=conversation_history,
                 emitter=emitter,
                 user_id=authenticated_user_id,
-                welcome_msg=welcome_msg
+                welcome_msg=welcome_msg,
+                language=language
             )
         finally:
             # Wait for event stream to finish naturally (flush queue)

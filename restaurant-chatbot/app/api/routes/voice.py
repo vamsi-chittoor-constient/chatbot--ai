@@ -149,7 +149,7 @@ async def voice_chat_websocket(
                             is_speaking = True
                             speech_buffer = []
                             await websocket.send_json({"type": "speech_started"})
-                            logger.debug("Speech started", session_id=session_id, prob=speech_prob)
+                            logger.info("voice_speech_started", session_id=session_id, language=language)
 
                         # Add to speech buffer
                         speech_buffer.append(audio_data)
@@ -166,7 +166,7 @@ async def voice_chat_websocket(
                                 is_speaking = False
                                 silence_frames = 0
                                 await websocket.send_json({"type": "speech_ended"})
-                                logger.debug("Speech ended (after hangover)", session_id=session_id)
+                                logger.info("voice_speech_ended", session_id=session_id, buffer_chunks=len(speech_buffer))
 
                                 # Process speech segment in background task
                                 if speech_buffer and not state["is_processing"]:
@@ -273,10 +273,10 @@ async def process_speech_segment(
 
         # Transcribe with Whisper
         # Note: Whisper works best with audio >= 0.5 seconds
-        logger.debug(
+        logger.info(
             "voice_transcribing",
             session_id=session_id,
-            audio_length=len(combined_audio),
+            audio_bytes=len(combined_audio),
             language=language
         )
 
@@ -438,34 +438,53 @@ async def process_speech_segment(
             response_preview=response_text[:100] if len(response_text) > 100 else response_text
         )
 
-        # Send text response to client (for display while audio plays)
+        # Translate to target language (agent responds in English)
+        display_text = await translate_for_tts(response_text, language, client)
+        if display_text != response_text:
+            logger.info(
+                "voice_translation_applied",
+                session_id=session_id,
+                language=language,
+                original_preview=response_text[:50] if len(response_text) > 50 else response_text,
+                translated_preview=display_text[:50] if len(display_text) > 50 else display_text
+            )
+
+        # Send translated text response to client (for display)
         await websocket.send_json({
             "type": "response_text",
-            "text": response_text
+            "text": display_text
         })
 
-        # Synthesize speech with HD quality
+        # Stream TTS audio sentence-by-sentence for real-time playback
+        logger.info("voice_tts_started", session_id=session_id, text_length=len(display_text), language=language)
         await websocket.send_json({"type": "audio_start"})
 
-        # Stream TTS audio back to client using proper async streaming
+        # Split into sentences for faster streaming (audio starts before full text is processed)
+        sentences = split_into_sentences(display_text)
         CHUNK_SIZE = 4096
-        async with client.audio.speech.with_streaming_response.create(
-            model="tts-1-hd",  # HD quality for clearer, more natural speech
-            voice="nova",  # Female voice (alloy, echo, fable, onyx, nova, shimmer)
-            input=response_text,
-            response_format="pcm",  # Raw PCM for streaming
-            speed=1.0  # Natural speed
-        ) as tts_response:
-            # Stream audio chunks to client
-            async for chunk in tts_response.iter_bytes(chunk_size=CHUNK_SIZE):
-                if chunk:
-                    base64_chunk = base64.b64encode(chunk).decode('utf-8')
-                    await websocket.send_json({
-                        "type": "audio_chunk",
-                        "audio": base64_chunk
-                    })
+
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+
+            # Stream TTS for each sentence immediately
+            async with client.audio.speech.with_streaming_response.create(
+                model="tts-1",  # Use faster model for real-time streaming
+                voice="nova",
+                input=sentence,
+                response_format="pcm",
+                speed=1.0
+            ) as tts_response:
+                async for chunk in tts_response.iter_bytes(chunk_size=CHUNK_SIZE):
+                    if chunk:
+                        base64_chunk = base64.b64encode(chunk).decode('utf-8')
+                        await websocket.send_json({
+                            "type": "audio_chunk",
+                            "audio": base64_chunk
+                        })
 
         await websocket.send_json({"type": "audio_end"})
+        logger.info("voice_tts_complete", session_id=session_id)
         await websocket.send_json({"type": "processing_end"})
 
     except Exception as e:
@@ -519,14 +538,8 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         conversation_history = session.metadata.get("conversation_history", []) if session.metadata else []
         user_id = session.user_id
 
-        # Add language instruction to the user message for the agent
-        # This tells the agent to respond in the specified language (Hinglish style)
-        if language == "Hindi":
-            # Prepend language instruction - Hinglish style (Hindi with English food/menu terms)
-            text = f"[RESPOND IN HINGLISH - Use Hindi language but keep food item names, menu terms, prices in English. Example: 'Aapka order mein 2 Masala Dosa add kar diya hai, total ₹250 ho gaya'] {text}"
-        elif language == "Tamil":
-            # Tamil with English terms
-            text = f"[RESPOND IN TANGLISH - Use Tamil language but keep food item names, menu terms, prices in English. Example: 'Ungal order-la 2 Masala Dosa add panniten, total ₹250 aagum'] {text}"
+        # NOTE: Agent always responds in English. Translation to Hindi/Tamil happens
+        # AFTER agent response, before TTS (see translate_for_tts below)
 
         # Enable voice mode ONLY during processing (not on connect)
         # This routes tool events (SEARCH_RESULTS, MENU_DATA) to voice WebSocket
@@ -582,12 +595,14 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
 
         try:
             # Process with agent
+            # Pass language so translation happens in crew (before AGUI streaming)
             response, _ = await process_with_agui_streaming(
                 user_message=text,
                 session_id=session_id,
                 conversation_history=conversation_history,
                 emitter=emitter,
-                user_id=user_id
+                user_id=user_id,
+                language=language
             )
 
             # Flush any remaining staged events to voice WebSocket
@@ -676,6 +691,28 @@ def pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, channels: int = 1, bit
     return wav_header + pcm_data
 
 
+def split_into_sentences(text: str) -> list:
+    """
+    Split text into sentences for real-time TTS streaming.
+    Handles multiple languages including Hindi and Tamil.
+    """
+    import re
+
+    # Split on sentence-ending punctuation (., !, ?, |, ।, ॥)
+    # Include Hindi/Tamil sentence enders: । (Devanagari danda), ॥ (double danda)
+    # Also split on | which is sometimes used as a pause marker
+    sentences = re.split(r'(?<=[.!?।॥|])\s+', text)
+
+    # Filter empty sentences and strip whitespace
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    # If no sentence breaks found, return the whole text
+    if not sentences:
+        return [text]
+
+    return sentences
+
+
 # Language code mapping for Whisper
 language_code_map = {
     "English": "en",
@@ -689,3 +726,82 @@ language_code_map = {
     "Gujarati": "gu",
     "Punjabi": "pa",
 }
+
+
+async def translate_for_tts(text: str, target_language: str, client: AsyncOpenAI) -> str:
+    """
+    Translate English text to target language for TTS output.
+    Uses Hinglish/Tanglish style (native script mixed with English for food terms).
+
+    Args:
+        text: English text from agent
+        target_language: Target language (Hindi, Tamil, etc.)
+        client: OpenAI client for translation
+
+    Returns:
+        Translated text for TTS, or original if translation fails/not needed
+    """
+    # Only translate for non-English languages
+    if target_language == "English" or target_language not in ["Hindi", "Tamil"]:
+        return text
+
+    try:
+        # Language-specific translation prompts
+        if target_language == "Hindi":
+            system_prompt = """You are a translator for a restaurant chatbot. Translate the English text to spoken Hinglish (Hindi-English mix).
+
+Rules:
+- Use Devanagari script for Hindi words
+- Keep English words for: food items (dosa, biryani, paneer), numbers, prices (₹), technical terms
+- Use natural conversational Hindi, not formal/literary Hindi
+- Keep it concise - this is for TTS (text-to-speech)
+- Don't add any explanations, just output the translation
+
+Example:
+English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
+Hinglish: "मुझे 3 items मिले आपकी search से। क्या आप Masala Dosa अपने cart में add करना चाहेंगे?"
+"""
+        elif target_language == "Tamil":
+            system_prompt = """You are a translator for a restaurant chatbot. Translate the English text to spoken Tanglish (Tamil-English mix).
+
+Rules:
+- Use Tamil script for Tamil words
+- Keep English words for: food items (dosa, biryani, paneer), numbers, prices (₹), technical terms
+- Use natural conversational Tamil, not formal/literary Tamil
+- Keep it concise - this is for TTS (text-to-speech)
+- Don't add any explanations, just output the translation
+
+Example:
+English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
+Tanglish: "உங்கள் search-க்கு 3 items கிடைச்சது. Masala Dosa-வை cart-ல add பண்ணணுமா?"
+"""
+        else:
+            return text
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",  # Fast and cheap for translation
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            temperature=0.3,  # Low temperature for consistent translations
+            max_tokens=500
+        )
+
+        translated = response.choices[0].message.content.strip()
+        logger.debug(
+            "voice_translation_complete",
+            original_length=len(text),
+            translated_length=len(translated),
+            target_language=target_language
+        )
+        return translated
+
+    except Exception as e:
+        logger.warning(
+            "voice_translation_failed",
+            error=str(e),
+            target_language=target_language
+        )
+        # Fall back to English if translation fails
+        return text

@@ -97,8 +97,10 @@ class PaymentOrder(Base):
     # not this one. Having back_populates here causes SQLAlchemy mapper conflict.
     order: Mapped["Order"] = relationship("Order")
     user: Mapped[Optional["User"]] = relationship("User")  # Optional since user_id can be null (no back_populates due to duplicate PaymentOrder classes)
-    payment_transactions: Mapped[List["PaymentTransaction"]] = relationship("PaymentTransaction", back_populates="payment_order")
-    retry_attempts: Mapped[List["PaymentRetryAttempt"]] = relationship("PaymentRetryAttempt", back_populates="payment_order")
+    # NOTE: Removed back_populates due to duplicate PaymentTransaction classes in codebase
+    # (app.shared.models.payment.PaymentTransaction vs app.features.food_ordering.models.payment_transaction.PaymentTransaction)
+    payment_transactions: Mapped[List["PaymentTransaction"]] = relationship("PaymentTransaction")
+    retry_attempts: Mapped[List["PaymentRetryAttempt"]] = relationship("PaymentRetryAttempt")
 
     __table_args__ = (
         Index('idx_payment_orders_order_id', 'order_id'),
@@ -153,8 +155,9 @@ class PaymentTransaction(Base):
                                                server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    payment_order: Mapped["PaymentOrder"] = relationship("PaymentOrder", back_populates="payment_transactions")
-    user: Mapped["User"] = relationship("User", back_populates="payment_transactions")
+    # NOTE: Removed back_populates due to duplicate class conflicts
+    payment_order: Mapped["PaymentOrder"] = relationship("PaymentOrder")
+    user: Mapped["User"] = relationship("User")
     order: Mapped["Order"] = relationship("Order")
 
     __table_args__ = (
@@ -225,8 +228,8 @@ class PaymentRetryAttempt(Base):
     failure_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
-    payment_order: Mapped["PaymentOrder"] = relationship("PaymentOrder", back_populates="retry_attempts")
+    # Relationships - removed back_populates due to duplicate class conflicts
+    payment_order: Mapped["PaymentOrder"] = relationship("PaymentOrder")
     user: Mapped["User"] = relationship("User")
 
     __table_args__ = (
