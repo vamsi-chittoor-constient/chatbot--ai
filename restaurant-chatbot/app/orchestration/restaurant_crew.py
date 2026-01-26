@@ -67,16 +67,18 @@ async def _translate_response(text: str, target_language: str) -> str:
         if target_language == "Hindi":
             system_prompt = """Translate to Hinglish (Hindi-English mix written in Roman/English script). Rules:
 - If the text is ALREADY in Hinglish (mix of Hindi and English in Roman script), return it UNCHANGED
+- Translate ALL English sentences including structured messages with emojis (✅, 📋, 💰, etc.)
 - Write ALL Hindi words in Roman/English letters only (e.g. "Aapka", "Kya", "hain") - NO Devanagari script
-- Keep English for: food items, numbers, prices (₹), technical terms
+- Keep UNCHANGED: food item names, numbers, prices (₹), order IDs (ORD-...), emojis, markdown (**bold**)
 - Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
         elif target_language == "Tamil":
             system_prompt = """Translate to Tanglish (Tamil-English mix written in Roman/English script). Rules:
 - If the text is ALREADY in Tanglish (mix of Tamil and English in Roman script), return it UNCHANGED
+- Translate ALL English sentences including structured messages with emojis (✅, 📋, 💰, etc.)
 - Write ALL Tamil words in Roman/English letters only (e.g. "Ungal", "Enna", "iruku") - NO Tamil script
-- Keep English for: food items, numbers, prices (₹), technical terms
+- Keep UNCHANGED: food item names, numbers, prices (₹), order IDs (ORD-...), emojis, markdown (**bold**)
 - Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
