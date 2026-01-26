@@ -541,9 +541,11 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         # NOTE: Agent always responds in English. Translation to Hindi/Tamil happens
         # AFTER agent response, before TTS (see translate_for_tts below)
 
-        # Enable voice mode ONLY during processing (not on connect)
-        # This routes tool events (SEARCH_RESULTS, MENU_DATA) to voice WebSocket
-        set_voice_mode(session_id, websocket)
+        # NOTE: We do NOT set voice_mode here. The voice_mode direct-send path
+        # (_emit_to_voice_websocket_sync) fails silently from thread pool workers because
+        # asyncio.get_event_loop() doesn't return the main loop. Instead, we let ALL
+        # events go to the queue and drain them via the background task below.
+        # set_voice_mode(session_id, websocket)  # DISABLED - use queue + background task instead
 
         # Create a real emitter that forwards ALL AGUI events through WebSocket
         # Voice mode needs full interactive experience: forms, menus, cards, etc.
@@ -593,6 +595,37 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
 
         emitter = VoiceWebSocketEmitter(websocket)
 
+        # Start background task to stream AG-UI events from queue to voice WebSocket.
+        # Tools emit events (MENU_DATA, SEARCH_RESULTS, CART_DATA) from sync thread pool
+        # contexts where asyncio.get_event_loop() doesn't get the main loop, so the
+        # direct voice_mode routing may fail silently. This background task catches any
+        # events that end up in the queue instead.
+        import json as _json
+
+        async def _stream_agui_events_to_voice_ws():
+            queue = get_event_queue(session_id)
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                        event_json = event.to_json() if hasattr(event, 'to_json') else _json.dumps({"type": getattr(event, 'type', 'UNKNOWN')})
+                        event_data = _json.loads(event_json)
+                        await websocket.send_json({
+                            "type": "agui_event",
+                            "agui": event_data
+                        })
+                    except asyncio.TimeoutError:
+                        continue
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        logger.debug("voice_agui_stream_error", error=str(e))
+                        continue
+            except asyncio.CancelledError:
+                pass
+
+        agui_stream_task = asyncio.create_task(_stream_agui_events_to_voice_ws())
+
         try:
             # Process with agent
             # Pass language so translation happens in crew (before AGUI streaming)
@@ -609,23 +642,32 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
             # (events staged in thread pool before voice_mode was checked)
             flush_pending_events(session_id)
 
-            # Also drain the queue and forward to voice WebSocket
-            # (in case events were queued before voice_mode was set)
+            # Give the background task a moment to process any remaining queued events
+            await asyncio.sleep(0.3)
+
+        finally:
+            # Stop the background event streaming task
+            agui_stream_task.cancel()
+            try:
+                await agui_stream_task
+            except asyncio.CancelledError:
+                pass
+
+            # Drain any remaining events in the queue
             queue = get_event_queue(session_id)
             while not queue.empty():
                 try:
                     event = queue.get_nowait()
+                    event_json = event.to_json() if hasattr(event, 'to_json') else _json.dumps({"type": getattr(event, 'type', 'UNKNOWN')})
+                    event_data = _json.loads(event_json)
                     await websocket.send_json({
                         "type": "agui_event",
-                        "agui": event.to_dict() if hasattr(event, 'to_dict') else {"type": event.type.value, **event.__dict__}
+                        "agui": event_data
                     })
                 except:
                     break
 
-        finally:
-            # CRITICAL: Disable voice mode after processing
-            # This ensures chat mode gets events when not in voice processing
-            set_voice_mode(session_id, None)
+            # Voice mode is not set (uses queue-based approach), so no cleanup needed
 
         # Update conversation history
         conversation_history.append(f"User: {text}")
