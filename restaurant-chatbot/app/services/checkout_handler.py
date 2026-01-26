@@ -22,7 +22,6 @@ async def handle_checkout_message(
     Returns:
         Response message if handled, None if should pass to crew agent
     """
-    from app.core.redis import get_cart_sync
     from app.core.agui_events import emit_quick_replies
 
     message_lower = message.lower().strip()
@@ -53,8 +52,10 @@ async def handle_checkout_message(
         message=message_lower
     )
 
-    # Check if cart has items
-    cart_data = get_cart_sync(session_id)
+    # Check if cart has items (read from PostgreSQL session_cart, not Redis)
+    from app.core.session_events import get_sync_session_tracker
+    tracker = get_sync_session_tracker(session_id)
+    cart_data = tracker.get_cart_summary()
     if not cart_data or not cart_data.get("items"):
         return "🛒 Your cart is empty! Please add some items before checkout.\n\nWould you like to see our menu?"
 

@@ -184,14 +184,16 @@ def _load_entity_graph(session_id: str) -> Optional[EntityGraph]:
 
 def _get_cart_items_from_redis(session_id: str) -> List[str]:
     """
-    Get cart item names directly from Redis.
+    Get cart item names from PostgreSQL session_cart (event-sourced).
     This is the single source of truth for cart state.
     """
     try:
-        from app.core.redis import get_cart_sync
-        cart_data = get_cart_sync(session_id)
+        from app.core.session_events import get_sync_session_tracker
+        tracker = get_sync_session_tracker(session_id)
+        cart_data = tracker.get_cart_summary()
         items = cart_data.get("items", [])
-        return [item.get("name", "") for item in items if item.get("name")]
+        # PostgreSQL returns item_name, fallback to name for compat
+        return [item.get("item_name") or item.get("name", "") for item in items if item.get("item_name") or item.get("name")]
     except Exception as e:
         logger.debug("cart_read_failed", error=str(e))
         return []

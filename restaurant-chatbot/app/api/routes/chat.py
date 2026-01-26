@@ -1070,11 +1070,12 @@ async def chat_endpoint(
                 welcome_emitter.emit_activity("thinking", "Setting up your personal waiter...")
                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
 
-                # Check for existing cart items (Ghost Cart Fix)
+                # Check for existing cart items (from PostgreSQL session_cart)
                 has_cart_items = False
                 try:
-                    from app.core.redis import get_cart_sync
-                    cart_data = get_cart_sync(session_id)
+                    from app.core.session_events import get_sync_session_tracker
+                    tracker = get_sync_session_tracker(session_id)
+                    cart_data = tracker.get_cart_summary()
                     has_cart_items = bool(cart_data.get("items"))
                     if has_cart_items:
                         logger.info("welcome_generating_with_cart_items", session_id=session_id)
@@ -1625,12 +1626,32 @@ async def process_message_with_ai(
             # SECURITY: Sanitize response before sending to frontend
             checkout_response = sanitize_response(checkout_response)
 
-            # Checkout handler processed the message - return response directly
+            # Checkout handler processed the message - stream via AGUI
             logger.info(
                 "checkout_handler_processed_message",
                 session_id=session_id,
                 response_length=len(checkout_response)
             )
+
+            # Stream checkout response through AGUI so agui_task forwards to WebSocket
+            emitter.emit_run_started()
+            emitter.emit_full_text(checkout_response, chunk_size=1)
+            # Flush any staged events (quick replies from checkout handler)
+            from app.core.agui_events import flush_pending_events
+            flush_pending_events(session_id)
+            emitter.emit_run_finished(checkout_response)
+
+            # Wait for agui_task to flush events to WebSocket
+            if not agui_task.done():
+                try:
+                    await asyncio.wait_for(agui_task, timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    if not agui_task.done():
+                        agui_task.cancel()
+                        try:
+                            await agui_task
+                        except asyncio.CancelledError:
+                            pass
 
             cycle_metadata = {
                 "type": "checkout_workflow",
@@ -1651,12 +1672,31 @@ async def process_message_with_ai(
             # SECURITY: Sanitize response before sending to frontend
             payment_response = sanitize_response(payment_response)
 
-            # Payment handler processed the message - return response directly
+            # Payment handler processed the message - stream via AGUI
             logger.info(
                 "payment_handler_processed_message",
                 session_id=session_id,
                 response_length=len(payment_response)
             )
+
+            # Stream payment response through AGUI so agui_task forwards to WebSocket
+            emitter.emit_run_started()
+            emitter.emit_full_text(payment_response, chunk_size=1)
+            from app.core.agui_events import flush_pending_events
+            flush_pending_events(session_id)
+            emitter.emit_run_finished(payment_response)
+
+            # Wait for agui_task to flush events to WebSocket
+            if not agui_task.done():
+                try:
+                    await asyncio.wait_for(agui_task, timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    if not agui_task.done():
+                        agui_task.cancel()
+                        try:
+                            await agui_task
+                        except asyncio.CancelledError:
+                            pass
 
             cycle_metadata = {
                 "type": "payment_workflow",

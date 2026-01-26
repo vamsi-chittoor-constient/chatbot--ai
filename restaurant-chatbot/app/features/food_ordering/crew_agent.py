@@ -459,13 +459,15 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
     DETERMINISTIC FLOW: After checkout, payment workflow is automatically triggered.
     """
     from app.core.agui_events import emit_tool_activity, emit_quick_replies, emit_order_data
-    from app.core.redis import get_cart_sync, set_cart_sync
+    from app.core.session_events import get_sync_session_tracker
     import uuid
     from datetime import datetime
 
     emit_tool_activity(session_id, "checkout")
 
-    cart_data = get_cart_sync(session_id)
+    # Read cart from PostgreSQL session_cart (event-sourced)
+    tracker = get_sync_session_tracker(session_id)
+    cart_data = tracker.get_cart_summary()
     if not cart_data or not cart_data.get("items"):
         return "[EMPTY CART] Your cart is looking a bit empty! 😊 Let me help you add some delicious items before we proceed to checkout. What would you like to order?"
 
@@ -485,7 +487,22 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
 
     # Prepare order and trigger payment workflow
     try:
-        items = cart_data.get("items", [])
+        # Normalize cart items: PostgreSQL returns item_name/item_id,
+        # downstream code expects name/id
+        raw_items = cart_data.get("items", [])
+        items = []
+        for item in raw_items:
+            normalized = dict(item)
+            if "item_name" in normalized and "name" not in normalized:
+                normalized["name"] = normalized["item_name"]
+            if "item_id" in normalized and "id" not in normalized:
+                normalized["id"] = str(normalized["item_id"])
+            # Convert Decimal to float for JSON serialization
+            if "price" in normalized:
+                normalized["price"] = float(normalized["price"])
+            if "total" in normalized:
+                normalized["total"] = float(normalized["total"])
+            items.append(normalized)
         total = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
 
         # Generate order display ID

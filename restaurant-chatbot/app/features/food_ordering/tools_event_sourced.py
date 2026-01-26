@@ -129,7 +129,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message: "Added 2x Margherita Pizza! Anything else?"
         """
-        from app.core.agui_events import emit_tool_activity, emit_cart_data
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
         from app.core.preloader import get_menu_preloader
         from app.core.session_events import get_sync_session_tracker
 
@@ -178,6 +178,13 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 cart['items'],
                 cart['total']
             )
+
+            # Emit quick replies for cart actions
+            emit_quick_replies(session_id, [
+                {"label": "🛒 View Cart", "action": "view cart"},
+                {"label": "✅ Checkout", "action": "checkout"},
+                {"label": "➕ Add More", "action": "add more items"},
+            ])
 
             # Return final human message with LLM formatting
             from app.core.llm_formatter import format_item_added
@@ -449,7 +456,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message confirming all items added.
         """
-        from app.core.agui_events import emit_tool_activity, emit_cart_data
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
         from app.core.preloader import get_menu_preloader
         from app.core.session_events import get_sync_session_tracker
 
@@ -513,6 +520,13 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Emit ONE cart update after all items added
             if cart:
                 emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Emit quick replies for cart actions
+            emit_quick_replies(session_id, [
+                {"label": "🛒 View Cart", "action": "view cart"},
+                {"label": "✅ Checkout", "action": "checkout"},
+                {"label": "➕ Add More", "action": "add more items"},
+            ])
 
             # Build response
             summary = ", ".join(added_items)

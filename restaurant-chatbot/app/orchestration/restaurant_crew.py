@@ -566,19 +566,15 @@ async def process_with_restaurant_crew(
     msg_lower = user_message.lower()
 
     if any(phrase in msg_lower for phrase in ['view cart', 'show cart', 'my cart', "what's in my cart", 'whats in my cart']):
-        # Emit cart data deterministically
+        # Emit cart data deterministically (from PostgreSQL session_cart)
         try:
-            from app.core.redis import get_cart_sync
+            from app.core.session_events import get_sync_session_tracker
             from app.core.agui_events import emit_cart_data
-            cart_data = get_cart_sync(session_id)
+            tracker = get_sync_session_tracker(session_id)
+            cart_data = tracker.get_cart_summary()
             items = cart_data.get("items", [])
             if items:
-                total = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
-                structured_items = [
-                    {"name": i.get("name"), "quantity": i.get("quantity", 1), "price": i.get("price", 0)}
-                    for i in items
-                ]
-                emit_cart_data(session_id, structured_items, total)
+                emit_cart_data(session_id, items, cart_data.get("total", 0))
                 logger.info("deterministic_cart_emit", session_id=session_id, items=len(items))
         except Exception as e:
             logger.warning("deterministic_cart_emit_failed", error=str(e))
