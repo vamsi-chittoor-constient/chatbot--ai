@@ -471,7 +471,9 @@ async def run_payment_workflow(
     session_id: str,
     order_id: str,
     amount: float,
-    initial_method: str | None = None
+    initial_method: str | None = None,
+    items: list | None = None,
+    order_type: str | None = None
 ) -> Dict[str, Any]:
     """
     Run the payment workflow for an order.
@@ -481,6 +483,8 @@ async def run_payment_workflow(
         order_id: Order ID to pay for
         amount: Total amount
         initial_method: Pre-selected payment method (optional)
+        items: Cart items for receipt generation (optional)
+        order_type: Order type for receipt (optional)
 
     Returns:
         Final workflow state
@@ -493,8 +497,8 @@ async def run_payment_workflow(
         initial_method=initial_method
     )
 
-    # Initialize payment state in Redis
-    init_payment_workflow(session_id, order_id, amount)
+    # Initialize payment state in Redis (with items for receipt)
+    init_payment_workflow(session_id, order_id, amount, items=items, order_type=order_type)
 
     # Create initial state
     initial_state: PaymentWorkflowState = {

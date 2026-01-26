@@ -107,6 +107,118 @@ async def _translate_response(text: str, target_language: str) -> str:
         return text
 
 
+def extract_unrealized_tool_call(raw_response: str) -> dict | None:
+    """
+    Detect when CrewAI's LLM output a tool call in its final answer text
+    instead of actually executing it.
+
+    Returns:
+        Dict with 'action' and 'input' keys, or None if no unrealized call found.
+    """
+    import re
+    import json
+
+    response = str(raw_response).strip()
+    # Strip triple backtick wrappers
+    response = re.sub(r'^```\s*', '', response)
+    response = re.sub(r'\s*```?\s*$', '', response)
+
+    # Only applies when there's Action + Action Input but no Observation
+    if 'Action:' not in response or 'Action Input:' not in response:
+        return None
+    if 'Observation:' in response:
+        return None  # Tool was executed — normal flow
+
+    action_match = re.search(r'Action:\s*(.+?)(?:\n|$)', response)
+    input_match = re.search(r'Action Input:\s*(.+?)(?:\n|$)', response, re.DOTALL)
+
+    if not action_match or not input_match:
+        return None
+
+    action_name = action_match.group(1).strip()
+    action_input_raw = input_match.group(1).strip()
+
+    # Parse JSON input
+    try:
+        action_input = json.loads(action_input_raw)
+    except json.JSONDecodeError:
+        # Try to extract JSON from the string (may have trailing backticks)
+        json_match = re.search(r'\{.*\}', action_input_raw, re.DOTALL)
+        if json_match:
+            try:
+                action_input = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                return None
+        else:
+            return None
+
+    logger.info(
+        "unrealized_tool_call_detected",
+        action=action_name,
+        input=action_input
+    )
+    return {"action": action_name, "input": action_input}
+
+
+def execute_unrealized_tool_call(tool_call: dict, tools: list) -> str | None:
+    """
+    Execute an unrealized tool call using the tools list from the crew.
+
+    Args:
+        tool_call: Dict with 'action' (tool name) and 'input' (dict of args)
+        tools: List of CrewAI tool instances
+
+    Returns:
+        Tool result string, or None if tool not found
+    """
+    action_name = tool_call["action"]
+    action_input = tool_call["input"]
+
+    # Find matching tool by name
+    matching_tool = None
+    for t in tools:
+        tool_name = getattr(t, 'name', '') or ''
+        if tool_name == action_name:
+            matching_tool = t
+            break
+
+    if not matching_tool:
+        logger.warning("unrealized_tool_not_found", action=action_name)
+        return None
+
+    try:
+        # CrewAI tools have a .run() method or can be called directly
+        if hasattr(matching_tool, 'run'):
+            if isinstance(action_input, dict):
+                result = matching_tool.run(**action_input)
+            else:
+                result = matching_tool.run(action_input)
+        elif callable(matching_tool):
+            if isinstance(action_input, dict):
+                result = matching_tool(**action_input)
+            else:
+                result = matching_tool(action_input)
+        else:
+            logger.warning("unrealized_tool_not_callable", action=action_name)
+            return None
+
+        logger.info(
+            "unrealized_tool_call_executed",
+            action=action_name,
+            result_len=len(str(result))
+        )
+        return str(result)
+
+    except Exception as e:
+        logger.error(
+            "unrealized_tool_call_failed",
+            action=action_name,
+            error=str(e),
+            exc_info=True
+        )
+        return None
+
+
 def clean_crew_response(raw_response: str) -> str:
     """
     Extract the final answer from CrewAI output.
@@ -673,8 +785,16 @@ async def process_with_restaurant_crew(
         # Process result - extract clean response
         response = None
 
+        # First: check for unrealized tool calls (LLM output Action/Input but tool wasn't executed)
+        raw_for_tool_check = str(result.raw).strip() if hasattr(result, 'raw') and result.raw else str(result).strip()
+        unrealized = extract_unrealized_tool_call(raw_for_tool_check)
+        if unrealized:
+            tool_result = execute_unrealized_tool_call(unrealized, crew._all_food_tools)
+            if tool_result:
+                response = tool_result
+
         # Try result.raw first (usually contains clean output)
-        if hasattr(result, 'raw') and result.raw:
+        if response is None and hasattr(result, 'raw') and result.raw:
             raw = str(result.raw).strip()
             # If raw output looks clean (no planner markers), check for incomplete
             if not any(marker in raw for marker in ['Thought:', 'Action:', 'Action Input:']):
@@ -911,7 +1031,15 @@ async def process_with_agui_streaming(
         # Process result - extract clean response
         response = None
 
-        if hasattr(result, 'raw') and result.raw:
+        # First: check for unrealized tool calls (LLM output Action/Input but tool wasn't executed)
+        raw_for_tool_check = str(result.raw).strip() if hasattr(result, 'raw') and result.raw else str(result).strip()
+        unrealized = extract_unrealized_tool_call(raw_for_tool_check)
+        if unrealized:
+            tool_result = execute_unrealized_tool_call(unrealized, crew._all_food_tools)
+            if tool_result:
+                response = tool_result
+
+        if response is None and hasattr(result, 'raw') and result.raw:
             raw = str(result.raw).strip()
             if not any(marker in raw for marker in ['Thought:', 'Action:', 'Action Input:']):
                 cleaned = clean_crew_response(raw)
@@ -986,8 +1114,20 @@ async def process_with_agui_streaming(
             if _pinfo_data:
                 _pinfo = _json.loads(_pinfo_data)
                 _redis.delete(_pinfo_key)
+                # Read pending order items for receipt generation
+                _items = None
+                _order_type = None
+                _pending_key = f"pending_order:{session_id}"
+                _pending_data = _redis.get(_pending_key)
+                if _pending_data:
+                    _pending = _json.loads(_pending_data)
+                    _items = _pending.get("items")
+                    _order_type = _pending.get("order_type")
                 from app.workflows.payment_workflow import run_payment_workflow
-                await run_payment_workflow(session_id, _pinfo["order_display_id"], _pinfo["total"])
+                await run_payment_workflow(
+                    session_id, _pinfo["order_display_id"], _pinfo["total"],
+                    items=_items, order_type=_order_type
+                )
                 # Flush the payment workflow events too
                 flushed_payment = flush_pending_events(session_id)
                 if flushed_payment > 0:

@@ -8,8 +8,8 @@ Two scenarios:
 2. External payment: User pays from SMS/Email link  Show success page and close window
 """
 
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import Optional
@@ -395,10 +395,18 @@ async def payment_callback(
                     )
 
                     # Update Redis payment state so payment_handler stops intercepting
+                    # Also store order_number and db_order_id for receipt generation
                     if session_id:
                         try:
-                            from app.services.payment_state_service import mark_payment_success as _mark_success
-                            _mark_success(session_id, razorpay_payment_id or "")
+                            from app.services.payment_state_service import (
+                                mark_payment_success as _mark_success,
+                                set_payment_state as _set_state
+                            )
+                            state = _mark_success(session_id, razorpay_payment_id or "")
+                            # Store order details needed by view_receipt handler
+                            state["order_number"] = str(order.order_invoice_number) if order and order.order_invoice_number else ""
+                            state["db_order_id"] = str(payment_order.order_id)
+                            _set_state(session_id, state)
                         except Exception as e:
                             logger.warning("mark_payment_success_failed", session_id=session_id, error=str(e))
 
@@ -721,4 +729,46 @@ async def payment_callback(
             </body>
             </html>
         """)
+
+
+@router.get("/payment/receipt/pdf")
+async def download_receipt_pdf(
+    session_id: str = Query(..., description="Session ID to generate receipt for")
+):
+    """
+    Generate and download a PDF receipt for a completed payment.
+
+    Reads the payment state from Redis (which includes order details and
+    cart items) and generates a formatted PDF receipt.
+    """
+    try:
+        from app.services.payment_state_service import get_payment_state
+        from app.services.receipt_pdf_service import generate_receipt_pdf
+
+        payment_state = get_payment_state(session_id)
+
+        if not payment_state.get("order_id"):
+            raise HTTPException(status_code=404, detail="No order found for this session")
+
+        if payment_state.get("step") not in ["payment_success", "cash_selected"]:
+            raise HTTPException(status_code=400, detail="Payment not completed yet")
+
+        pdf_bytes = generate_receipt_pdf(payment_state)
+
+        order_id = payment_state.get("order_id", "order")
+        filename = f"receipt_{order_id}.pdf"
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("receipt_pdf_generation_failed", session_id=session_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate receipt: {str(e)}")
 

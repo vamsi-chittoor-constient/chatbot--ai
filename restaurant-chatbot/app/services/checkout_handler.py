@@ -169,9 +169,22 @@ async def _trigger_payment_workflow(session_id: str):
         # Clean up the temporary key
         redis_client.delete(payment_info_key)
 
+        # Read pending order items for receipt generation
+        items = None
+        order_type = None
+        pending_order_key = f"pending_order:{session_id}"
+        pending_order_data = redis_client.get(pending_order_key)
+        if pending_order_data:
+            pending_order = json.loads(pending_order_data)
+            items = pending_order.get("items")
+            order_type = pending_order.get("order_type")
+
         # Run payment workflow inline (awaited) - this emits quick replies
         from app.workflows.payment_workflow import run_payment_workflow
-        await run_payment_workflow(session_id, order_display_id, total)
+        await run_payment_workflow(
+            session_id, order_display_id, total,
+            items=items, order_type=order_type
+        )
 
         logger.info(
             "payment_workflow_triggered_inline",

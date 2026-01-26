@@ -112,7 +112,9 @@ def set_payment_state(session_id: str, state: Dict[str, Any], ttl_hours: int = 2
 def init_payment_workflow(
     session_id: str,
     order_id: str,
-    amount: float
+    amount: float,
+    items: Optional[list] = None,
+    order_type: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Initialize payment workflow for an order.
@@ -121,6 +123,8 @@ def init_payment_workflow(
         session_id: Session identifier
         order_id: Order ID to pay for
         amount: Total amount to pay
+        items: Cart items list (name, price, quantity) for receipt generation
+        order_type: Order type (dine_in, take_away) for receipt
 
     Returns:
         Initial payment state
@@ -135,6 +139,12 @@ def init_payment_workflow(
         "completed": False,
         "created_at": datetime.now().isoformat()
     }
+
+    # Store items for receipt generation
+    if items:
+        state["items"] = items
+    if order_type:
+        state["order_type"] = order_type
 
     set_payment_state(session_id, state)
 

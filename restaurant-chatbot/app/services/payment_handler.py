@@ -40,21 +40,34 @@ async def handle_payment_message(
     # Handle quick replies from payment success card (view_receipt, order_more)
     if message_lower == "view_receipt":
         payment_state = get_payment_state(session_id)
-        order_id = payment_state.get("order_id")
-        order_number = payment_state.get("order_number", "N/A")
+        display_id = payment_state.get("order_id", "")  # Display ID like "ORD-830A98E5"
+        order_number = payment_state.get("order_number") or display_id or "N/A"
+        payment_id = payment_state.get("payment_id", "")
+        amount = payment_state.get("amount", 0)
+        method = payment_state.get("method", "")
+        method_label = {
+            "online": "Online (Razorpay)",
+            "cash": "Cash",
+            "card_at_counter": "Card at Counter",
+            "card": "Card at Counter",
+        }.get(method, method or "Online")
 
-        if order_id:
-            # Generate PDF receipt download link
-            pdf_download_url = f"/api/v1/orders/{order_id}/receipt/pdf"
+        if display_id:
+            pdf_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
 
-            return (
-                f"📄 **Order Receipt**\n\n"
-                f"Order Number: {order_number}\n"
-                f"Order ID: {order_id}\n\n"
-                f"📥 [Download PDF Receipt]({pdf_download_url})\n\n"
-                f"Your receipt has also been sent to your registered mobile number via SMS.\n\n"
-                f"Anything else I can help you with?"
-            )
+            lines = [
+                "📄 **Order Receipt**\n",
+                f"**Order:** {order_number}",
+                f"**Amount:** ₹{amount:.2f}",
+                f"**Payment:** {method_label}",
+            ]
+            if payment_id:
+                lines.append(f"**Payment ID:** {payment_id}")
+            lines.append("**Status:** Paid ✅\n")
+            lines.append(f"📥 [Download PDF Receipt]({pdf_url})\n")
+            lines.append("Anything else I can help you with?")
+
+            return "\n".join(lines)
 
         return "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?"
 
@@ -110,14 +123,19 @@ async def handle_payment_message(
             # Resume payment workflow with selected method
             order_id = payment_state.get("order_id")
             amount = payment_state.get("amount", 0.0)
+            existing_items = payment_state.get("items")
+            existing_order_type = payment_state.get("order_type")
 
             try:
                 # Run payment workflow with selected method
+                # Pass existing items/order_type so init doesn't lose them
                 final_state = await run_payment_workflow(
                     session_id=session_id,
                     order_id=order_id,
                     amount=amount,
-                    initial_method=method
+                    initial_method=method,
+                    items=existing_items,
+                    order_type=existing_order_type
                 )
 
                 # Workflow has completed - return confirmation
