@@ -1457,12 +1457,18 @@ def _convert_decimal(value):
 
 
 def _sanitize_cart_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sanitize cart items by converting Decimal values to float."""
+    """Sanitize cart items by converting Decimal values to float and normalizing keys.
+
+    The DB returns 'item_name' but the frontend CartCard expects 'name'.
+    """
     sanitized = []
     for item in items:
         sanitized_item = {}
         for key, value in item.items():
             sanitized_item[key] = _convert_decimal(value)
+        # Map item_name → name for frontend compatibility
+        if "item_name" in sanitized_item and "name" not in sanitized_item:
+            sanitized_item["name"] = sanitized_item["item_name"]
         sanitized.append(sanitized_item)
     return sanitized
 

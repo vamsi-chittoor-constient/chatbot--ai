@@ -94,9 +94,12 @@ async def select_payment_method_node(state: PaymentWorkflowState) -> PaymentWork
 async def generate_payment_link_node(state: PaymentWorkflowState) -> PaymentWorkflowState:
     """
     Node 2: Generate Razorpay payment link for online payment.
+
+    Creates a DB Order + OrderItems first (Razorpay tool queries Order by UUID),
+    then calls Razorpay to generate the payment link.
     """
     session_id = state["session_id"]
-    order_id = state["order_id"]
+    order_id = state["order_id"]  # Display ID like "ORD-7AA36E8D"
     amount = state["amount"]
 
     logger.info(
@@ -121,15 +124,65 @@ async def generate_payment_link_node(state: PaymentWorkflowState) -> PaymentWork
             customer_email = customer.get("email", customer_email)
             customer_phone = customer.get("phone", customer_phone)
 
-        # Generate payment link using Razorpay
+        # ================================================================
+        # CREATE DATABASE ORDER FIRST (Razorpay tool queries Order by UUID)
+        # ================================================================
+        import uuid as uuid_module
+        from app.core.database import get_db_session
+        from app.features.food_ordering.models import Order, OrderItem
+
+        pending_order_key = f"pending_order:{session_id}"
+        pending_order_data = redis_client.get(pending_order_key)
+
+        if not pending_order_data:
+            mark_payment_failed(session_id, "No pending order found")
+            state["error"] = "No pending order found"
+            state["step"] = PaymentStep.PAYMENT_FAILED.value
+            return state
+
+        pending_order = json.loads(pending_order_data)
+        db_order_id = uuid_module.uuid4()
+
+        async with get_db_session() as db_session:
+            order = Order(
+                order_id=db_order_id,
+                order_invoice_number=order_id,  # Display ID "ORD-7AA36E8D"
+            )
+            db_session.add(order)
+            await db_session.flush()
+
+            for item in pending_order.get("items", []):
+                item_price = float(item.get("price", 0))
+                item_qty = int(item.get("quantity", 1))
+                menu_item_id = item.get("id") or item.get("menu_item_id")
+
+                order_item = OrderItem(
+                    order_item_id=uuid_module.uuid4(),
+                    order_id=db_order_id,
+                    menu_item_id=uuid_module.UUID(menu_item_id) if menu_item_id else None,
+                    base_price=item_price * item_qty,
+                )
+                db_session.add(order_item)
+
+            await db_session.commit()
+
+        logger.info(
+            "db_order_created_for_payment",
+            session_id=session_id,
+            db_order_id=str(db_order_id),
+            display_id=order_id
+        )
+
+        # Generate payment link using Razorpay (pass real UUID)
         payment_result = await razorpay_payment_tool._execute_impl(
             operation="create_order",
-            order_id=order_id,
+            order_id=str(db_order_id),  # Real UUID for DB query
             user_id="guest",
             payment_source="chat",
             session_id=session_id,
             notes={
-                "order_id": order_id,
+                "order_id": order_id,  # Display ID for reference
+                "db_order_id": str(db_order_id),
                 "session_id": session_id,
                 "customer_name": customer_name
             }
@@ -149,6 +202,9 @@ async def generate_payment_link_node(state: PaymentWorkflowState) -> PaymentWork
 
             # Emit payment link via AG-UI event
             emit_payment_link(session_id, payment_link, amount, expires_at or "")
+
+            # Clean up pending order from Redis
+            redis_client.delete(pending_order_key)
 
             state["payment_link"] = payment_link
             state["step"] = PaymentStep.AWAITING_PAYMENT.value
@@ -210,51 +266,40 @@ async def handle_cash_payment_node(state: PaymentWorkflowState) -> PaymentWorkfl
     if pending_order_data:
         pending_order = json.loads(pending_order_data)
 
-        # Create database order
         from app.core.database import get_db_session
         from app.features.food_ordering.models import Order, OrderItem
-        from datetime import timedelta
         import uuid
 
         async with get_db_session() as db_session:
-            # Create order
+            db_order_id = uuid.uuid4()
             order = Order(
-                order_id=uuid.uuid4(),
-                order_number=pending_order["order_id"],
-                restaurant_id=uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-                order_type_id=uuid.UUID("d1e2f3a4-b5c6-7890-abcd-123456789def"),
-                order_source_type_id=uuid.UUID("11111111-2222-3333-4444-555555555555"),
-                order_status_type_id=uuid.UUID("a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5"),
-                total_amount=pending_order["total"],
-                payment_status="pending",
-                status="confirmed",
-                payment_method="cash",
-                estimated_ready_time=datetime.now(timezone.utc) + timedelta(minutes=25),
-                created_at=datetime.now(timezone.utc)
+                order_id=db_order_id,
+                order_invoice_number=order_id,  # Display ID "ORD-xxx" (String column)
             )
             db_session.add(order)
             await db_session.flush()
 
-            # Create order items
             for item in pending_order.get("items", []):
+                item_price = float(item.get("price", 0))
+                item_qty = int(item.get("quantity", 1))
+                menu_item_id = item.get("id") or item.get("menu_item_id")
+
                 order_item = OrderItem(
                     order_item_id=uuid.uuid4(),
-                    order_id=order.order_id,
-                    menu_item_id=uuid.UUID(item.get("menu_item_id")) if item.get("menu_item_id") else None,
-                    quantity=item.get("quantity", 1),
-                    unit_price=item.get("price", 0),
-                    total_price=item.get("price", 0) * item.get("quantity", 1)
+                    order_id=db_order_id,
+                    menu_item_id=uuid.UUID(menu_item_id) if menu_item_id else None,
+                    base_price=item_price * item_qty,
                 )
                 db_session.add(order_item)
 
             await db_session.commit()
 
-            # Delete pending order from Redis
             redis_client.delete(pending_order_key)
 
             logger.info(
                 "order_created_cash_payment",
-                order_id=order.order_number,
+                order_id=str(db_order_id),
+                display_id=order_id,
                 session_id=session_id
             )
 
@@ -295,51 +340,40 @@ async def handle_card_counter_payment_node(state: PaymentWorkflowState) -> Payme
     if pending_order_data:
         pending_order = json.loads(pending_order_data)
 
-        # Create database order
         from app.core.database import get_db_session
         from app.features.food_ordering.models import Order, OrderItem
-        from datetime import timedelta
         import uuid
 
         async with get_db_session() as db_session:
-            # Create order
+            db_order_id = uuid.uuid4()
             order = Order(
-                order_id=uuid.uuid4(),
-                order_number=pending_order["order_id"],
-                restaurant_id=uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-                order_type_id=uuid.UUID("d1e2f3a4-b5c6-7890-abcd-123456789def"),
-                order_source_type_id=uuid.UUID("11111111-2222-3333-4444-555555555555"),
-                order_status_type_id=uuid.UUID("a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5"),
-                total_amount=pending_order["total"],
-                payment_status="pending",
-                status="confirmed",
-                payment_method="card_at_counter",
-                estimated_ready_time=datetime.now(timezone.utc) + timedelta(minutes=25),
-                created_at=datetime.now(timezone.utc)
+                order_id=db_order_id,
+                order_invoice_number=order_id,  # Display ID "ORD-xxx" (String column)
             )
             db_session.add(order)
             await db_session.flush()
 
-            # Create order items
             for item in pending_order.get("items", []):
+                item_price = float(item.get("price", 0))
+                item_qty = int(item.get("quantity", 1))
+                menu_item_id = item.get("id") or item.get("menu_item_id")
+
                 order_item = OrderItem(
                     order_item_id=uuid.uuid4(),
-                    order_id=order.order_id,
-                    menu_item_id=uuid.UUID(item.get("menu_item_id")) if item.get("menu_item_id") else None,
-                    quantity=item.get("quantity", 1),
-                    unit_price=item.get("price", 0),
-                    total_price=item.get("price", 0) * item.get("quantity", 1)
+                    order_id=db_order_id,
+                    menu_item_id=uuid.UUID(menu_item_id) if menu_item_id else None,
+                    base_price=item_price * item_qty,
                 )
                 db_session.add(order_item)
 
             await db_session.commit()
 
-            # Delete pending order from Redis
             redis_client.delete(pending_order_key)
 
             logger.info(
                 "order_created_card_counter_payment",
-                order_id=order.order_number,
+                order_id=str(db_order_id),
+                display_id=order_id,
                 session_id=session_id
             )
 

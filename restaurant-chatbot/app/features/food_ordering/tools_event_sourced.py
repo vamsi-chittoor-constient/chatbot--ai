@@ -432,9 +432,106 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             logger.error("search_menu_failed", error=str(e), session_id=session_id)
             return "Sorry, I couldn't load the menu. Please try again."
 
+    @tool("batch_add_to_cart")
+    def batch_add_to_cart(items_with_quantities: str) -> str:
+        """
+        Add MULTIPLE different items to cart in one call. Emits a single cart update.
+
+        Use this when customer orders 2+ DIFFERENT items in one message.
+        Format: "item1:qty1, item2:qty2, ..."
+
+        Args:
+            items_with_quantities: Comma-separated "item:quantity" pairs.
+                Examples:
+                - "ghee masala dosa:2, ghee onion dosa:1"
+                - "margherita pizza:1, coke:2, garlic bread:1"
+
+        Returns:
+            Final message confirming all items added.
+        """
+        from app.core.agui_events import emit_tool_activity, emit_cart_data
+        from app.core.preloader import get_menu_preloader
+        from app.core.session_events import get_sync_session_tracker
+
+        emit_tool_activity(session_id, "add_to_cart")
+
+        try:
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+            preloader = get_menu_preloader()
+            if not preloader.is_loaded:
+                return "Menu is loading, please try again in a moment."
+
+            # Parse "item:qty, item:qty, ..." format
+            pairs = [p.strip() for p in items_with_quantities.split(",") if p.strip()]
+            added_items = []
+            failed_items = []
+            cart = None
+
+            for pair in pairs:
+                # Support "item:qty" or just "item" (default qty=1)
+                if ":" in pair:
+                    item_name_raw, qty_str = pair.rsplit(":", 1)
+                    try:
+                        quantity = int(qty_str.strip())
+                    except ValueError:
+                        quantity = 1
+                        item_name_raw = pair  # treat the whole thing as item name
+                else:
+                    item_name_raw = pair
+                    quantity = 1
+
+                item_name_raw = item_name_raw.strip()
+                if quantity <= 0:
+                    quantity = 1
+                if quantity > 50:
+                    quantity = 50
+
+                # Resolve ordinal references
+                resolved = resolve_ordinal_reference(item_name_raw, tracker)
+                item_to_find = resolved if resolved else item_name_raw
+
+                found_item = preloader.find_item(item_to_find)
+                if not found_item:
+                    failed_items.append(item_name_raw)
+                    continue
+
+                item_id = UUID(found_item['id'])
+                name = found_item['name']
+                price = float(found_item['price'])
+
+                cart = tracker.add_to_cart(
+                    item_id=item_id,
+                    item_name=name,
+                    quantity=quantity,
+                    price=price
+                )
+                added_items.append(f"{quantity}x {name}")
+
+            if not added_items:
+                return f"I couldn't find these items on our menu: {', '.join(failed_items)}. Try searching first?"
+
+            # Emit ONE cart update after all items added
+            if cart:
+                emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Build response
+            summary = ", ".join(added_items)
+            msg = f"Added {summary} to your cart!"
+            if cart:
+                msg += f" Cart total: ₹{cart['total']:.0f} ({cart['item_count']} items)."
+            if failed_items:
+                msg += f"\nCouldn't find: {', '.join(failed_items)}."
+            msg += " Anything else?"
+            return msg
+
+        except Exception as e:
+            logger.error("batch_add_to_cart_failed", error=str(e), session_id=session_id)
+            return "Sorry, I couldn't add those items. Please try again."
+
     # Return all tools
     return [
         add_to_cart,
+        batch_add_to_cart,
         view_cart,
         remove_from_cart,
         search_menu,

@@ -200,9 +200,26 @@ class WebSocketManager:
             }
         )
 
-    async def disconnect(self, session_id: str):
-        """Remove WebSocket connection and log analytics"""
+    async def disconnect(self, session_id: str, websocket: WebSocket = None):
+        """Remove WebSocket connection and log analytics.
+
+        Args:
+            session_id: Session to disconnect
+            websocket: Optional WebSocket reference. If provided, only disconnect
+                       if the stored WebSocket matches. This prevents a reconnecting
+                       client's NEW connection from being removed by the OLD connection's
+                       finally block cleanup.
+        """
         if session_id in self.active_connections:
+            # Guard: If a specific WebSocket was provided, only disconnect if it matches
+            # the one currently stored. A newer connection may have replaced it.
+            if websocket is not None and self.active_connections[session_id] is not websocket:
+                logger.info(
+                    "disconnect_skipped_newer_connection_exists",
+                    session_id=session_id
+                )
+                return
+
             connection_info = self.connection_metadata.get(session_id, {})
 
             # ========================================================================
@@ -297,11 +314,17 @@ class WebSocketManager:
 
             return clean_value(metadata)
 
-    async def send_message_with_metadata(self, session_id: str, message: str, message_type: str = "ai_response", metadata: Optional[dict] = None):
-        """Send message with metadata to specific WebSocket connection"""
+    async def send_message_with_metadata(self, session_id: str, message: str, message_type: str = "ai_response", metadata: Optional[dict] = None) -> bool:
+        """Send message with metadata to specific WebSocket connection.
+
+        Returns True if sent successfully, False otherwise.
+        IMPORTANT: Does NOT call disconnect() on send errors.
+        Only the WebSocket endpoint's finally block should handle disconnection.
+        This prevents transient send errors from permanently destroying the session.
+        """
         if session_id not in self.active_connections:
             logger.debug(f"Cannot send message - session {session_id} not in active connections")
-            return
+            return False
 
         websocket = self.active_connections[session_id]
 
@@ -312,8 +335,7 @@ class WebSocketManager:
                 logger.warning(
                     f"WebSocket not connected for session {session_id}, state: {websocket.client_state.name}"
                 )
-                await self.disconnect(session_id)
-                return
+                return False
         except AttributeError:
             # Fallback if client_state is not available
             pass
@@ -344,18 +366,17 @@ class WebSocketManager:
                 content=message,
                 metadata={"sent_successfully": True, "debug_metadata": metadata}
             )
+            return True
 
         except RuntimeError as e:
-            # Handle specific "WebSocket is not connected" error
             if "WebSocket is not connected" in str(e):
-                logger.warning(f"WebSocket disconnected for session {session_id}, cleaning up")
-                await self.disconnect(session_id)
+                logger.warning(f"WebSocket send failed for session {session_id}: not connected")
             else:
-                logger.error(f"WebSocket runtime error for session {session_id}: {str(e)}")
-                await self.disconnect(session_id)
+                logger.warning(f"WebSocket runtime error for session {session_id}: {str(e)}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to send message to session {session_id}: {str(e)}")
-            await self.disconnect(session_id)
+            logger.warning(f"Failed to send message to session {session_id}: {str(e)}")
+            return False
 
     def _calculate_session_duration(self, session_id: str) -> float:
         """Calculate session duration for analytics"""
@@ -965,7 +986,7 @@ async def chat_endpoint(
 
                 except WebSocketDisconnect:
                     logger.info(f"WebSocket disconnected during auth for session: {session_id}")
-                    await websocket_manager.disconnect(session_id)
+                    await websocket_manager.disconnect(session_id, websocket)
                     return
                 except json.JSONDecodeError:
                     continue
@@ -975,7 +996,7 @@ async def chat_endpoint(
                     # Check if this is a WebSocket disconnection error
                     if "WebSocket is not connected" in error_msg or "disconnect" in error_msg.lower():
                         logger.info(f"WebSocket disconnected, exiting auth flow for session: {session_id}")
-                        await websocket_manager.disconnect(session_id)
+                        await websocket_manager.disconnect(session_id, websocket)
                         return
                     continue
         # ========================================================================
@@ -1161,6 +1182,16 @@ async def chat_endpoint(
                 if isinstance(message_data, dict) and message_data.get("type") == "form_response":
                     form_type = message_data.get("form_type")
                     form_data = message_data.get("data", {})
+
+                    # Skip auth form responses that arrive in main loop
+                    # (e.g. from frontend form submitted after reconnect)
+                    if form_type in ("phone_auth", "login_otp", "name_collection"):
+                        logger.info(
+                            "auth_form_response_in_main_loop_skipped",
+                            session_id=session_id,
+                            form_type=form_type
+                        )
+                        continue  # Skip - auth already handled
 
                     if form_type == "direct_add_to_cart":
                         # Direct add-to-cart from UI cards - bypass LLM entirely
@@ -1391,8 +1422,8 @@ async def chat_endpoint(
         logger.error(f"WebSocket connection error for session {session_id}: {str(e)}")
 
     finally:
-        # Clean up connection
-        await websocket_manager.disconnect(session_id)
+        # Clean up connection (pass websocket to prevent removing a newer connection)
+        await websocket_manager.disconnect(session_id, websocket)
         logger.info(f"WebSocket connection closed for session: {session_id}")
 
 
