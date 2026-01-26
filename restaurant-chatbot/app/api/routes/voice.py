@@ -432,6 +432,16 @@ async def process_speech_segment(
         if not isinstance(response_text, str):
             response_text = str(response_text)
 
+        # Strip internal tool context markers (e.g. [SEARCH RESULTS DISPLAYED ...])
+        # These are meant for the LLM agent, not for user display/TTS.
+        import re as _re
+        response_text = _re.sub(
+            r'\[(?:SEARCH RESULTS DISPLAYED|MENU CARD DISPLAYED|MENU DISPLAYED|CART CARD DISPLAYED'
+            r'|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED|INVALID QUANTITY|INVALID INSTRUCTIONS)'
+            r'[^\]]*\]\s*',
+            '', response_text
+        ).strip()
+
         logger.info(
             "voice_response",
             session_id=session_id,
