@@ -126,10 +126,17 @@ export function useVoiceChat(sessionId, onEvent) {
 
             case 'agui_event':
                 // Forward AG-UI events (menu cards, cart, search results, quick replies, etc.)
-                // to the same handler used by chat mode so cards render in the UI
+                // to the same handler used by chat mode so cards render in the UI.
+                // Skip TEXT_MESSAGE events - voice mode handles text display via responseText
+                // useEffect in App.jsx. Forwarding them would create duplicate messages.
                 if (data.agui && onEvent) {
-                    console.log('Voice AGUI event:', data.agui.type || data.agui);
-                    onEvent(data.agui);
+                    const eventType = data.agui.type;
+                    if (eventType !== 'TEXT_MESSAGE_START' &&
+                        eventType !== 'TEXT_MESSAGE_CONTENT' &&
+                        eventType !== 'TEXT_MESSAGE_END') {
+                        console.log('Voice AGUI event:', eventType);
+                        onEvent(data.agui);
+                    }
                 }
                 break;
 

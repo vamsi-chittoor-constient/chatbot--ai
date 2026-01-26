@@ -554,7 +554,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 self.ws = ws
 
             def emit_run_started(self):
-                pass  # Optional
+                asyncio.create_task(self.ws.send_json({
+                    "type": "agui_event",
+                    "agui": {"type": "RUN_STARTED"}
+                }))
 
             def emit_activity(self, activity_type: str, message: str):
                 asyncio.create_task(self.ws.send_json({
@@ -591,7 +594,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 pass  # Errors handled separately
 
             def emit_run_finished(self, response: str = None):
-                pass  # Optional - voice mode handles response via TTS
+                asyncio.create_task(self.ws.send_json({
+                    "type": "agui_event",
+                    "agui": {"type": "RUN_FINISHED"}
+                }))
 
         emitter = VoiceWebSocketEmitter(websocket)
 
