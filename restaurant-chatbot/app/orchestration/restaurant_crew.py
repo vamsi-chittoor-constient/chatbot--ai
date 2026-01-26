@@ -1062,14 +1062,10 @@ async def process_with_agui_streaming(
 
         emitter.emit_activity_end()
 
-        # Translate response if needed (before streaming)
-        logger.info("crew_language_check", session_id=session_id, language=language, will_translate=(language != "English" and language in ["Hindi", "Tamil"]), response_preview=response[:50] if response else "")
-        if language != "English" and language in ["Hindi", "Tamil"]:
-            logger.info("crew_translating_response", session_id=session_id, language=language)
-            response = await _translate_response(response, language)
-            logger.info("crew_translation_done", session_id=session_id, translated_preview=response[:50] if response else "")
-        else:
-            logger.info("crew_skipping_translation", session_id=session_id, reason="language is English or not supported")
+        # NOTE: Crew already responds in the target language (Hinglish/Tanglish) via backstory instructions.
+        # Do NOT re-translate here — it corrupts correct responses by double-translating.
+        # The chat.py translate_response() handles deterministic handler responses (checkout/payment) which are English.
+        logger.info("crew_language_check", session_id=session_id, language=language, response_preview=response[:50] if response else "")
 
         # Stream response
         logger.info("restaurant_crew_complete", session_id=session_id, response_length=len(response))
