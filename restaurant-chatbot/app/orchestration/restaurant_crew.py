@@ -66,14 +66,18 @@ async def _translate_response(text: str, target_language: str) -> str:
 
         if target_language == "Hindi":
             system_prompt = """Translate to Hinglish (Hindi-English mix written in Roman/English script). Rules:
+- If the text is ALREADY in Hinglish (mix of Hindi and English in Roman script), return it UNCHANGED
 - Write ALL Hindi words in Roman/English letters only (e.g. "Aapka", "Kya", "hain") - NO Devanagari script
 - Keep English for: food items, numbers, prices (₹), technical terms
+- Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
         elif target_language == "Tamil":
             system_prompt = """Translate to Tanglish (Tamil-English mix written in Roman/English script). Rules:
+- If the text is ALREADY in Tanglish (mix of Tamil and English in Roman script), return it UNCHANGED
 - Write ALL Tamil words in Roman/English letters only (e.g. "Ungal", "Enna", "iruku") - NO Tamil script
 - Keep English for: food items, numbers, prices (₹), technical terms
+- Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
         else:
@@ -1062,10 +1066,14 @@ async def process_with_agui_streaming(
 
         emitter.emit_activity_end()
 
-        # NOTE: Crew already responds in the target language (Hinglish/Tanglish) via backstory instructions.
-        # Do NOT re-translate here — it corrupts correct responses by double-translating.
-        # The chat.py translate_response() handles deterministic handler responses (checkout/payment) which are English.
-        logger.info("crew_language_check", session_id=session_id, language=language, response_preview=response[:50] if response else "")
+        # Translate crew response if needed.
+        # The crew sometimes responds in English despite the language prefix, so translation is needed.
+        # The prompt includes "if already in Hinglish/Tanglish, return UNCHANGED" to avoid double-translation.
+        logger.info("crew_language_check", session_id=session_id, language=language, will_translate=(language != "English" and language in ["Hindi", "Tamil"]), response_preview=response[:50] if response else "")
+        if language != "English" and language in ["Hindi", "Tamil"]:
+            logger.info("crew_translating_response", session_id=session_id, language=language)
+            response = await _translate_response(response, language)
+            logger.info("crew_translation_done", session_id=session_id, translated_preview=response[:50] if response else "")
 
         # Stream response
         logger.info("restaurant_crew_complete", session_id=session_id, response_length=len(response))

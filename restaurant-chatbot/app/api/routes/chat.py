@@ -71,14 +71,18 @@ async def translate_response(text: str, target_language: str) -> str:
 
         if target_language == "Hindi":
             system_prompt = """Translate to Hinglish (Hindi-English mix written in Roman/English script). Rules:
+- If the text is ALREADY in Hinglish (mix of Hindi and English in Roman script), return it UNCHANGED
 - Write ALL Hindi words in Roman/English letters only (e.g. "Aapka", "Kya", "hain") - NO Devanagari script
 - Keep English for: food items, numbers, prices (₹), technical terms
+- Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
         else:  # Tamil
             system_prompt = """Translate to Tanglish (Tamil-English mix written in Roman/English script). Rules:
+- If the text is ALREADY in Tanglish (mix of Tamil and English in Roman script), return it UNCHANGED
 - Write ALL Tamil words in Roman/English letters only (e.g. "Ungal", "Enna", "iruku") - NO Tamil script
 - Keep English for: food items, numbers, prices (₹), technical terms
+- Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
 
