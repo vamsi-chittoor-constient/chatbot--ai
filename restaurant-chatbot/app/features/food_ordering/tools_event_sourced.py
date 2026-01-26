@@ -214,7 +214,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message: "Your cart: 2x Margherita (₹400), 1x Coke (₹50). Total: ₹450"
         """
-        from app.core.agui_events import emit_tool_activity, emit_cart_data
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
         from app.core.session_events import get_sync_session_tracker
 
         emit_tool_activity(session_id, "view_cart")
@@ -226,6 +226,19 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
 
             # Emit cart card to frontend
             emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Emit quick replies based on cart state
+            if cart.get('items'):
+                emit_quick_replies(session_id, [
+                    {"label": "✅ Checkout", "action": "checkout"},
+                    {"label": "➕ Add More", "action": "add more items"},
+                    {"label": "🗑️ Remove Item", "action": "remove item"},
+                ])
+            else:
+                emit_quick_replies(session_id, [
+                    {"label": "📋 View Menu", "action": "show menu"},
+                    {"label": "🔍 Search", "action": "search menu"},
+                ])
 
             # Return formatted cart view with LLM
             from app.core.llm_formatter import format_cart_view
@@ -251,7 +264,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message: "Removed Margherita Pizza from your cart."
         """
-        from app.core.agui_events import emit_tool_activity, emit_cart_data
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
         from app.core.preloader import get_menu_preloader
         from app.core.session_events import get_sync_session_tracker
 
@@ -276,6 +289,19 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
 
             # Emit updated cart
             emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Emit quick replies based on remaining cart
+            if cart.get('items'):
+                emit_quick_replies(session_id, [
+                    {"label": "🛒 View Cart", "action": "view cart"},
+                    {"label": "✅ Checkout", "action": "checkout"},
+                    {"label": "➕ Add More", "action": "add more items"},
+                ])
+            else:
+                emit_quick_replies(session_id, [
+                    {"label": "📋 View Menu", "action": "show menu"},
+                    {"label": "🔍 Search", "action": "search menu"},
+                ])
 
             # Return formatted removal confirmation with LLM
             from app.core.llm_formatter import format_item_removed
@@ -304,7 +330,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message: "[MENU DISPLAYED] Browse the menu and let me know what you'd like!"
         """
-        from app.core.agui_events import emit_tool_activity, emit_menu_data, emit_search_results
+        from app.core.agui_events import emit_tool_activity, emit_menu_data, emit_search_results, emit_quick_replies
         from app.core.preloader import get_menu_preloader, get_current_meal_period
         from app.core.session_events import get_sync_session_tracker, EventType
 
@@ -342,6 +368,12 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
 
                 # Emit menu card to frontend
                 emit_menu_data(session_id, items[:50], meal_period)
+
+                # Emit quick replies for menu browsing
+                emit_quick_replies(session_id, [
+                    {"label": "🛒 View Cart", "action": "view cart"},
+                    {"label": "🔍 Search Item", "action": "search for an item"},
+                ])
 
                 # Return formatted menu results
                 from app.core.llm_formatter import format_menu_results
@@ -404,6 +436,13 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                     available_count=available_count,
                     unavailable_count=unavailable_count
                 )
+
+                # Emit quick replies for search results
+                emit_quick_replies(session_id, [
+                    {"label": "🛒 View Cart", "action": "view cart"},
+                    {"label": "✅ Checkout", "action": "checkout"},
+                    {"label": "🔍 Search More", "action": "search for another item"},
+                ])
 
                 # Build response message with upselling
                 # Human-friendly meal period name

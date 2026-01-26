@@ -26,7 +26,43 @@ async def handle_checkout_message(
 
     message_lower = message.lower().strip()
 
-    # Detect checkout intent
+    # ---- Detect standalone order type selection (follow-up to "dine in or take away?" prompt) ----
+    # When checkout handler previously asked "dine in or take away?", the user may respond
+    # with just the order type (e.g. "Take Away", "Dine In") without the word "checkout".
+    standalone_order_type = None
+    if message_lower in ["dine in", "dine-in", "dinein", "dine"]:
+        standalone_order_type = "dine_in"
+    elif message_lower in ["take away", "takeaway", "take-away", "pickup", "take out"]:
+        standalone_order_type = "take_away"
+
+    if standalone_order_type:
+        # Verify cart has items before treating as checkout follow-up
+        from app.core.session_events import get_sync_session_tracker
+        tracker = get_sync_session_tracker(session_id)
+        cart_data = tracker.get_cart_summary()
+        if cart_data and cart_data.get("items"):
+            logger.info(
+                "checkout_order_type_followup",
+                session_id=session_id,
+                order_type=standalone_order_type,
+                message=message_lower
+            )
+            from app.features.food_ordering.crew_agent import _checkout_impl
+            try:
+                order_type_str = "dine in" if standalone_order_type == "dine_in" else "take away"
+                result = _checkout_impl(order_type_str, session_id)
+                return result
+            except Exception as e:
+                logger.error(
+                    "checkout_followup_failed",
+                    session_id=session_id,
+                    error=str(e),
+                    exc_info=True
+                )
+                return f"❌ Error processing checkout: {str(e)}"
+        # If cart is empty, fall through to normal flow (crew agent will handle)
+
+    # ---- Detect checkout intent ----
     is_checkout = any(word in message_lower for word in [
         "checkout", "check out", "place order", "complete order", "finish order"
     ])
@@ -101,12 +137,22 @@ async def handle_checkout_message(
 def is_checkout_message(message: str) -> bool:
     """
     Check if message is checkout-related.
+    Also matches standalone order type selections (follow-up to checkout prompt).
 
     Returns:
-        True if message is about checkout
+        True if message is about checkout or is an order type selection
     """
     message_lower = message.lower().strip()
 
-    return any(word in message_lower for word in [
+    # Direct checkout keywords
+    if any(word in message_lower for word in [
         "checkout", "check out", "place order", "complete order", "finish order"
-    ])
+    ]):
+        return True
+
+    # Standalone order type selections (follow-up to "dine in or take away?" prompt)
+    if message_lower in ["dine in", "dine-in", "dinein", "dine",
+                          "take away", "takeaway", "take-away", "pickup", "take out"]:
+        return True
+
+    return False
