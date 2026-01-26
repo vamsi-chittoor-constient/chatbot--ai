@@ -421,7 +421,7 @@ async def process_speech_segment(
         })
 
         # Process with chat agent (with full AGUI support)
-        response_text = await process_with_chat_agent(
+        response_text, deferred_quick_replies = await process_with_chat_agent(
             transcript_text,
             session_id,
             websocket,
@@ -485,6 +485,26 @@ async def process_speech_segment(
 
         await websocket.send_json({"type": "audio_end"})
         logger.info("voice_tts_complete", session_id=session_id)
+
+        # Send deferred quick replies AFTER response_text and audio are done.
+        # This ensures they arrive after TEXT_MESSAGE_START has cleared stale ones.
+        if deferred_quick_replies:
+            # Small delay to ensure React useEffect for responseText has fired
+            await asyncio.sleep(0.15)
+            for qr_options in deferred_quick_replies:
+                await websocket.send_json({
+                    "type": "agui_event",
+                    "agui": {
+                        "type": "QUICK_REPLIES",
+                        "options": qr_options
+                    }
+                })
+            logger.info(
+                "voice_deferred_quick_replies_sent",
+                session_id=session_id,
+                count=len(deferred_quick_replies)
+            )
+
         await websocket.send_json({"type": "processing_end"})
 
     except Exception as e:
@@ -529,10 +549,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
 
         if not session:
             if language == "Hindi":
-                return "Maaf kijiye, aapka session nahi mila. Please refresh karke dubara try kijiye."
+                return "Maaf kijiye, aapka session nahi mila. Please refresh karke dubara try kijiye.", []
             elif language == "Tamil":
-                return "Mannikkavum, ungal session kandupidikka mudiyavillai. Thayavu seidhu refresh seidhu meeNdum muayarchi seyyungal."
-            return "I'm sorry, I couldn't find your session. Please refresh and try again."
+                return "Mannikkavum, ungal session kandupidikka mudiyavillai. Thayavu seidhu refresh seidhu meeNdum muayarchi seyyungal.", []
+            return "I'm sorry, I couldn't find your session. Please refresh and try again.", []
 
         # Get conversation history from session metadata
         conversation_history = session.metadata.get("conversation_history", []) if session.metadata else []
@@ -546,6 +566,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         # asyncio.get_event_loop() doesn't return the main loop. Instead, we let ALL
         # events go to the queue and drain them via the background task below.
         # set_voice_mode(session_id, websocket)  # DISABLED - use queue + background task instead
+
+        # Deferred quick replies - sent AFTER response_text so they appear after
+        # the AI response in the chat UI (TEXT_MESSAGE_START clears old quick_replies)
+        deferred_quick_replies = []
 
         # Create a real emitter that forwards ALL AGUI events through WebSocket
         # Voice mode needs full interactive experience: forms, menus, cards, etc.
@@ -581,14 +605,8 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 pass  # Text is returned directly, not streamed via AGUI
 
             def emit_quick_replies(self, options):
-                """Emit quick reply options"""
-                asyncio.create_task(self.ws.send_json({
-                    "type": "agui_event",
-                    "agui": {
-                        "type": "QUICK_REPLIES",
-                        "options": options
-                    }
-                }))
+                """Defer quick replies until after response_text is sent"""
+                deferred_quick_replies.append(options)
 
             def emit_run_error(self, error: str):
                 pass  # Errors handled separately
@@ -616,6 +634,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                         event = await asyncio.wait_for(queue.get(), timeout=0.5)
                         event_json = event.to_json() if hasattr(event, 'to_json') else _json.dumps({"type": getattr(event, 'type', 'UNKNOWN')})
                         event_data = _json.loads(event_json)
+                        # Defer QUICK_REPLIES so they arrive after response_text
+                        if event_data.get("type") == "QUICK_REPLIES":
+                            deferred_quick_replies.append(event_data.get("options", []))
+                            continue
                         await websocket.send_json({
                             "type": "agui_event",
                             "agui": event_data
@@ -666,6 +688,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                     event = queue.get_nowait()
                     event_json = event.to_json() if hasattr(event, 'to_json') else _json.dumps({"type": getattr(event, 'type', 'UNKNOWN')})
                     event_data = _json.loads(event_json)
+                    # Defer QUICK_REPLIES so they arrive after response_text
+                    if event_data.get("type") == "QUICK_REPLIES":
+                        deferred_quick_replies.append(event_data.get("options", []))
+                        continue
                     await websocket.send_json({
                         "type": "agui_event",
                         "agui": event_data
@@ -691,7 +717,7 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
             metadata=updated_metadata
         )
 
-        return response
+        return response, deferred_quick_replies
 
     except Exception as e:
         logger.error(
@@ -702,11 +728,11 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         )
         # Return localized error message
         if language == "Hindi":
-            return "Maaf kijiye, kuch तकनीकी (technical) dikkat aa gayi. Please dobara boliye."
+            return "Maaf kijiye, kuch तकनीकी (technical) dikkat aa gayi. Please dobara boliye.", []
         elif language == "Tamil":
-            return "Mannikkavum, oru technical problem erpattullathu. Thayavu seidhu meeNdum sollungal."
-        
-        return "I'm sorry, I encountered an error processing your request. Please try again."
+            return "Mannikkavum, oru technical problem erpattullathu. Thayavu seidhu meeNdum sollungal.", []
+
+        return "I'm sorry, I encountered an error processing your request. Please try again.", []
 
 
 def pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, channels: int = 1, bits_per_sample: int = 16) -> bytes:
