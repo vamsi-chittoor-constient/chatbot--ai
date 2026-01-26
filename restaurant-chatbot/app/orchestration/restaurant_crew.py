@@ -784,6 +784,12 @@ async def process_with_restaurant_crew(
     }
 
     try:
+        # Store main event loop so run_async() in tools can schedule coroutines
+        # on it instead of creating a new loop (prevents "Future attached to
+        # a different loop" errors with HTTP clients/DB connections).
+        from app.features.food_ordering import crew_agent as _crew_agent_mod
+        _crew_agent_mod._MAIN_LOOP = asyncio.get_running_loop()
+
         # Use akickoff() for native async execution
         # Semaphore rate-limits concurrent crews to MAX_CONCURRENT_CREWS
         async with _CREW_SEMAPHORE:
@@ -1030,6 +1036,10 @@ async def process_with_agui_streaming(
 
         # Phase 3: Processing - this is where the real work happens
         emitter.emit_activity("processing", "Processing your request...")
+
+        # Store main event loop for run_async() in tools
+        from app.features.food_ordering import crew_agent as _crew_agent_mod
+        _crew_agent_mod._MAIN_LOOP = asyncio.get_running_loop()
 
         # Use akickoff() for native async execution
         async with _CREW_SEMAPHORE:

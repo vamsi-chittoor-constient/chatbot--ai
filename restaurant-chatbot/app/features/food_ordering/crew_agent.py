@@ -55,6 +55,13 @@ _EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 
+# Reference to the main event loop, set before crew kickoff.
+# Used by run_async() to schedule coroutines on the main loop instead of
+# creating a new loop (which causes "Future attached to a different loop"
+# errors when async resources like HTTP clients are tied to the main loop).
+_MAIN_LOOP = None
+
+
 def run_async(coro):
     """
     Run async coroutine from sync context (inside @tool functions).
@@ -66,7 +73,13 @@ def run_async(coro):
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        # No running loop - safe to use asyncio.run
+        # No running loop - we're in a thread pool worker.
+        # Schedule on the main event loop to avoid creating a new loop that
+        # can't access HTTP clients/DB connections tied to the main loop.
+        if _MAIN_LOOP is not None and _MAIN_LOOP.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
+            return future.result(timeout=30)
+        # Fallback: no main loop reference, create a new one
         return asyncio.run(coro)
 
     # There's a running loop - run in thread to avoid blocking

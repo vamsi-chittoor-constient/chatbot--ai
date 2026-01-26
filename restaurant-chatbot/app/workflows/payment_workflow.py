@@ -28,7 +28,8 @@ from app.services.payment_state_service import (
 )
 from app.core.agui_events import (
     emit_quick_replies,
-    emit_payment_link
+    emit_payment_link,
+    emit_payment_method_selection
 )
 from app.tools.external_apis.razorpay_tools import razorpay_payment_tool
 from app.core.redis import get_sync_redis_client
@@ -67,9 +68,9 @@ async def select_payment_method_node(state: PaymentWorkflowState) -> PaymentWork
         pre_selected_method=method
     )
 
-    # Only show quick replies if no method is pre-selected
+    # Only show payment method card if no method is pre-selected
     if not method:
-        emit_quick_replies(session_id, [
+        emit_payment_method_selection(session_id, [
             {
                 "label": "💳 Pay Online",
                 "action": "pay_online",
@@ -85,7 +86,7 @@ async def select_payment_method_node(state: PaymentWorkflowState) -> PaymentWork
                 "action": "pay_card_counter",
                 "description": "Pay by card when you arrive"
             }
-        ])
+        ], amount=amount, order_id=order_id)
 
     # Update state to waiting for method selection
     update_payment_step(session_id, PaymentStep.SELECT_METHOD)

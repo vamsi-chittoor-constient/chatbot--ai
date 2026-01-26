@@ -53,7 +53,10 @@ function aguiReducer(state, action) {
       return {
         ...state,
         currentStreamId: newStreamId,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        // Don't filter quick_replies here - ADD_USER_MESSAGE already clears old ones.
+        // In voice mode, quick replies arrive BEFORE response_text, so filtering them
+        // here would strip them when the responseText useEffect triggers TEXT_MESSAGE_START.
+        messages: [...state.messages, {
           id: newStreamId,
           role: 'assistant',
           content: '',
