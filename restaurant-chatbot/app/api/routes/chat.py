@@ -63,12 +63,6 @@ async def translate_response(text: str, target_language: str) -> str:
     if target_language == "English" or target_language not in ["Hindi", "Tamil"]:
         return text
 
-    # Quick check: if text already has Tamil characters, skip translation
-    # (Hindi uses Roman script so no character-based detection needed)
-    import re
-    if target_language == "Tamil" and re.search(r'[\u0B80-\u0BFF]', text):
-        return text  # Already has Tamil characters
-
     try:
         from openai import AsyncOpenAI
         import os
@@ -82,8 +76,8 @@ async def translate_response(text: str, target_language: str) -> str:
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
         else:  # Tamil
-            system_prompt = """Translate to Tanglish (Tamil-English mix). Rules:
-- Use Tamil script for Tamil words
+            system_prompt = """Translate to Tanglish (Tamil-English mix written in Roman/English script). Rules:
+- Write ALL Tamil words in Roman/English letters only (e.g. "Ungal", "Enna", "iruku") - NO Tamil script
 - Keep English for: food items, numbers, prices (₹), technical terms
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
