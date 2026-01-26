@@ -975,6 +975,26 @@ async def process_with_agui_streaming(
         if flushed > 0:
             logger.debug("tool_events_flushed_before_run_finished", session_id=session_id, count=flushed)
 
+        # Check if crew agent triggered checkout (via checkout tool) and trigger payment workflow
+        # _checkout_impl stores payment info in Redis; this triggers the payment workflow inline
+        try:
+            from app.core.redis import get_sync_redis_client
+            import json as _json
+            _redis = get_sync_redis_client()
+            _pinfo_key = f"checkout_payment_info:{session_id}"
+            _pinfo_data = _redis.get(_pinfo_key)
+            if _pinfo_data:
+                _pinfo = _json.loads(_pinfo_data)
+                _redis.delete(_pinfo_key)
+                from app.workflows.payment_workflow import run_payment_workflow
+                await run_payment_workflow(session_id, _pinfo["order_display_id"], _pinfo["total"])
+                # Flush the payment workflow events too
+                flushed_payment = flush_pending_events(session_id)
+                if flushed_payment > 0:
+                    logger.debug("payment_events_flushed", session_id=session_id, count=flushed_payment)
+        except Exception as _pe:
+            logger.warning("payment_workflow_fallback_failed", error=str(_pe), session_id=session_id)
+
         # Emit run finished
         emitter.emit_run_finished(response)
 

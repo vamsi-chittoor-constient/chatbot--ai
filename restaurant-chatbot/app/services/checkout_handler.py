@@ -51,6 +51,8 @@ async def handle_checkout_message(
             try:
                 order_type_str = "dine in" if standalone_order_type == "dine_in" else "take away"
                 result = _checkout_impl(order_type_str, session_id)
+                # Trigger payment workflow inline for immediate event delivery
+                await _trigger_payment_workflow(session_id)
                 return result
             except Exception as e:
                 logger.error(
@@ -123,6 +125,9 @@ async def handle_checkout_message(
             order_type=order_type
         )
 
+        # Trigger payment workflow inline for immediate event delivery
+        await _trigger_payment_workflow(session_id)
+
         return result
     except Exception as e:
         logger.error(
@@ -132,6 +137,55 @@ async def handle_checkout_message(
             exc_info=True
         )
         return f"❌ Error processing checkout: {str(e)}"
+
+
+async def _trigger_payment_workflow(session_id: str):
+    """
+    Trigger payment workflow after checkout completes.
+
+    Reads payment info stored by _checkout_impl in Redis and runs
+    the payment workflow inline (awaited) so events are staged before
+    the main flush in chat.py.
+    """
+    try:
+        from app.core.redis import get_sync_redis_client
+        import json
+
+        redis_client = get_sync_redis_client()
+        payment_info_key = f"checkout_payment_info:{session_id}"
+        payment_info_data = redis_client.get(payment_info_key)
+
+        if not payment_info_data:
+            logger.warning(
+                "no_payment_info_after_checkout",
+                session_id=session_id
+            )
+            return
+
+        payment_info = json.loads(payment_info_data)
+        order_display_id = payment_info["order_display_id"]
+        total = payment_info["total"]
+
+        # Clean up the temporary key
+        redis_client.delete(payment_info_key)
+
+        # Run payment workflow inline (awaited) - this emits quick replies
+        from app.workflows.payment_workflow import run_payment_workflow
+        await run_payment_workflow(session_id, order_display_id, total)
+
+        logger.info(
+            "payment_workflow_triggered_inline",
+            session_id=session_id,
+            order_id=order_display_id,
+            amount=total
+        )
+    except Exception as e:
+        logger.error(
+            "payment_workflow_trigger_failed",
+            session_id=session_id,
+            error=str(e),
+            exc_info=True
+        )
 
 
 def is_checkout_message(message: str) -> bool:

@@ -52,37 +52,40 @@ class PaymentWorkflowState(TypedDict):
 async def select_payment_method_node(state: PaymentWorkflowState) -> PaymentWorkflowState:
     """
     Node 1: Ask user to select payment method.
-    Shows QUICK_REPLIES with payment options.
+    Shows QUICK_REPLIES with payment options (only if method not already selected).
     """
     session_id = state["session_id"]
     order_id = state["order_id"]
     amount = state["amount"]
+    method = state.get("method")
 
     logger.info(
         "payment_workflow_select_method",
         session_id=session_id,
         order_id=order_id,
-        amount=amount
+        amount=amount,
+        pre_selected_method=method
     )
 
-    # Send quick reply buttons for payment methods
-    emit_quick_replies(session_id, [
-        {
-            "label": "💳 Pay Online",
-            "action": "pay_online",
-            "description": "Secure payment via Razorpay (Card/UPI/NetBanking)"
-        },
-        {
-            "label": "💵 Cash",
-            "action": "pay_cash",
-            "description": "Pay cash on delivery or at counter"
-        },
-        {
-            "label": "💳 Card at Counter",
-            "action": "pay_card_counter",
-            "description": "Pay by card when you arrive"
-        }
-    ])
+    # Only show quick replies if no method is pre-selected
+    if not method:
+        emit_quick_replies(session_id, [
+            {
+                "label": "💳 Pay Online",
+                "action": "pay_online",
+                "description": "Secure payment via Razorpay (Card/UPI/NetBanking)"
+            },
+            {
+                "label": "💵 Cash",
+                "action": "pay_cash",
+                "description": "Pay cash on delivery or at counter"
+            },
+            {
+                "label": "💳 Card at Counter",
+                "action": "pay_card_counter",
+                "description": "Pay by card when you arrive"
+            }
+        ])
 
     # Update state to waiting for method selection
     update_payment_step(session_id, PaymentStep.SELECT_METHOD)

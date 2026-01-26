@@ -184,8 +184,13 @@ function aguiReducer(state, action) {
         ...state,
         messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
           id: Date.now(),
-          role: 'assistant',
-          content: `🔗 **Payment Link Generated**\n\nPlease complete your payment of ₹${action.payload.amount} using the link below:\n\n[Click here to pay](${action.payload.payment_link})\n\nPayment link: ${action.payload.payment_link}\n\nExpires at: ${new Date(action.payload.expires_at).toLocaleString()}`,
+          role: 'system',
+          type: 'payment_link',
+          data: {
+            payment_link: action.payload.payment_link,
+            amount: action.payload.amount,
+            expires_at: action.payload.expires_at,
+          },
           timestamp: new Date(),
         }],
       }

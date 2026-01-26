@@ -394,29 +394,56 @@ async def payment_callback(
                         amount=float(payment_order.order_amount) if payment_order.order_amount else 0
                     )
 
+                    # Update Redis payment state so payment_handler stops intercepting
+                    if session_id:
+                        try:
+                            from app.services.payment_state_service import mark_payment_success as _mark_success
+                            _mark_success(session_id, razorpay_payment_id or "")
+                        except Exception as e:
+                            logger.warning("mark_payment_success_failed", session_id=session_id, error=str(e))
+
                     # Send WebSocket notification to chat
+                    # NOTE: Must send directly via WebSocket (not AGUI event queue)
+                    # because the agui_task consumer has already exited after the
+                    # previous message cycle's RUN_FINISHED.
                     if source == "chat" and session_id:
                         try:
-                            from app.core.agui_events import emit_payment_success
+                            from app.core.agui_events import PaymentSuccessEvent
+                            from app.api.routes.chat import websocket_manager
+                            import json as _json
 
-                            # Emit payment success card with quick replies
-                            emit_payment_success(
-                                session_id=session_id,
+                            order_number = str(order.order_invoice_number) if order and order.order_invoice_number else str(payment_order.order_id)
+                            amount = float(payment_order.order_amount) if payment_order.order_amount else 0
+
+                            # Build the AGUI event directly
+                            event = PaymentSuccessEvent(
                                 order_id=str(payment_order.order_id),
-                                order_number=str(order.order_invoice_number) if order and order.order_invoice_number else str(payment_order.order_id),
-                                amount=float(payment_order.order_amount) if payment_order.order_amount else 0,
+                                order_number=order_number,
+                                amount=amount,
                                 payment_id=razorpay_payment_id or "",
-                                order_type="takeaway",  # TODO: Get from order
+                                order_type="takeaway",
                                 quick_replies=[
                                     {"label": "📄 View Receipt", "action": "view_receipt"},
                                     {"label": "🍽️ Order More", "action": "order_more"}
                                 ]
                             )
 
-                            logger.info(
-                                "payment_success_notification_sent",
+                            # Send directly via WebSocket (same format as agui_task)
+                            event_data = _json.loads(event.to_json())
+                            await websocket_manager.send_message_with_metadata(
                                 session_id=session_id,
-                                order_number=str(order.order_invoice_number) if order and order.order_invoice_number else str(payment_order.order_id)
+                                message="",
+                                message_type="agui_event",
+                                metadata={
+                                    "agui": event_data,
+                                    "target_session": session_id
+                                }
+                            )
+
+                            logger.info(
+                                "payment_success_sent_direct_websocket",
+                                session_id=session_id,
+                                order_number=order_number
                             )
                         except Exception as e:
                             logger.warning(

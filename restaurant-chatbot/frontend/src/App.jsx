@@ -16,6 +16,7 @@ import {
   SessionModal,
   PaymentMethodCard,
   PaymentSuccessCard,
+  PaymentLinkCard,
   VoiceModeBanner,
 } from './components'
 import { SearchResultsCard } from './components/SearchResultsCard'
@@ -56,7 +57,7 @@ function ChatInterface() {
     const isAuthFormDismiss = event.type === 'FORM_DISMISS'
 
     // Always process payment-related events
-    const isPaymentEvent = event.type === 'PAYMENT_METHOD_SELECTION'
+    const isPaymentEvent = event.type === 'PAYMENT_METHOD_SELECTION' || event.type === 'PAYMENT_LINK' || event.type === 'PAYMENT_SUCCESS'
 
     console.log('🔶 Event flags:', { isAuthForm, isAuthFormDismiss, isPaymentEvent, sessionReady: sessionReadyRef.current })
 
@@ -167,6 +168,8 @@ function ChatInterface() {
             onSelectMethod={handlePaymentMethodSelect}
           />
         )
+      case 'payment_link':
+        return <PaymentLinkCard key={message.id} data={message.data} />
       case 'payment_success':
         console.log('Rendering PaymentSuccessCard with data:', message.data)
         return (

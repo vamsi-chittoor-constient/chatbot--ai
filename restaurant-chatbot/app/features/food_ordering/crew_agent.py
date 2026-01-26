@@ -526,37 +526,28 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         logger.info("pending_order_created", session_id=session_id, order_id=order_display_id)
 
         # =====================================================================
-        # DETERMINISTIC PAYMENT WORKFLOW - Auto-triggered after checkout
+        # PAYMENT WORKFLOW - Triggered by checkout_handler after this returns
         # =====================================================================
-        # Trigger payment workflow (runs in background thread to avoid blocking)
-        from app.workflows.payment_workflow import run_payment_workflow
-        import threading
-
-        def trigger_payment_workflow():
-            """Run payment workflow in async context"""
-            import asyncio
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(
-                    run_payment_workflow(session_id, order_display_id, total)
-                )
-                loop.close()
-            except Exception as e:
-                logger.error("payment_workflow_trigger_failed", error=str(e), exc_info=True)
-
-        # Start payment workflow in background
-        thread = threading.Thread(target=trigger_payment_workflow, daemon=True)
-        thread.start()
+        # Store payment info in Redis so checkout_handler can trigger workflow
+        payment_info = {
+            "order_display_id": order_display_id,
+            "total": total,
+            "session_id": session_id,
+        }
+        redis_client.setex(
+            f"checkout_payment_info:{session_id}",
+            3600,
+            json.dumps(payment_info)
+        )
 
         logger.info(
-            "payment_workflow_triggered",
+            "checkout_payment_info_stored",
             session_id=session_id,
             order_id=order_display_id,
             amount=total
         )
 
-        # Return simple confirmation - payment workflow will handle the rest
+        # Return simple confirmation - checkout_handler will trigger payment workflow
         order_type_display = "dine-in" if order_type_clean == "dine_in" else "take-away"
         items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
         if len(items) > 3:
