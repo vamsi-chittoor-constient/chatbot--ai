@@ -188,14 +188,27 @@ class MenuPreloader:
             drink_keywords = ["drink", "drinks", "beverage", "beverages", "cold drink", "cool drink"]
             is_drink_search = any(keyword in query_lower for keyword in drink_keywords)
 
-            available_items = [
+            # Stage 1: Substring match (fast, precise)
+            matched_items = [
                 item for item in available_items
                 if (query_lower in item.get("name", "").lower() or
                     query_lower in item.get("description", "").lower() or
                     query_lower in item.get("subcategory", "").lower() or
-                    # If searching for drinks, match items in Beverages category
                     (is_drink_search and item.get("subcategory", "").lower() == "beverages"))
             ]
+
+            # Stage 2: Fuzzy match fallback for spelling variations
+            # (e.g. "paratha" vs "parota", "biriyani" vs "biryani")
+            if not matched_items and len(query_lower) >= 4:
+                from difflib import SequenceMatcher
+                matched_items = [
+                    item for item in available_items
+                    if SequenceMatcher(None, query_lower, item.get("name", "").lower()).ratio() >= 0.65
+                ]
+                if matched_items:
+                    logger.info("search_fuzzy_fallback", query=query, matches=len(matched_items))
+
+            available_items = matched_items
 
         # Apply meal period filtering/prioritization
         if meal_period:
@@ -249,27 +262,59 @@ class MenuPreloader:
 
     def find_item(self, name: str) -> Optional[Dict]:
         """
-        Find item by name (fuzzy match).
+        Find item by name with multi-stage matching.
 
-        Returns first match, or None if not found.
+        Stage 1: Exact/substring match (fast, precise)
+        Stage 2: Fuzzy match via SequenceMatcher (handles spelling variations
+                 like parota/paratha, biryani/biriyani, dosa/dosai)
+
+        Returns best match, or None if not found.
         """
         if not self._menu_cache:
             return None
 
-        name_lower = name.lower()
+        name_lower = name.lower().strip()
         name_singular = name_lower.rstrip('s') if name_lower.endswith('s') else name_lower
 
+        # Stage 1: Exact/substring match
         for item in self._menu_cache:
-            # Skip zero-price items
             if item.get("price", 0) <= 0:
                 continue
 
             item_name = item.get("name", "").lower()
             if (name_lower in item_name or
                 name_singular in item_name or
+                item_name in name_lower or
                 item_name == name_lower or
                 item_name == name_singular):
                 return item
+
+        # Stage 2: Fuzzy match (handles LLM "correcting" spellings)
+        # e.g. "aloo paratha" matches "Aloo Parota", "biriyani" matches "Biryani"
+        from difflib import SequenceMatcher
+
+        best_match = None
+        best_ratio = 0.0
+
+        for item in self._menu_cache:
+            if item.get("price", 0) <= 0:
+                continue
+
+            item_name = item.get("name", "").lower()
+            ratio = SequenceMatcher(None, name_lower, item_name).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_match = item
+
+        # Require at least 75% similarity to avoid false positives
+        if best_ratio >= 0.75 and best_match:
+            logger.info(
+                "find_item_fuzzy_match",
+                query=name,
+                matched=best_match.get("name"),
+                similarity=f"{best_ratio:.2f}"
+            )
+            return best_match
 
         return None
 

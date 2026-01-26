@@ -63,11 +63,9 @@ async def translate_response(text: str, target_language: str) -> str:
     if target_language == "English" or target_language not in ["Hindi", "Tamil"]:
         return text
 
-    # Quick check: if text already has Hindi/Tamil characters, skip translation
-    # Hindi: \u0900-\u097F, Tamil: \u0B80-\u0BFF
+    # Quick check: if text already has Tamil characters, skip translation
+    # (Hindi uses Roman script so no character-based detection needed)
     import re
-    if target_language == "Hindi" and re.search(r'[\u0900-\u097F]', text):
-        return text  # Already has Hindi characters
     if target_language == "Tamil" and re.search(r'[\u0B80-\u0BFF]', text):
         return text  # Already has Tamil characters
 
@@ -78,8 +76,8 @@ async def translate_response(text: str, target_language: str) -> str:
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
         if target_language == "Hindi":
-            system_prompt = """Translate to Hinglish (Hindi-English mix). Rules:
-- Use Devanagari for Hindi words
+            system_prompt = """Translate to Hinglish (Hindi-English mix written in Roman/English script). Rules:
+- Write ALL Hindi words in Roman/English letters only (e.g. "Aapka", "Kya", "hain") - NO Devanagari script
 - Keep English for: food items, numbers, prices (₹), technical terms
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
@@ -1615,16 +1613,34 @@ async def process_message_with_ai(
             conversation_history = []
 
         # =====================================================================
+        # STRIP LANGUAGE PREFIX for deterministic handlers
+        # =====================================================================
+        # The [RESPOND IN HINGLISH/TANGLISH...] prefix is only for the LLM crew.
+        # Deterministic handlers (checkout, payment) use exact/substring matching
+        # which breaks if the prefix is included (e.g., "view_receipt" != "[RESPOND IN...] view_receipt").
+        # Also, the prefix contains words like "order", "add" which trigger false positives
+        # in intent detection (e.g., checkout handler's has_ordering_intent check).
+        handler_message = message
+        if message.startswith("[RESPOND IN "):
+            bracket_end = message.find("] ", 1)
+            if bracket_end > 0:
+                handler_message = message[bracket_end + 2:].strip()
+
+        # =====================================================================
         # CHECKOUT WORKFLOW INTERCEPTOR - Handle checkout messages deterministically
         # =====================================================================
         from app.services.checkout_handler import handle_checkout_message
         from app.core.response_sanitizer import sanitize_response
 
-        checkout_response = await handle_checkout_message(session_id, message)
+        checkout_response = await handle_checkout_message(session_id, handler_message)
 
         if checkout_response:
             # SECURITY: Sanitize response before sending to frontend
             checkout_response = sanitize_response(checkout_response)
+
+            # Translate if non-English language selected
+            if language != "English" and language in ["Hindi", "Tamil"]:
+                checkout_response = await translate_response(checkout_response, language)
 
             # Checkout handler processed the message - stream via AGUI
             logger.info(
@@ -1666,11 +1682,24 @@ async def process_message_with_ai(
         # =====================================================================
         from app.services.payment_handler import handle_payment_message
 
-        payment_response = await handle_payment_message(session_id, message)
+        payment_response = await handle_payment_message(session_id, handler_message)
 
         if payment_response:
             # SECURITY: Sanitize response before sending to frontend
             payment_response = sanitize_response(payment_response)
+
+            # Translate if non-English language selected
+            # Preserve markdown links [text](url) so PDF receipt link stays intact
+            if language != "English" and language in ["Hindi", "Tamil"]:
+                import re as _re
+                _links = _re.findall(r'\[([^\]]+)\]\(([^)]+)\)', payment_response)
+                _temp = payment_response
+                for _i, (_txt, _url) in enumerate(_links):
+                    _temp = _temp.replace(f'[{_txt}]({_url})', f'__LINK_{_i}__')
+                _temp = await translate_response(_temp, language)
+                for _i, (_txt, _url) in enumerate(_links):
+                    _temp = _temp.replace(f'__LINK_{_i}__', f'[{_txt}]({_url})')
+                payment_response = _temp
 
             # Payment handler processed the message - stream via AGUI
             logger.info(

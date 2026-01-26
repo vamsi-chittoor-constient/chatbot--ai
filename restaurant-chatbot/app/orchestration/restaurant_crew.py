@@ -59,9 +59,8 @@ async def _translate_response(text: str, target_language: str) -> str:
     """
     import re
 
-    # Quick check: if text already has Hindi/Tamil characters, skip translation
-    if target_language == "Hindi" and re.search(r'[\u0900-\u097F]', text):
-        return text
+    # Quick check: if text already has Tamil characters, skip translation
+    # (Hindi uses Roman script so no character-based detection needed)
     if target_language == "Tamil" and re.search(r'[\u0B80-\u0BFF]', text):
         return text
 
@@ -71,8 +70,8 @@ async def _translate_response(text: str, target_language: str) -> str:
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
         if target_language == "Hindi":
-            system_prompt = """Translate to Hinglish (Hindi-English mix). Rules:
-- Use Devanagari for Hindi words
+            system_prompt = """Translate to Hinglish (Hindi-English mix written in Roman/English script). Rules:
+- Write ALL Hindi words in Roman/English letters only (e.g. "Aapka", "Kya", "hain") - NO Devanagari script
 - Keep English for: food items, numbers, prices (₹), technical terms
 - Be natural and conversational
 - Output ONLY the translation, no explanations"""
@@ -519,6 +518,13 @@ When customer says EXACTLY these phrases, you MUST call these tools:
 - "add beeda to cart" / "get me a beeda" / "one beeda please" → call add_to_cart("beeda", 1) DIRECTLY
 - Any request with "add" + item + quantity → use add_to_cart() DIRECTLY
 - "do you have beeda?" / "what is beeda?" / "show me beeda" → call search_menu(query="beeda") to show options
+
+🚨 PRESERVE EXACT ITEM NAMES - DO NOT CORRECT SPELLINGS 🚨
+When calling add_to_cart(), batch_add_to_cart(), or search_menu(), use the EXACT item name the customer typed.
+Do NOT "correct" or re-spell food names. The tools have fuzzy matching built in.
+- Customer says "aloo parota" → pass "aloo parota", NOT "aloo paratha"
+- Customer says "dosai" → pass "dosai", NOT "dosa"
+- Customer says "biriyani" → pass "biriyani", NOT "biryani"
 
 🚨 BATCH RULE - MULTIPLE ITEMS IN ONE MESSAGE:
 When the customer mentions 2+ DIFFERENT items in one message, ALWAYS use batch_add_to_cart() instead of calling add_to_cart() multiple times.

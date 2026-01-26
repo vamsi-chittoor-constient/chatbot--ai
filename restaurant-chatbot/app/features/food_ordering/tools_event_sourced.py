@@ -164,6 +164,27 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             item_name = found_item['name']
             price = float(found_item['price'])
 
+            # Check meal period availability before adding
+            from app.core.preloader import get_current_meal_period
+            meal_period = get_current_meal_period()
+            meal_types = found_item.get("meal_types", [])
+            if isinstance(meal_types, str):
+                meal_types = [mt.strip() for mt in meal_types.split(",")]
+
+            if meal_types and meal_period not in meal_types and "All Day" not in meal_types:
+                meal_time_info = {
+                    "Breakfast": "6 AM - 11 AM",
+                    "Lunch": "11 AM - 4 PM",
+                    "Dinner": "4 PM - 10 PM"
+                }
+                available_times = ", ".join(
+                    f"{m} ({meal_time_info.get(m, '')})" for m in meal_types if m != "All Day"
+                ) or "other meal times"
+                return (
+                    f"Sorry, '{item_name}' is only available during {available_times}. "
+                    f"It's currently {meal_period} time. Would you like to see what's available now?"
+                )
+
             # Add to cart (logs event + updates state) - tracker already created above
             cart = tracker.add_to_cart(
                 item_id=item_id,
@@ -462,17 +483,37 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                         # Emit SECOND card: MenuCard with currently available items
                         emit_menu_data(session_id, available_items[:30], meal_period)
 
-                    # Get meal periods from first unavailable item for better messaging
-                    first_item_meals = items_with_availability[0].get("meal_types", []) if items_with_availability else []
-                    if isinstance(first_item_meals, str):
-                        first_item_meals = [m.strip() for m in first_item_meals.split(",")]
-                    available_times = " & ".join([m for m in first_item_meals if m != "All Day"]) or "other times"
+                    # Collect ALL unique meal periods from unavailable items
+                    all_meal_types = set()
+                    for item in items_with_availability:
+                        mt = item.get("meal_types", [])
+                        if isinstance(mt, str):
+                            mt = [m.strip() for m in mt.split(",")]
+                        all_meal_types.update(m for m in mt if m != "All Day")
 
-                    # Build response that drives action
+                    meal_time_info = {
+                        "Breakfast": "6 AM - 11 AM",
+                        "Lunch": "11 AM - 4 PM",
+                        "Dinner": "4 PM - 10 PM"
+                    }
+                    available_times = ", ".join(
+                        f"{m} ({meal_time_info.get(m, '')})" for m in sorted(all_meal_types)
+                    ) or "other meal times"
+
+                    # Build explicit response - LLM must convey this to the user
                     if available_items:
-                        return f"I found {unavailable_count} '{query}' options - they're available during {available_times}. Meanwhile, here's what's available now - want to explore?"
+                        return (
+                            f"[SEARCH RESULTS DISPLAYED - {unavailable_count} '{query}' items, NONE available now] "
+                            f"'{query.title()}' is only available during {available_times}. "
+                            f"It's currently {meal_period} time, so these can't be ordered right now. "
+                            f"I've shown our {meal_period.lower()} menu with {len(available_items)} items you can order instead!"
+                        )
                     else:
-                        return f"I found {unavailable_count} '{query}' options, but they're only available during {available_times}. Check the card above to see when you can order them."
+                        return (
+                            f"[SEARCH RESULTS DISPLAYED - {unavailable_count} '{query}' items, NONE available now] "
+                            f"'{query.title()}' is only available during {available_times}. "
+                            f"It's currently {meal_period} time, so these can't be ordered right now."
+                        )
 
         except Exception as e:
             logger.error("search_menu_failed", error=str(e), session_id=session_id)
@@ -539,6 +580,17 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 found_item = preloader.find_item(item_to_find)
                 if not found_item:
                     failed_items.append(item_name_raw)
+                    continue
+
+                # Check meal period availability
+                from app.core.preloader import get_current_meal_period
+                meal_period = get_current_meal_period()
+                item_meal_types = found_item.get("meal_types", [])
+                if isinstance(item_meal_types, str):
+                    item_meal_types = [mt.strip() for mt in item_meal_types.split(",")]
+                if item_meal_types and meal_period not in item_meal_types and "All Day" not in item_meal_types:
+                    avail_times = ", ".join(m for m in item_meal_types if m != "All Day") or "other meal times"
+                    failed_items.append(f"{found_item['name']} (only {avail_times})")
                     continue
 
                 item_id = UUID(found_item['id'])
