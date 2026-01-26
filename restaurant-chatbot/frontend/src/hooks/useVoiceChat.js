@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-export function useVoiceChat(sessionId) {
+export function useVoiceChat(sessionId, onEvent) {
     const [isConnected, setIsConnected] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -122,6 +122,15 @@ export function useVoiceChat(sessionId) {
                 setIsAISpeaking(false);
                 // In continuous voice mode, microphone keeps running
                 // No need to restart anything
+                break;
+
+            case 'agui_event':
+                // Forward AG-UI events (menu cards, cart, search results, quick replies, etc.)
+                // to the same handler used by chat mode so cards render in the UI
+                if (data.agui && onEvent) {
+                    console.log('Voice AGUI event:', data.agui.type || data.agui);
+                    onEvent(data.agui);
+                }
                 break;
 
             case 'error':

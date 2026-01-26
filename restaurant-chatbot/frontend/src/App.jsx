@@ -230,7 +230,7 @@ function ChatInterface() {
     isConnected: isVoiceConnected,
     transcript,
     responseText
-  } = useVoiceChat(sessionId) // Use same session ID as chat WebSocket
+  } = useVoiceChat(sessionId, stableEventHandler) // Use same session ID + AG-UI handler as chat
 
   // Auto-connect voice when language changes or session is ready
   useEffect(() => {
