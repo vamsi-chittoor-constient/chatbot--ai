@@ -536,6 +536,12 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             "created_at": datetime.now().isoformat()
         }
         redis_client.setex(pending_order_key, 3600, json.dumps(pending_order))  # Expire in 1 hour
+
+        # Save to order history so receipt tool can find this order later
+        history_key = f"order_history:{session_id}"
+        redis_client.lpush(history_key, order_display_id)
+        redis_client.expire(history_key, 86400 * 7)  # 7 days
+
         logger.info("pending_order_created", session_id=session_id, order_id=order_display_id)
 
         # =====================================================================
@@ -704,7 +710,7 @@ def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
             with conn.cursor() as cur:
                 # Get order details
                 cur.execute("""
-                    SELECT o.order_id, o.order_display_id, o.total_amount,
+                    SELECT o.order_id, o.order_invoice_number, o.total_amount,
                            o.created_at, ost.order_status_name as status,
                            ott.order_type_name as order_type,
                            rc.restaurant_name
@@ -712,7 +718,7 @@ def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
                     LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
                     LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
                     LEFT JOIN restaurant_config rc ON o.restaurant_id = rc.id
-                    WHERE o.order_display_id = %s
+                    WHERE o.order_invoice_number = %s
                 """, (order_display_id,))
                 order = cur.fetchone()
 
@@ -802,12 +808,12 @@ def _get_order_status_impl(order_id: str, session_id: str) -> str:
         with SyncDBConnection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT o.order_display_id, ost.order_status_name,
+                    SELECT o.order_invoice_number, ost.order_status_name,
                            ott.order_type_name, o.created_at, o.total_amount
                     FROM orders o
                     LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
                     LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
-                    WHERE o.order_display_id = %s
+                    WHERE o.order_invoice_number = %s
                 """, (order_display_id,))
                 order = cur.fetchone()
 
@@ -845,12 +851,12 @@ def _get_order_history_impl(session_id: str) -> str:
             with conn.cursor() as cur:
                 placeholders = ','.join(['%s'] * len(order_ids))
                 cur.execute(f"""
-                    SELECT o.order_display_id, ost.order_status_name,
+                    SELECT o.order_invoice_number, ost.order_status_name,
                            ott.order_type_name, o.created_at, o.total_amount
                     FROM orders o
                     LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
                     LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
-                    WHERE o.order_display_id IN ({placeholders})
+                    WHERE o.order_invoice_number IN ({placeholders})
                     ORDER BY o.created_at DESC
                 """, tuple(oid.decode() if isinstance(oid, bytes) else oid for oid in order_ids))
                 orders = cur.fetchall()

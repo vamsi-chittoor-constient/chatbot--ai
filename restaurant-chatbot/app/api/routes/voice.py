@@ -292,10 +292,16 @@ async def process_speech_segment(
                 "lassi, chai, menu, cart, order, checkout, table, reservation, booking"
             ),
             "Hindi": (
+                # Food items in Devanagari
                 "दोसा, इडली, वड़ा, सांभर, चटनी, मसाला डोसा, पराठा, बिरयानी, "
                 "पनीर, बटर चिकन, नान, रोटी, दाल, तंदूरी, टिक्का, कोरमा, "
-                "लस्सी, चाय, मेनू, कार्ट, ऑर्डर, चेकआउट, टेबल, बुकिंग, "
-                "खाना, पीना, दो, तीन, चार, एक, कितना, दीजिए, चाहिए"
+                "लस्सी, चाय, एप्पल जूस, बादाम कुल्फी, रवा डोसा, "
+                # Action words & quantities in Hindi
+                "मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
+                "एक, दो, तीन, चार, पांच, कितना, दीजिए, चाहिए, हटाओ, "
+                "डाइन इन, टेक अवे, पेमेंट, कैश, ऑनलाइन, "
+                # Common Hinglish action words (transliterated in Devanagari)
+                "ऐड, रिमूव, सर्च, शो, व्यू, बीडा, अप्पलम"
             ),
             "Tamil": (
                 "தோசை, இட்லி, வடை, சாம்பார், சட்னி, மசாலா தோசை, பரோட்டா, பிரியாணி, "
@@ -669,14 +675,17 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
 
         try:
             # Process with agent
-            # Pass language so translation happens in crew (before AGUI streaming)
+            # VOICE MODE: Always pass language="English" to crew so it does NOT translate.
+            # Translation happens ONCE in translate_for_tts() below (English → target language).
+            # Passing the real language here caused double-translation: crew translated to
+            # Roman Hinglish, then translate_for_tts translated again → inconsistent output.
             response, _ = await process_with_agui_streaming(
                 user_message=text,
                 session_id=session_id,
                 conversation_history=conversation_history,
                 emitter=emitter,
                 user_id=user_id,
-                language=language
+                language="English"
             )
 
             # Flush any remaining staged events to voice WebSocket
