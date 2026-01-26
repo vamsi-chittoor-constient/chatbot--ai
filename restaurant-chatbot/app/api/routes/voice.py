@@ -646,7 +646,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                         event_data = _json.loads(event_json)
                         # Defer QUICK_REPLIES so they arrive after response_text
                         if event_data.get("type") == "QUICK_REPLIES":
-                            deferred_quick_replies.append(event_data.get("options", []))
+                            # QuickRepliesEvent serializes as "replies", not "options"
+                            opts = event_data.get("replies") or event_data.get("options") or []
+                            if opts:  # Skip empty arrays to prevent overwriting valid ones
+                                deferred_quick_replies.append(opts)
                             continue
                         await websocket.send_json({
                             "type": "agui_event",
@@ -700,7 +703,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                     event_data = _json.loads(event_json)
                     # Defer QUICK_REPLIES so they arrive after response_text
                     if event_data.get("type") == "QUICK_REPLIES":
-                        deferred_quick_replies.append(event_data.get("options", []))
+                        # QuickRepliesEvent serializes as "replies", not "options"
+                        opts = event_data.get("replies") or event_data.get("options") or []
+                        if opts:  # Skip empty arrays to prevent overwriting valid ones
+                            deferred_quick_replies.append(opts)
                         continue
                     await websocket.send_json({
                         "type": "agui_event",
