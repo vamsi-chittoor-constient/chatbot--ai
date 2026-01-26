@@ -42,14 +42,17 @@ class Order(Base):
     )
 
     # Foreign Keys
+    # NOTE: FK to restaurant_table removed from SQLAlchemy model because the
+    # Restaurant model uses table "restaurant_config", not "restaurant_table".
+    # The DB-level FK constraint still exists.
     restaurant_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
-        ForeignKey("restaurant_table.restaurant_id", ondelete="SET NULL"),
         nullable=True
     )
+    # NOTE: FK to table_booking_info removed from SQLAlchemy model because there is
+    # no TableBookingInfo model class loaded. The DB-level FK constraint still exists.
     table_booking_id: Mapped[Optional[UUID]] = mapped_column(
         UUID_TYPE(as_uuid=True),
-        ForeignKey("table_booking_info.table_booking_id", ondelete="SET NULL"),
         nullable=True
     )
     order_type_id: Mapped[Optional[UUID]] = mapped_column(
