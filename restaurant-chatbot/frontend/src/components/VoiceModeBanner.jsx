@@ -28,17 +28,17 @@ export function VoiceModeBanner({
   const { text, icon: Icon, color, animate } = getStateInfo();
 
   return (
-    <div className="bg-gradient-to-r from-indigo-900/90 to-purple-900/90 border-b border-purple-500/30 px-4 py-2">
+    <div className="bg-gradient-to-r from-red-600 to-orange-600 border-b border-red-500/30 px-4 py-3 shadow-md">
       <div className="flex items-center justify-between max-w-3xl mx-auto">
         {/* Left: Voice status */}
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-full ${isUserSpeaking ? 'bg-red-500/20' : 'bg-white/10'}`}>
+          <div className={`p-2 rounded-full ${isUserSpeaking ? 'bg-white/30' : 'bg-white/10'}`}>
             <Icon
-              size={18}
-              className={`${color} ${animate ? 'animate-pulse' : ''}`}
+              size={20}
+              className={`text-white ${animate ? 'animate-pulse' : ''}`}
             />
           </div>
-          <span className="text-sm font-medium text-white/90">{text}</span>
+          <span className="text-sm font-semibold text-white">{text}</span>
 
           {/* Audio visualizer dots */}
           {(isUserSpeaking || isAISpeaking) && (
@@ -46,7 +46,7 @@ export function VoiceModeBanner({
               {[...Array(4)].map((_, i) => (
                 <div
                   key={i}
-                  className={`w-1 rounded-full ${isUserSpeaking ? 'bg-red-400' : 'bg-green-400'}`}
+                  className="w-1 rounded-full bg-white"
                   style={{
                     height: `${8 + Math.random() * 12}px`,
                     animation: 'pulse 0.5s ease-in-out infinite',
@@ -61,10 +61,10 @@ export function VoiceModeBanner({
         {/* Right: Exit button */}
         <button
           onClick={onExitVoiceMode}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors text-sm"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-white hover:shadow-lg transition-all text-sm font-medium"
         >
-          <X size={14} />
-          <span>Exit Voice</span>
+          <X size={16} />
+          <span>Exit Voice Mode</span>
         </button>
       </div>
     </div>

@@ -1,5 +1,8 @@
 import React from 'react'
 import { Mic, MicOff, Volume2, Loader2 } from 'lucide-react'
+import Lottie from 'lottie-react'
+import voicecommunication from '../animations/voicecommunication.json'
+import siri from '../animations/siri.json'
 
 export const VoiceModeUI = ({
   isRecording,
@@ -30,11 +33,11 @@ export const VoiceModeUI = ({
       borderColor: 'border-gray-600'
     },
     'user-speaking': {
-      icon: <Mic size={48} className="text-accent animate-pulse" />,
+      icon: <Mic size={48} className="text-red-500 animate-pulse" />,
       title: '🗣️ Listening',
       subtitle: 'Speak naturally, I\'ll detect when you finish',
-      bgColor: 'bg-accent/10',
-      borderColor: 'border-accent'
+      bgColor: 'bg-red-500/10',
+      borderColor: 'border-red-500'
     },
     processing: {
       icon: <Loader2 size={48} className="text-yellow-500 animate-spin" />,
@@ -83,24 +86,32 @@ export const VoiceModeUI = ({
             </p>
           </div>
 
-          {/* Visual Indicator */}
-          <div className="flex justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div
-                key={i}
-                className={`w-2 h-12 rounded-full transition-all ${
-                  state === 'user-speaking'
-                    ? 'bg-accent animate-pulse'
-                    : state === 'speaking'
-                    ? 'bg-green-500 animate-pulse'
-                    : 'bg-gray-700'
-                }`}
-                style={{
-                  animationDelay: `${i * 0.1}s`,
-                  height: state === 'user-speaking' || state === 'speaking' ? `${20 + Math.random() * 30}px` : '12px'
-                }}
+          {/* Visual Indicator - Lottie Animation */}
+          <div className="flex justify-center mb-6">
+            {(state === 'user-speaking' || state === 'listening') && (
+              <Lottie
+                animationData={voicecommunication}
+                loop={true}
+                className="h-24 w-full"
               />
-            ))}
+            )}
+            {state === 'speaking' && (
+              <Lottie
+                animationData={siri}
+                loop={true}
+                className="h-24 w-full"
+              />
+            )}
+            {state === 'idle' && (
+              <div className="flex justify-center gap-2">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div
+                    key={i}
+                    className="w-2 h-3 rounded-full bg-gray-700"
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Transcript Display */}

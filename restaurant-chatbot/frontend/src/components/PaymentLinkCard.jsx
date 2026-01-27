@@ -9,50 +9,42 @@ export function PaymentLinkCard({ data }) {
     : ''
 
   return (
-    <div className="w-full max-w-sm bg-chat-secondary rounded-2xl overflow-hidden shadow-lg border border-chat-border my-2 animate-fade-in-up">
+    <div className="w-full max-w-sm bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200 rounded-xl shadow-sm overflow-hidden my-3 animate-fade-in-up">
       {/* Header */}
-      <div className="bg-chat-tertiary px-5 py-4 border-b border-chat-border">
-        <div className="flex justify-between items-start">
+      <div className="px-5 py-4">
+        <div className="flex justify-between items-start mb-3">
           <div>
-            <h3 className="font-semibold text-white/90 text-lg">Complete Payment</h3>
-            <p className="text-sm text-gray-400 mt-1">Secure online payment</p>
+            <h3 className="font-semibold text-gray-800 text-lg">Complete Payment</h3>
+            <p className="text-sm text-gray-600 mt-1">Secure online payment</p>
           </div>
           <div className="text-right">
-            <span className="text-2xl font-bold text-white tracking-tight">
+            <span className="text-3xl font-bold text-red-600 tracking-tight">
               ₹{amount}
             </span>
           </div>
         </div>
-      </div>
 
-      {/* Pay Button */}
-      <div className="px-5 py-5">
+        {/* Pay Button */}
         <a
           href={payment_link}
           target="_blank"
           rel="noopener noreferrer"
-          className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/90 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 shadow-md hover:shadow-lg"
+          className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-3.5 px-6 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
         >
-          <ExternalLink size={18} />
-          Pay ₹{amount} Now
+          <Shield size={18} />
+          Pay ₹{amount} Now with Razorpay
         </a>
       </div>
 
       {/* Footer */}
-      <div className="border-t border-chat-border px-4 py-3 bg-chat-tertiary">
-        <div className="flex items-center justify-between text-xs text-gray-500">
-          {formattedExpiry && (
-            <span className="flex items-center gap-1">
-              <Clock size={12} />
-              Expires: {formattedExpiry}
-            </span>
-          )}
-          <span className="flex items-center gap-1">
-            <Shield size={12} />
-            Powered by Razorpay
-          </span>
+      {formattedExpiry && (
+        <div className="border-t border-red-200 px-5 py-3 bg-red-50/50">
+          <div className="flex items-center justify-center text-xs text-gray-600">
+            <Clock size={12} className="mr-1" />
+            Expires: {formattedExpiry}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

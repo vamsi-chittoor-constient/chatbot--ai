@@ -1,5 +1,7 @@
 import React from 'react'
-import { User, Bot } from 'lucide-react'
+import { User } from 'lucide-react'
+import Lottie from 'lottie-react'
+import aibot from '../animations/aibot.json'
 
 /**
  * Parse basic markdown inline elements into React nodes.
@@ -67,17 +69,37 @@ export const ChatMessage = ({ message }) => {
   const isUser = message.role === 'user'
 
   return (
-    <div className={`p-5 rounded-lg animate-fadeIn ${isUser ? 'bg-chat-user' : 'bg-chat-assistant'}`}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`w-7 h-7 rounded flex items-center justify-center ${isUser ? 'bg-purple-600' : 'bg-accent'}`}>
-          {isUser ? <User size={16} /> : <Bot size={16} />}
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-fadeIn`}>
+      <div className="flex items-start max-w-[85%]">
+        {/* Bot Lottie Animation Avatar */}
+        {!isUser && (
+          <Lottie
+            animationData={aibot}
+            loop={true}
+            className="w-14 h-14 flex-shrink-0"
+          />
+        )}
+
+        {/* Message Bubble with their styling */}
+        <div className={`
+          ${isUser
+            ? 'bg-red-600 text-white rounded-xl p-3 ml-0'
+            : 'bg-white text-gray-900 border border-gray-200 rounded-xl p-3 ml-2'
+          }
+        `}>
+          <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+            {renderMarkdown(message.content)}
+            {message.isStreaming && (
+              <span className="inline-block w-2 h-4 bg-red-500 ml-1 animate-pulse-slow" />
+            )}
+          </div>
         </div>
-        <span className="font-semibold text-sm">{isUser ? 'You' : 'Assistant'}</span>
-      </div>
-      <div className="text-[15px] leading-relaxed whitespace-pre-wrap">
-        {renderMarkdown(message.content)}
-        {message.isStreaming && (
-          <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse-slow" />
+
+        {/* User Icon */}
+        {isUser && (
+          <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center ml-2 flex-shrink-0">
+            <User size={20} className="text-white" />
+          </div>
         )}
       </div>
     </div>
