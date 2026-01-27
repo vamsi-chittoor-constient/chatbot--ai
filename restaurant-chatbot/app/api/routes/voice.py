@@ -284,7 +284,8 @@ async def process_speech_segment(
         # Using vocabulary hint in the TARGET language improves accuracy
         # DO NOT use English hints for Hindi/Tamil - it causes hallucinations!
 
-        # Language-specific vocabulary hints
+        # Code-switching aware prompts with natural language guidance
+        # These prompts tell Whisper to EXPECT mixed language and preserve English words
         vocabulary_hints = {
             "English": (
                 "dosa, idli, vada, sambar, chutney, masala dosa, parota, paratha, biryani, "
@@ -292,35 +293,59 @@ async def process_speech_segment(
                 "lassi, chai, menu, cart, order, checkout, table, reservation, booking"
             ),
             "Hindi": (
-                # Food items in Devanagari
-                "दोसा, इडली, वड़ा, सांभर, चटनी, मसाला डोसा, पराठा, बिरयानी, "
-                "पनीर, बटर चिकन, नान, रोटी, दाल, तंदूरी, टिक्का, कोरमा, "
-                "लस्सी, चाय, एप्पल जूस, बादाम कुल्फी, रवा डोसा, "
-                # Action words & quantities in Hindi
-                "मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
-                "एक, दो, तीन, चार, पांच, कितना, दीजिए, चाहिए, हटाओ, "
-                "डाइन इन, टेक अवे, पेमेंट, कैश, ऑनलाइन, "
-                # Common Hinglish action words (transliterated in Devanagari)
-                "ऐड, रिमूव, सर्च, शो, व्यू, बीडा, अप्पलम"
+                "This conversation mixes Hindi and English (Hinglish). "
+                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "menu, cart, add, remove, checkout, view, show, search, "
+                "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
+                "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
+                "dine in, take away, takeaway, payment, cash, online, beeda, appalam. "
+                "Common Hindi phrases: मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
+                "एक, दो, तीन, चार, पांच, छह, सात, आठ, नौ, दस, "
+                "कितना, कितने, चाहिए, दीजिए, दीजिये, हटाओ, दिखाओ, डाइन इन, टेक अवे।"
             ),
             "Tamil": (
-                "தோசை, இட்லி, வடை, சாம்பார், சட்னி, மசாலா தோசை, பரோட்டா, பிரியாணி, "
-                "பன்னீர், நான், ரொட்டி, தால், தந்தூரி, டிக்கா, "
-                "லஸ்ஸி, டீ, மெனு, கார்ட், ஆர்டர், செக்அவுட், டேபிள், புக்கிங், "
-                "சாப்பாடு, இரண்டு, மூன்று, நான்கு, ஒன்று, எவ்வளவு, வேண்டும்"
+                "This conversation mixes Tamil and English (Tanglish). "
+                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "menu, cart, add, remove, checkout, view, show, "
+                "apple juice, orange juice, masala dosa, idli, vada, biryani, paneer. "
+                "Common Tamil phrases: மெனு காட்டுங்கள், கார்ட், ஆர்டர், செக்அவுட், "
+                "இரண்டு, மூன்று, நான்கு, ஐந்து, எவ்வளவு, வேண்டும், சாப்பாடு।"
             ),
         }
 
-        # Get language-specific hint (or empty for unsupported languages)
+        # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
+
+        # For code-switching languages (Hindi, Tamil), use auto-detect instead of forcing
+        # This allows Whisper to naturally handle mixed language within utterances
+        use_auto_detect = language in ["Hindi", "Tamil"]
 
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language=language_code_map.get(language, "en"),
-            prompt=vocabulary_hint if vocabulary_hint else None,  # Only use hint if available
-            temperature=0.0,  # Lower temperature to reduce hallucinations
+            # Auto-detect for code-switching languages, explicit for others
+            language=None if use_auto_detect else language_code_map.get(language, "en"),
+            # Force transcription (don't translate to English)
+            task="transcribe",
+            # Multi-language aware prompt guides decoder to preserve English words
+            prompt=vocabulary_hint if vocabulary_hint else None,
+            # Higher temperature (0.2) allows flexibility for code-switching
+            # Still conservative enough to avoid hallucinations
+            temperature=0.2 if use_auto_detect else 0.0,
+            # Get detailed response with confidence scores for quality validation
+            response_format="verbose_json",
         )
+
+        # Validate transcription quality using confidence scores
+        if hasattr(transcription, 'avg_logprob'):
+            if transcription.avg_logprob < -0.8:
+                logger.warning(
+                    "Low confidence transcription detected",
+                    session_id=session_id,
+                    language=language,
+                    avg_logprob=transcription.avg_logprob,
+                    text_preview=transcription.text[:50] if len(transcription.text) > 50 else transcription.text
+                )
 
         transcript_text = transcription.text.strip()
 
