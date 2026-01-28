@@ -288,9 +288,19 @@ async def process_speech_segment(
         # These prompts tell Whisper to EXPECT mixed language and preserve English words
         vocabulary_hints = {
             "English": (
-                "dosa, idli, vada, sambar, chutney, masala dosa, parota, paratha, biryani, "
-                "paneer, butter chicken, naan, roti, dal, tandoori, tikka, korma, vindaloo, "
-                "lassi, chai, menu, cart, order, checkout, table, reservation, booking"
+                # Common ordering actions
+                "add, remove, delete, cancel, order, checkout, cart, menu, show, search, "
+                "dine in, take away, takeaway, payment, cash, online, booking, reservation, "
+                # Indian food staples
+                "dosa, dosai, masala dosa, rava dosa, onion dosa, ghee dosa, podi dosa, "
+                "idli, vada, sambar, chutney, parota, paratha, biryani, "
+                "paneer, butter chicken, naan, roti, dal, tandoori, tikka, korma, omelette, "
+                # Beverages & Aswins brand
+                "Aswins, amla juice, apple juice, orange juice, nannari juice, rose milk, "
+                "badam gheer, badam kulfi, cold coffee, mango drink, jigardhanda, ilaneer payasam, "
+                "lassi, chai, "
+                # Add-ons & extras
+                "appalam, beeda"
             ),
             "Hindi": (
                 "This conversation mixes Hindi and English (Hinglish). "
