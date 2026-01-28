@@ -12,6 +12,7 @@ from typing import Optional
 import structlog
 import asyncio
 import base64
+import collections
 import io
 import json
 import os
@@ -90,6 +91,10 @@ async def voice_chat_websocket(
     # Audio buffer for VAD processing
     audio_buffer = []  # List of PCM chunks
     speech_buffer = []  # Buffer for detected speech
+    # Pre-buffer: rolling window of recent chunks (10 × 32ms = 320ms lookback)
+    # Captures soft speech onsets (e.g., "I" in "I like") that fall below
+    # SPEECH_THRESHOLD and would otherwise be clipped by the VAD.
+    pre_buffer = collections.deque(maxlen=10)
     is_speaking = False
     silence_frames = 0  # Counter for consecutive silent frames (hangover mechanism)
     # Mutable state container for sharing between main loop and background tasks
@@ -145,11 +150,12 @@ async def voice_chat_websocket(
                         silence_frames = 0
 
                         if not is_speaking:
-                            # Speech started
+                            # Speech started — seed with pre-buffer to recover
+                            # soft onsets (e.g. "I" in "I like to take away")
                             is_speaking = True
-                            speech_buffer = []
+                            speech_buffer = list(pre_buffer)
                             await websocket.send_json({"type": "speech_started"})
-                            logger.info("voice_speech_started", session_id=session_id, language=language)
+                            logger.info("voice_speech_started", session_id=session_id, language=language, pre_buffer_chunks=len(speech_buffer))
 
                         # Add to speech buffer
                         speech_buffer.append(audio_data)
@@ -188,6 +194,10 @@ async def voice_chat_websocket(
                         # Keep buffering if speaking, don't increment silence counter
                         if is_speaking:
                             speech_buffer.append(audio_data)
+
+                    # Update pre-buffer AFTER VAD decision so it contains prior
+                    # chunks (not the current one) when speech onset is detected.
+                    pre_buffer.append(audio_data)
 
             except WebSocketDisconnect:
                 logger.info("voice_websocket_disconnected", session_id=session_id)

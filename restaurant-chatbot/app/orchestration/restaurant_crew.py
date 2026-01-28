@@ -187,18 +187,31 @@ def execute_unrealized_tool_call(tool_call: dict, tools: list) -> str | None:
         return None
 
     try:
-        # CrewAI tools have a .run() method or can be called directly
-        if hasattr(matching_tool, 'run'):
-            if isinstance(action_input, dict):
-                result = matching_tool.run(**action_input)
+        # Run tool in a THREAD so that run_async() inside tools sees no running
+        # event loop and properly schedules on _MAIN_LOOP. Without this, calling
+        # tool.run() from the main loop thread causes run_async() to create a new
+        # loop, breaking DB connections tied to the main loop.
+        import concurrent.futures
+
+        def _run_tool():
+            if hasattr(matching_tool, 'run'):
+                if isinstance(action_input, dict):
+                    return matching_tool.run(**action_input)
+                else:
+                    return matching_tool.run(action_input)
+            elif callable(matching_tool):
+                if isinstance(action_input, dict):
+                    return matching_tool(**action_input)
+                else:
+                    return matching_tool(action_input)
             else:
-                result = matching_tool.run(action_input)
-        elif callable(matching_tool):
-            if isinstance(action_input, dict):
-                result = matching_tool(**action_input)
-            else:
-                result = matching_tool(action_input)
-        else:
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_run_tool)
+            result = future.result(timeout=30)
+
+        if result is None:
             logger.warning("unrealized_tool_not_callable", action=action_name)
             return None
 
