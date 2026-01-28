@@ -103,6 +103,15 @@ class ResponseSanitizer:
             response = re.sub(r'\[DEBUG\]', '', response)
             response = re.sub(r'\[INTERNAL\]', '', response)
 
+            # Step 4b: Remove internal food-ordering context markers
+            # These are meant for the LLM agent, not for user display.
+            response = re.sub(
+                r'\[(?:SEARCH RESULTS DISPLAYED|MENU CARD DISPLAYED|MENU DISPLAYED'
+                r'|CART CARD DISPLAYED|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED'
+                r'|INVALID QUANTITY|INVALID INSTRUCTIONS)[^\]]*\]\s*',
+                '', response
+            )
+
             # Step 5: Ensure response is not empty after sanitization
             response = response.strip()
             if not response or len(response) < 5:
