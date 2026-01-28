@@ -325,8 +325,6 @@ async def process_speech_segment(
             file=audio_file,
             # Auto-detect for code-switching languages, explicit for others
             language=None if use_auto_detect else language_code_map.get(language, "en"),
-            # Force transcription (don't translate to English)
-            task="transcribe",
             # Multi-language aware prompt guides decoder to preserve English words
             prompt=vocabulary_hint if vocabulary_hint else None,
             # Higher temperature (0.2) allows flexibility for code-switching
