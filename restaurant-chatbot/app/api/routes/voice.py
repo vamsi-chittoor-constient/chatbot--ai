@@ -259,20 +259,26 @@ async def process_speech_segment(
                 state["is_processing"] = False
             return  # Too short, probably noise
 
-        # ----- Audio preprocessing: noise gate + normalization -----
-        # Convert PCM bytes to int16 numpy array for processing
+        # ----- Audio preprocessing: spectral noise reduction + normalization -----
+        import noisereduce as nr
+
         samples = np.frombuffer(combined_audio, dtype=np.int16).astype(np.float32)
 
-        # Noise gate: zero out samples below threshold to kill background hum
-        noise_threshold = 300  # ~1% of int16 range; tweak if too aggressive
-        samples[np.abs(samples) < noise_threshold] = 0
+        # Spectral noise reduction: analyses noise profile and removes it
+        # while preserving speech frequencies (far better than simple amplitude gate)
+        cleaned = nr.reduce_noise(
+            y=samples,
+            sr=16000,
+            stationary=True,    # Assume stationary background noise (fan, AC, hum)
+            prop_decrease=0.75,  # Remove 75% of detected noise; keep some naturalness
+        )
 
-        # Normalize: scale to use full dynamic range so Whisper gets consistent levels
-        peak = np.max(np.abs(samples))
+        # Normalize to consistent volume for Whisper
+        peak = np.max(np.abs(cleaned))
         if peak > 0:
-            samples = samples * (32000.0 / peak)  # leave a bit of headroom below 32767
+            cleaned = cleaned * (32000.0 / peak)
 
-        preprocessed_audio = samples.astype(np.int16).tobytes()
+        preprocessed_audio = cleaned.astype(np.int16).tobytes()
 
         # Convert PCM to WAV format for Whisper (16kHz is fine for Whisper)
         wav_data = pcm_to_wav(preprocessed_audio, sample_rate=16000)

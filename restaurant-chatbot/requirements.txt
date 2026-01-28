@@ -53,6 +53,7 @@ razorpay
 torch
 numpy
 openai
+noisereduce         # Spectral noise reduction for cleaner Whisper input
 
 # Voice Activity Detection (VAD) - Select via VAD_ENGINE env var
 # Default: silero (best multilingual support)
