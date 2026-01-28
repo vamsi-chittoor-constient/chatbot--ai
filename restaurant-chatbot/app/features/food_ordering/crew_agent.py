@@ -2902,13 +2902,28 @@ def create_update_quantity_tool(session_id: str):
             if not items:
                 return "Cart is empty. Nothing to update."
 
-            # Find and update item
+            # Find and update item — prefer exact match over substring
             updated = False
+            target_item = None
+            # Pass 1: exact match
             for item in items:
-                if item_name_clean in item.get("name", "").lower():
-                    old_qty = item.get("quantity", 1)
-                    item["quantity"] = new_quantity
-                    updated = True
+                if item.get("name", "").lower() == item_name_clean:
+                    target_item = item
+                    break
+            # Pass 2: substring match, prefer longest name (most specific)
+            if not target_item:
+                best_len = 0
+                for item in items:
+                    name_lower = item.get("name", "").lower()
+                    if item_name_clean in name_lower or name_lower in item_name_clean:
+                        if len(name_lower) > best_len:
+                            best_len = len(name_lower)
+                            target_item = item
+            if target_item:
+                item = target_item
+                old_qty = item.get("quantity", 1)
+                item["quantity"] = new_quantity
+                updated = True
 
                     # Save cart (sync Redis)
                     cart_data['items'] = items
