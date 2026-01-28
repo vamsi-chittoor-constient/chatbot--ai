@@ -18,6 +18,7 @@ import {
   PaymentSuccessCard,
   PaymentLinkCard,
   VoiceModeBanner,
+  VoiceModeUI,
 } from './components'
 import { SearchResultsCard } from './components/SearchResultsCard'
 import PaymentSuccess from './components/PaymentSuccess'
@@ -300,52 +301,67 @@ function ChatInterface() {
         />
       )}
 
-      {/* Chat Container - Always visible */}
-      <main
-        ref={chatContainerRef}
-        className="flex-1 overflow-y-auto"
-      >
-        <div className="max-w-3xl mx-auto p-5 space-y-4">
-          {/* Welcome Message */}
-          {messages.length === 0 && !isStreaming && (
-            <div className="text-center py-20">
-              <h2 className="text-2xl font-semibold mb-4">Welcome!</h2>
-              <p className="text-gray-400 mb-6">
-                I'm your AI restaurant assistant. I can help you with:
-              </p>
-              <ul className="text-gray-400 space-y-2 mb-8">
-                <li>Browse our menu and recommendations</li>
-                <li>Add items to your cart</li>
-                <li>Place orders for dine-in or takeaway</li>
-                <li>Track your order status</li>
-              </ul>
-              <QuickReplies
-                options={['Show menu', 'View my cart', "What's popular?"]}
-                onSelect={handleQuickReply}
-              />
+      {/* Voice Mode: Full-screen voice UI replaces chat */}
+      {voiceModeEnabled ? (
+        <VoiceModeUI
+          isRecording={isVoiceRecording}
+          isProcessing={isVoiceProcessing}
+          isUserSpeaking={isUserSpeaking}
+          isAISpeaking={isAISpeaking}
+          onExitVoiceMode={toggleVoiceMode}
+          transcript={transcript}
+          responseText={responseText}
+        />
+      ) : (
+        <>
+          {/* Chat Container */}
+          <main
+            ref={chatContainerRef}
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="max-w-3xl mx-auto p-5 space-y-4">
+              {/* Welcome Message */}
+              {messages.length === 0 && !isStreaming && (
+                <div className="text-center py-20">
+                  <h2 className="text-2xl font-semibold mb-4">Welcome!</h2>
+                  <p className="text-gray-400 mb-6">
+                    I'm your AI restaurant assistant. I can help you with:
+                  </p>
+                  <ul className="text-gray-400 space-y-2 mb-8">
+                    <li>Browse our menu and recommendations</li>
+                    <li>Add items to your cart</li>
+                    <li>Place orders for dine-in or takeaway</li>
+                    <li>Track your order status</li>
+                  </ul>
+                  <QuickReplies
+                    options={['Show menu', 'View my cart', "What's popular?"]}
+                    onSelect={handleQuickReply}
+                  />
+                </div>
+              )}
+
+              {/* Messages */}
+              {console.log('Rendering messages array, length:', messages.length, 'types:', messages.map(m => m.type))}
+              {messages.map(renderMessage)}
+
+              {/* Activity Indicator */}
+              {activity && <ActivityIndicator message={activity} />}
             </div>
-          )}
+          </main>
 
-          {/* Messages */}
-          {console.log('Rendering messages array, length:', messages.length, 'types:', messages.map(m => m.type))}
-          {messages.map(renderMessage)}
+          {/* Input */}
+          <ChatInput
+            onSend={handleSendMessage}
+            disabled={status !== 'connected' || isStreaming || showSessionModal}
 
-          {/* Activity Indicator */}
-          {activity && <ActivityIndicator message={activity} />}
-        </div>
-      </main>
-
-      {/* Input */}
-      <ChatInput
-        onSend={handleSendMessage}
-        disabled={status !== 'connected' || isStreaming || showSessionModal}
-
-        // Voice Props
-        onToggleVoiceMode={toggleVoiceMode}
-        voiceModeActive={voiceModeEnabled}
-        selectedLanguage={selectedLanguage}
-        onLanguageChange={setSelectedLanguage}
-      />
+            // Voice Props
+            onToggleVoiceMode={toggleVoiceMode}
+            voiceModeActive={voiceModeEnabled}
+            selectedLanguage={selectedLanguage}
+            onLanguageChange={setSelectedLanguage}
+          />
+        </>
+      )}
     </div>
   )
 }
