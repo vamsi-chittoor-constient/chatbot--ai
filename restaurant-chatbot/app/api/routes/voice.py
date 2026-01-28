@@ -259,8 +259,23 @@ async def process_speech_segment(
                 state["is_processing"] = False
             return  # Too short, probably noise
 
+        # ----- Audio preprocessing: noise gate + normalization -----
+        # Convert PCM bytes to int16 numpy array for processing
+        samples = np.frombuffer(combined_audio, dtype=np.int16).astype(np.float32)
+
+        # Noise gate: zero out samples below threshold to kill background hum
+        noise_threshold = 300  # ~1% of int16 range; tweak if too aggressive
+        samples[np.abs(samples) < noise_threshold] = 0
+
+        # Normalize: scale to use full dynamic range so Whisper gets consistent levels
+        peak = np.max(np.abs(samples))
+        if peak > 0:
+            samples = samples * (32000.0 / peak)  # leave a bit of headroom below 32767
+
+        preprocessed_audio = samples.astype(np.int16).tobytes()
+
         # Convert PCM to WAV format for Whisper (16kHz is fine for Whisper)
-        wav_data = pcm_to_wav(combined_audio, sample_rate=16000)
+        wav_data = pcm_to_wav(preprocessed_audio, sample_rate=16000)
 
         # Transcribe with Whisper
         await websocket.send_json({"type": "processing_start"})
