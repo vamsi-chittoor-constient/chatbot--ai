@@ -1090,6 +1090,15 @@ async def process_with_agui_streaming(
         # Stream response
         logger.info("restaurant_crew_complete", session_id=session_id, response_length=len(response))
 
+        # Strip internal context markers before streaming to the user.
+        # These brackets are LLM-agent metadata, not user-facing text.
+        response = re.sub(
+            r'\[(?:SEARCH RESULTS DISPLAYED|MENU CARD DISPLAYED|MENU DISPLAYED'
+            r'|CART CARD DISPLAYED|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED'
+            r'|INVALID QUANTITY|INVALID INSTRUCTIONS)[^\]]*\]\s*',
+            '', response
+        ).strip()
+
         # Stream the response word by word
         emitter.emit_full_text(response, chunk_size=1)
 
