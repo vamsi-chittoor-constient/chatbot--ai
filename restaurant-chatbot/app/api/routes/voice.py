@@ -235,6 +235,16 @@ async def voice_chat_websocket(
             pass
 
 
+async def _safe_send(websocket: WebSocket, data: dict) -> bool:
+    """Send JSON to WebSocket, returning False if connection is closed."""
+    try:
+        await websocket.send_json(data)
+        return True
+    except RuntimeError:
+        # WebSocket already closed (e.g. client disconnected during processing)
+        return False
+
+
 async def process_speech_segment(
     websocket: WebSocket,
     speech_buffer: list,
@@ -603,8 +613,11 @@ async def process_speech_segment(
                 count=len(deferred_quick_replies)
             )
 
-        await websocket.send_json({"type": "processing_end"})
+        await _safe_send(websocket, {"type": "processing_end"})
 
+    except RuntimeError as e:
+        # WebSocket closed during processing (client navigated away, toggled voice off, etc.)
+        logger.info("voice_ws_closed_during_processing", session_id=session_id, error=str(e))
     except Exception as e:
         logger.error(
             "voice_processing_error",
@@ -612,11 +625,8 @@ async def process_speech_segment(
             error=str(e),
             exc_info=True
         )
-        await websocket.send_json({
-            "type": "error",
-            "message": "Failed to process audio"
-        })
-        await websocket.send_json({"type": "processing_end"})
+        await _safe_send(websocket, {"type": "error", "message": "Failed to process audio"})
+        await _safe_send(websocket, {"type": "processing_end"})
     finally:
         # Reset processing state to allow new requests
         if state is not None:
@@ -676,13 +686,13 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 self.ws = ws
 
             def emit_run_started(self):
-                asyncio.create_task(self.ws.send_json({
+                asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {"type": "RUN_STARTED"}
                 }))
 
             def emit_activity(self, activity_type: str, message: str):
-                asyncio.create_task(self.ws.send_json({
+                asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {
                         "type": "ACTIVITY_START",
@@ -692,7 +702,7 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 }))
 
             def emit_activity_end(self):
-                asyncio.create_task(self.ws.send_json({
+                asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {"type": "ACTIVITY_END"}
                 }))
@@ -710,7 +720,7 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 pass  # Errors handled separately
 
             def emit_run_finished(self, response: str = None):
-                asyncio.create_task(self.ws.send_json({
+                asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {"type": "RUN_FINISHED"}
                 }))

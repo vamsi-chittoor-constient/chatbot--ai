@@ -276,18 +276,31 @@ class MenuPreloader:
         name_lower = name.lower().strip()
         name_singular = name_lower.rstrip('s') if name_lower.endswith('s') else name_lower
 
-        # Stage 1: Exact/substring match
+        # Stage 1a: Exact match (highest priority)
         for item in self._menu_cache:
             if item.get("price", 0) <= 0:
                 continue
+            item_name = item.get("name", "").lower()
+            if item_name == name_lower or item_name == name_singular:
+                return item
 
+        # Stage 1b: Substring match — prefer the longest (most specific) match
+        # Without this, "amla juice" (substring of "aswins amla juice") would
+        # incorrectly match before the exact "Aswins Amla Juice" item.
+        best_substring = None
+        best_len = 0
+        for item in self._menu_cache:
+            if item.get("price", 0) <= 0:
+                continue
             item_name = item.get("name", "").lower()
             if (name_lower in item_name or
                 name_singular in item_name or
-                item_name in name_lower or
-                item_name == name_lower or
-                item_name == name_singular):
-                return item
+                item_name in name_lower):
+                if len(item_name) > best_len:
+                    best_len = len(item_name)
+                    best_substring = item
+        if best_substring:
+            return best_substring
 
         # Stage 2: Fuzzy match (handles LLM "correcting" spellings)
         # e.g. "aloo paratha" matches "Aloo Parota", "biriyani" matches "Biryani"
