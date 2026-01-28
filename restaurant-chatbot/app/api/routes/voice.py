@@ -259,21 +259,47 @@ async def process_speech_segment(
                 state["is_processing"] = False
             return  # Too short, probably noise
 
-        # ----- Audio preprocessing: spectral noise reduction + normalization -----
+        # ----- Audio preprocessing pipeline -----
+        # 1. Spectral noise reduction  2. Silence trimming  3. Normalization
         import noisereduce as nr
 
         samples = np.frombuffer(combined_audio, dtype=np.int16).astype(np.float32)
 
-        # Spectral noise reduction: analyses noise profile and removes it
-        # while preserving speech frequencies (far better than simple amplitude gate)
+        # Step 1: Spectral noise reduction — remove stationary background noise
+        # (fan, AC, laptop hum) while preserving speech frequencies
         cleaned = nr.reduce_noise(
             y=samples,
             sr=16000,
-            stationary=True,    # Assume stationary background noise (fan, AC, hum)
-            prop_decrease=0.75,  # Remove 75% of detected noise; keep some naturalness
+            stationary=True,
+            prop_decrease=0.75,
         )
 
-        # Normalize to consistent volume for Whisper
+        # Step 2: Silence trimming — strip leading/trailing silence
+        # Prevents Whisper hallucinations on quiet sections at start/end
+        silence_threshold = 500  # amplitude threshold for "silence"
+        abs_signal = np.abs(cleaned)
+        voiced = np.where(abs_signal > silence_threshold)[0]
+        if len(voiced) > 0:
+            # Keep a small margin (800 samples = 50ms) around speech
+            margin = 800
+            start = max(0, voiced[0] - margin)
+            end = min(len(cleaned), voiced[-1] + margin)
+            cleaned = cleaned[start:end]
+        else:
+            # All silence after denoising — skip
+            logger.debug("voice_segment_all_silence_after_denoise", session_id=session_id)
+            if state is not None:
+                state["is_processing"] = False
+            return
+
+        # Skip if trimmed audio is too short (< 0.5s at 16kHz)
+        if len(cleaned) < 8000:
+            logger.debug("voice_segment_too_short_after_trim", session_id=session_id, samples=len(cleaned))
+            if state is not None:
+                state["is_processing"] = False
+            return
+
+        # Step 3: Normalize to consistent volume for Whisper
         peak = np.max(np.abs(cleaned))
         if peak > 0:
             cleaned = cleaned * (32000.0 / peak)
