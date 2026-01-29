@@ -2925,25 +2925,25 @@ def create_update_quantity_tool(session_id: str):
                 item["quantity"] = new_quantity
                 updated = True
 
-                    # Save cart (sync Redis)
-                    cart_data['items'] = items
-                    cart_data['updated_at'] = str(datetime.now())
-                    set_cart_sync(session_id, cart_data, ttl=3600)
+                # Save cart (sync Redis)
+                cart_data['items'] = items
+                cart_data['updated_at'] = str(datetime.now())
+                set_cart_sync(session_id, cart_data, ttl=3600)
 
-                    new_total = sum(i['price'] * i['quantity'] for i in items)
+                new_total = sum(i['price'] * i['quantity'] for i in items)
 
-                    # Emit cart update
-                    emit_cart_data(session_id, items, new_total)
+                # Emit cart update
+                emit_cart_data(session_id, items, new_total)
 
-                    logger.info(
-                        "quantity_updated",
-                        session_id=session_id,
-                        item=item.get("name"),
-                        old_qty=old_qty,
-                        new_qty=new_quantity
-                    )
+                logger.info(
+                    "quantity_updated",
+                    session_id=session_id,
+                    item=item.get("name"),
+                    old_qty=old_qty,
+                    new_qty=new_quantity
+                )
 
-                    return f"Updated {item.get('name')} to {new_quantity}. Cart total: Rs.{new_total:.0f}"
+                return f"Updated {item.get('name')} to {new_quantity}. Cart total: Rs.{new_total:.0f}"
 
             if not updated:
                 return f"Item '{item_name}' not found in cart."
