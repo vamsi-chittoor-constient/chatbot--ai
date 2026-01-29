@@ -209,7 +209,8 @@ def execute_unrealized_tool_call(tool_call: dict, tools: list) -> str | None:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_run_tool)
-            result = future.result(timeout=30)
+            # Increase timeout to 60s for slow operations like payment API calls
+            result = future.result(timeout=60)
 
         if result is None:
             logger.warning("unrealized_tool_not_callable", action=action_name)

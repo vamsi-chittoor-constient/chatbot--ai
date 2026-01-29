@@ -264,9 +264,9 @@ async def process_speech_segment(
         # Combine audio chunks
         combined_audio = b''.join(speech_buffer)
 
-        # Minimum 1 second of audio to reduce hallucinations (was 0.5s)
-        # At 16kHz mono 16-bit: 16000 Hz * 1 sec * 2 bytes = 32000 bytes
-        MIN_AUDIO_BYTES = 32000
+        # Minimum 0.5 second of audio to allow short confirmations ("yes", "no", "okay")
+        # At 16kHz mono 16-bit: 16000 Hz * 0.5 sec * 2 bytes = 16000 bytes
+        MIN_AUDIO_BYTES = 16000
         if len(combined_audio) < MIN_AUDIO_BYTES:
             logger.debug(
                 "voice_segment_too_short",
@@ -312,8 +312,9 @@ async def process_speech_segment(
                 state["is_processing"] = False
             return
 
-        # Skip if trimmed audio is too short (< 0.5s at 16kHz)
-        if len(cleaned) < 8000:
+        # Skip if trimmed audio is too short (< 0.25s at 16kHz)
+        # Allows short confirmations while filtering very brief noise
+        if len(cleaned) < 4000:
             logger.debug("voice_segment_too_short_after_trim", session_id=session_id, samples=len(cleaned))
             if state is not None:
                 state["is_processing"] = False
