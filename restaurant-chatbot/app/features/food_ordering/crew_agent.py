@@ -3469,8 +3469,82 @@ def create_initiate_payment_tool(session_id: str):
                     except:
                         pass  # Use defaults
 
-                    # Use session_id as the order_id for Razorpay (pending orders aren't in DB yet)
-                    db_order_id = order_display_id
+                    # Save pending order to database before payment
+                    # (Razorpay tool requires database UUID, not Redis order reference)
+                    from app.core.db_pool import get_async_db_pool
+
+                    try:
+                        pool = await get_async_db_pool()
+                        async with pool.acquire() as conn:
+                            # Get lookup table UUIDs
+                            order_type_id = await conn.fetchval(
+                                "SELECT order_type_id FROM order_type_table WHERE order_type_code = $1",
+                                pending_order.get("order_type", "take_away")
+                            )
+                            order_status_id = await conn.fetchval(
+                                "SELECT order_status_type_id FROM order_status_type WHERE order_status_code = $1",
+                                "pending"
+                            )
+                            order_source_id = await conn.fetchval(
+                                "SELECT order_source_type_id FROM order_source_type WHERE order_source_type_code = $1",
+                                "chat_agent"
+                            )
+
+                            # Insert order record
+                            db_order_id = await conn.fetchval(
+                                """
+                                INSERT INTO orders (
+                                    restaurant_id,
+                                    order_type_id,
+                                    order_status_type_id,
+                                    order_source_type_id,
+                                    order_external_reference_id,
+                                    order_display_id,
+                                    total_amount,
+                                    device_id
+                                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                RETURNING order_id
+                                """,
+                                pending_order.get("restaurant_id"),
+                                order_type_id,
+                                order_status_id,
+                                order_source_id,
+                                order_display_id,  # External reference
+                                order_display_id,  # Display ID
+                                total_amount,
+                                session_id  # Device ID
+                            )
+
+                            # Insert order items
+                            items = pending_order.get("items", [])
+                            for item in items:
+                                await conn.execute(
+                                    """
+                                    INSERT INTO order_item (
+                                        order_id,
+                                        item_name,
+                                        quantity,
+                                        unit_price,
+                                        line_total
+                                    ) VALUES ($1, $2, $3, $4, $5)
+                                    """,
+                                    db_order_id,
+                                    item.get("name"),
+                                    item.get("quantity", 1),
+                                    item.get("price", 0),
+                                    item.get("quantity", 1) * item.get("price", 0)
+                                )
+
+                            logger.info(
+                                "pending_order_saved_to_database",
+                                session_id=session_id,
+                                order_display_id=order_display_id,
+                                db_order_id=str(db_order_id)
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Failed to save pending order to database: {e}", exc_info=True)
+                        return f"Failed to prepare order for payment: {str(e)}. Please try again."
 
                     # Create Razorpay payment link using razorpay_payment_tool
                     payment_result = await razorpay_payment_tool._execute_impl(
