@@ -32,15 +32,19 @@ async def get_openai_client():
     # Try to use dedicated voice API key first
     voice_api_key = os.getenv("OPENAI_VOICE_API_KEY")
 
+    # Use longer timeout for voice operations (transcription can be slow on poor networks)
+    from httpx import Timeout
+    voice_timeout = Timeout(60.0, connect=30.0)  # 60s total, 30s to connect
+
     if voice_api_key:
         logger.debug("Using dedicated voice API key")
-        return AsyncOpenAI(api_key=voice_api_key)
+        return AsyncOpenAI(api_key=voice_api_key, timeout=voice_timeout)
 
     # Fallback to regular API key rotation
     from app.ai_services.llm_manager import get_llm_manager
     llm_manager = get_llm_manager()
     api_key = llm_manager.get_next_api_key()
-    return AsyncOpenAI(api_key=api_key)
+    return AsyncOpenAI(api_key=api_key, timeout=voice_timeout)
 
 
 @router.websocket("/ws/voice/{session_id}")
