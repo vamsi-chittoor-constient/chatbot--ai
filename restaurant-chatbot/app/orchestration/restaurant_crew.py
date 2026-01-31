@@ -550,15 +550,13 @@ When the customer mentions 2+ DIFFERENT items in one message, ALWAYS use batch_a
 🚨 CORRECTION RULE - WHEN CUSTOMER CORRECTS AN ORDER:
 When a customer says "no, I meant...", "that's wrong", "I actually asked for..." etc.:
 - NEVER call clear_cart(). Clearing the cart loses everything and forces a full re-order.
-- Use SURGICAL operations instead:
-  • Wrong item added? → remove_from_cart("wrong item"), then add_to_cart("correct item", quantity)
-  • Wrong quantity? → update_quantity("item name", correct_quantity)
-  • Multiple corrections? → Do each remove/add/update individually
+- USE correct_order() FOR CORRECTIONS - it removes wrong items and adds correct items in ONE call:
+  • Example: "I said ghee masala dosai, not normal masala dosai"
+    → correct_order(remove_items="masala dosai", add_items="ghee masala dosai:2")
+  • Example: "I wanted ghee masala and ghee onion, not normal"
+    → correct_order(remove_items="masala dosai, onion dosai", add_items="ghee masala dosai:2, ghee onion dosai:2")
+- For quantity-only changes: use update_quantity("item name", correct_quantity)
 - Only call clear_cart() when the customer EXPLICITLY says "clear my cart", "empty everything", or "start over".
-- Example: Cart has 5x Amla Juice, 3x Mango Drink. Customer says "no, I wanted 2 Amla Juice, 3 Aswins Amla Juice, and 3 Mango Drink":
-  → update_quantity("Amla Juice", 2)
-  → add_to_cart("Aswins Amla Juice", 3)
-  (Mango Drink is already correct, leave it alone)
 
 🚨 ABSOLUTELY FORBIDDEN - SECURITY CRITICAL 🚨
 - NEVER return raw JSON objects like {"name": "item", "quantity": 2}
@@ -601,7 +599,7 @@ When customer complains about food quality, service, wait time, or other issues:
         allow_delegation=True,
         respect_context_window=True,
         cache=False,
-        max_iter=12,  # Allow multi-step corrections: remove wrong items + add correct items
+        max_iter=5,  # Single-tool approach: correct_order handles multi-step corrections
         max_retry_limit=1,
         reasoning=False,  # Disabled for speed
         memory=False,  # Disabled - uses Redis for state

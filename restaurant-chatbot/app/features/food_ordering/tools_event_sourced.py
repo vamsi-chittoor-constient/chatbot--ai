@@ -633,10 +633,154 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             logger.error("batch_add_to_cart_failed", error=str(e), session_id=session_id)
             return "Sorry, I couldn't add those items. Please try again."
 
+    @tool("correct_order")
+    def correct_order(remove_items: str, add_items: str) -> str:
+        """
+        Correct an order by removing wrong items and adding correct items in ONE call.
+
+        Use this when customer says "I meant X not Y", "that's wrong", "I said X not Y".
+        This is MORE EFFICIENT than calling remove_from_cart + add_to_cart separately.
+
+        Args:
+            remove_items: Comma-separated items to remove (e.g., "masala dosai, onion dosai")
+            add_items: Comma-separated "item:quantity" pairs to add (e.g., "ghee masala dosai:2, ghee onion dosai:2")
+
+        Returns:
+            Confirmation message with what was removed and added.
+        """
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
+        from app.core.preloader import get_menu_preloader
+        from app.core.session_events import get_sync_session_tracker
+
+        emit_tool_activity(session_id, "correct_order")
+
+        try:
+            preloader = get_menu_preloader()
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+
+            removed_items = []
+            failed_removes = []
+            added_items = []
+            failed_adds = []
+            cart = None
+
+            # Phase 1: Remove wrong items
+            for item_name in remove_items.split(","):
+                item_name = item_name.strip()
+                if not item_name:
+                    continue
+
+                found_item = preloader.find_item(item_name)
+                if not found_item:
+                    failed_removes.append(item_name)
+                    continue
+
+                item_id = UUID(found_item['id'])
+                result = tracker.remove_from_cart(item_id)
+                if result.get('success', False):
+                    removed_items.append(found_item['name'])
+                    cart = result
+                else:
+                    failed_removes.append(item_name)
+
+            # Phase 2: Add correct items
+            for pair in add_items.split(","):
+                pair = pair.strip()
+                if not pair:
+                    continue
+
+                # Parse "item:quantity" format
+                if ":" in pair:
+                    item_name_raw, qty_str = pair.rsplit(":", 1)
+                    try:
+                        quantity = int(qty_str.strip())
+                    except ValueError:
+                        quantity = 1
+                        item_name_raw = pair
+                else:
+                    item_name_raw = pair
+                    quantity = 1
+
+                item_name_raw = item_name_raw.strip()
+                if quantity <= 0:
+                    quantity = 1
+                if quantity > 50:
+                    quantity = 50
+
+                found_item = preloader.find_item(item_name_raw)
+                if not found_item:
+                    failed_adds.append(item_name_raw)
+                    continue
+
+                # Check meal period availability
+                from app.core.preloader import get_current_meal_period
+                meal_period = get_current_meal_period()
+                item_meal_types = found_item.get("meal_types", [])
+                if isinstance(item_meal_types, str):
+                    item_meal_types = [mt.strip() for mt in item_meal_types.split(",")]
+                if item_meal_types and meal_period not in item_meal_types and "All Day" not in item_meal_types:
+                    avail_times = ", ".join(m for m in item_meal_types if m != "All Day") or "other meal times"
+                    failed_adds.append(f"{found_item['name']} (only {avail_times})")
+                    continue
+
+                item_id = UUID(found_item['id'])
+                name = found_item['name']
+                price = float(found_item['price'])
+
+                cart = tracker.add_to_cart(
+                    item_id=item_id,
+                    item_name=name,
+                    quantity=quantity,
+                    price=price
+                )
+                added_items.append(f"{quantity}x {name}")
+
+            # Emit ONE cart update after all changes
+            if cart:
+                emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Emit quick replies
+            if cart and cart.get('items'):
+                emit_quick_replies(session_id, [
+                    {"label": "🛒 View Cart", "action": "view cart"},
+                    {"label": "✅ Checkout", "action": "checkout"},
+                    {"label": "➕ Add More", "action": "add more items"},
+                ])
+            else:
+                emit_quick_replies(session_id, [
+                    {"label": "📋 View Menu", "action": "show menu"},
+                    {"label": "🔍 Search", "action": "search menu"},
+                ])
+
+            # Build response
+            msg_parts = []
+            if removed_items:
+                msg_parts.append(f"Removed {', '.join(removed_items)}")
+            if added_items:
+                msg_parts.append(f"Added {', '.join(added_items)}")
+
+            if not msg_parts:
+                return "I couldn't make those changes. Please check the item names and try again."
+
+            msg = " and ".join(msg_parts) + "."
+            if cart:
+                msg += f" Cart total: ₹{cart['total']:.0f} ({cart['item_count']} items)."
+            if failed_removes:
+                msg += f"\nCouldn't remove: {', '.join(failed_removes)}."
+            if failed_adds:
+                msg += f"\nCouldn't add: {', '.join(failed_adds)}."
+            msg += " Anything else?"
+            return msg
+
+        except Exception as e:
+            logger.error("correct_order_failed", error=str(e), session_id=session_id)
+            return "Sorry, I couldn't correct your order. Please try again."
+
     # Return all tools
     return [
         add_to_cart,
         batch_add_to_cart,
+        correct_order,
         view_cart,
         remove_from_cart,
         search_menu,
