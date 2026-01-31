@@ -601,7 +601,7 @@ When customer complains about food quality, service, wait time, or other issues:
         allow_delegation=True,
         respect_context_window=True,
         cache=False,
-        max_iter=5,  # Need iterations for: parse intent, call tool, process result
+        max_iter=12,  # Allow multi-step corrections: remove wrong items + add correct items
         max_retry_limit=1,
         reasoning=False,  # Disabled for speed
         memory=False,  # Disabled - uses Redis for state
