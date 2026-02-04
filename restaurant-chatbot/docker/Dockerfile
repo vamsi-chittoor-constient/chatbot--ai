@@ -1,7 +1,7 @@
 # =============================================================================
 # Production Dockerfile for Restaurant AI Chatbot
 # =============================================================================
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,7 +18,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Install CPU-only torch first (avoids downloading 5GB+ of CUDA/NVIDIA packages)
+RUN pip install --upgrade pip && \
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
 
 # Pre-download ChromaDB embedding model to avoid first-request delays
 RUN python -c "import chromadb; from chromadb.utils import embedding_functions; ef = embedding_functions.DefaultEmbeddingFunction(); ef(['test'])" || true
@@ -26,7 +29,7 @@ RUN python -c "import chromadb; from chromadb.utils import embedding_functions; 
 # -----------------------------------------------------------------------------
 # Production Stage
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as production
+FROM python:3.11-slim AS production
 
 LABEL maintainer="restaurant-ai" \
       version="1.0.0" \
