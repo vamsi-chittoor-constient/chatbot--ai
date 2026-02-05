@@ -1274,6 +1274,24 @@ async def emit_tool_activity_async(session_id: str, tool_name: str):
         logger.debug("async_tool_activity_emit_failed", error=str(e))
 
 
+async def emit_activity_end_async(session_id: str):
+    """
+    Emit activity end to hide the loading indicator from async context.
+
+    Call this at the end of each async tool to clear the hamburger animation.
+
+    Args:
+        session_id: The session ID
+    """
+    try:
+        event = ActivityEndEvent()
+        queue = get_event_queue(session_id)
+        await queue.put(event)
+        logger.debug("async_activity_end_emitted", session_id=session_id)
+    except Exception as e:
+        logger.debug("async_activity_end_emit_failed", error=str(e))
+
+
 async def emit_cart_data_async(session_id: str, items: List[Dict[str, Any]], total: float):
     """
     Emit cart data for rich UI display from async context.
@@ -1403,6 +1421,38 @@ async def emit_quick_replies_async(session_id: str, replies: List[Dict[str, str]
 
 
 # ============================================================================
+# TOOL ACTIVITY WRAPPER - Auto-emit ACTIVITY_END
+# ============================================================================
+
+def with_activity_tracking(session_id: str, tool_name: str):
+    """
+    Decorator/context to automatically emit ACTIVITY_START and ACTIVITY_END.
+
+    This ensures the hamburger animation always clears after tool execution,
+    even if the tool throws an exception.
+
+    Usage:
+        @with_activity_tracking(session_id, "search_menu")
+        def my_tool_logic():
+            # ... tool code ...
+            return result
+    """
+    from contextlib import contextmanager
+    from functools import wraps
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            emit_tool_activity(session_id, tool_name)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                emit_activity_end(session_id)
+        return wrapper
+    return decorator
+
+
+# ============================================================================
 # SYNC EMIT FUNCTIONS (legacy - kept for backwards compatibility)
 # ============================================================================
 
@@ -1446,6 +1496,29 @@ def emit_tool_activity(session_id: str, tool_name: str):
     except Exception as e:
         # Don't fail tool execution if activity emission fails
         logger.debug("tool_activity_emit_failed", error=str(e))
+
+
+def emit_activity_end(session_id: str):
+    """
+    Emit activity end to hide the loading indicator.
+
+    Thread-safe: uses _put_event_threadsafe() for cross-thread queue operations.
+    Call this at the end of each tool to clear the hamburger animation.
+
+    Args:
+        session_id: The session ID
+    """
+    # Route to voice WebSocket if in voice mode
+    if is_voice_mode(session_id):
+        _emit_to_voice_websocket_sync(session_id, "ACTIVITY_END", {})
+        return
+
+    try:
+        event = ActivityEndEvent()
+        _put_event_threadsafe(session_id, event)
+        logger.debug("activity_end_emitted", session_id=session_id)
+    except Exception as e:
+        logger.debug("activity_end_emit_failed", error=str(e))
 
 
 def _convert_decimal(value):

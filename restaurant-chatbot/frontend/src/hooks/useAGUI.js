@@ -3,6 +3,7 @@ import { useReducer, useCallback } from 'react'
 const initialState = {
   messages: [],
   activity: null,
+  activityCount: 0,  // Track overlapping activities with a counter
   isStreaming: false,
   currentStreamId: null,
 }
@@ -33,19 +34,26 @@ function aguiReducer(state, action) {
         ...state,
         isStreaming: false,
         activity: null,
+        activityCount: 0,  // Reset activity counter when run completes
         currentStreamId: null,
       }
 
     case 'ACTIVITY_START':
+      // Increment counter for overlapping activities
+      const newCount = state.activityCount + 1
       return {
         ...state,
+        activityCount: newCount,
         activity: action.payload.message || action.payload.activity || 'Processing...',
       }
 
     case 'ACTIVITY_END':
+      // Decrement counter, only clear activity when counter reaches 0
+      const decrementedCount = Math.max(0, state.activityCount - 1)
       return {
         ...state,
-        activity: null,
+        activityCount: decrementedCount,
+        activity: decrementedCount > 0 ? state.activity : null,
       }
 
     case 'TEXT_MESSAGE_START':
