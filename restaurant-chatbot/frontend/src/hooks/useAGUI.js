@@ -5,6 +5,7 @@ const initialState = {
   activity: null,
   activityCount: 0,  // Track overlapping activities with a counter
   isStreaming: false,
+  runFinished: false,  // Track if run has finished to ignore late events
   currentStreamId: null,
 }
 
@@ -25,6 +26,7 @@ function aguiReducer(state, action) {
       return {
         ...state,
         isStreaming: true,
+        runFinished: false,  // Reset flag when new run starts
         activity: null,
       }
 
@@ -33,12 +35,19 @@ function aguiReducer(state, action) {
       return {
         ...state,
         isStreaming: false,
+        runFinished: true,  // Mark run as finished to ignore late ACTIVITY_START events
         activity: null,
         activityCount: 0,  // Reset activity counter when run completes
         currentStreamId: null,
       }
 
     case 'ACTIVITY_START':
+      // Ignore ACTIVITY_START events that arrive after RUN_FINISHED
+      // (These are late tool emissions and should not show the hamburger)
+      if (state.runFinished) {
+        return state
+      }
+
       // Increment counter for overlapping activities
       const newCount = state.activityCount + 1
       return {
