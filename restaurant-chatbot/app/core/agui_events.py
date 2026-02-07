@@ -1521,6 +1521,25 @@ def emit_activity_end(session_id: str):
         logger.debug("activity_end_emit_failed", error=str(e))
 
 
+from contextlib import contextmanager
+
+@contextmanager
+def tool_activity(session_id: str, tool_name: str):
+    """
+    Context manager that automatically emits ACTIVITY_START and ACTIVITY_END.
+    
+    Usage:
+        with tool_activity(session_id, "search_menu"):
+            # tool logic here
+            return result
+    """
+    emit_tool_activity(session_id, tool_name)
+    try:
+        yield
+    finally:
+        emit_activity_end(session_id)
+
+
 def _convert_decimal(value):
     """Convert Decimal to float for JSON serialization."""
     from decimal import Decimal
