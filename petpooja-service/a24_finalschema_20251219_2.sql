@@ -1530,7 +1530,7 @@ INSERT INTO "menu_item" ("menu_item_id", "restaurant_id", "menu_sub_category_id"
 ('2fb8d0a2-9018-4c87-9cb6-8532626a588c',	'58d98970-fe89-406a-a0fd-94581cb5a94c',	'52d100cc-4cce-4124-aa64-8cb0e7e9e787',	'Chicken Fry',	'active',	'',	120.00,	'f',	'f',	NULL,	NULL,	NULL,	NULL,	NULL,	0.00,	'd3a1ad7e-874f-4b8b-ae82-0af81adc06e8',	5,	'f',	'f',	'f',	't',	'f',	'f',	'not-applicable',	'0',	NULL,	'f',	'2025-12-19 16:59:53.542163+05:30',	'2025-12-19 16:59:53.542163+05:30',	NULL,	NULL,	NULL,	'f',	10584302,	0,	NULL,	'f',	NULL,	NULL),
 ('733a1265-faab-4b2a-8ed1-124856124f5a',	'58d98970-fe89-406a-a0fd-94581cb5a94c',	'52d100cc-4cce-4124-aa64-8cb0e7e9e787',	'Chicken Ukkad',	'active',	'',	160.00,	'f',	'f',	NULL,	NULL,	NULL,	NULL,	NULL,	0.00,	'd3a1ad7e-874f-4b8b-ae82-0af81adc06e8',	6,	'f',	'f',	'f',	't',	'f',	'f',	'not-applicable',	'0',	NULL,	'f',	'2025-12-19 16:59:53.542163+05:30',	'2025-12-19 16:59:53.542163+05:30',	NULL,	NULL,	NULL,	'f',	10584303,	0,	NULL,	'f',	NULL,	NULL),
 ('3e2c1e69-0ffc-493f-92a7-e37e3dee3e12',	'58d98970-fe89-406a-a0fd-94581cb5a94c',	'52d100cc-4cce-4124-aa64-8cb0e7e9e787',	'Chicken Thali',	'active',	'',	0.00,	't',	'f',	NULL,	NULL,	NULL,	NULL,	NULL,	0.00,	'd3a1ad7e-874f-4b8b-ae82-0af81adc06e8',	7,	'f',	'f',	'f',	't',	'f',	'f',	'not-applicable',	'0',	NULL,	'f',	'2025-12-19 16:59:53.542163+05:30',	'2025-12-19 16:59:53.542163+05:30',	NULL,	NULL,	NULL,	'f',	10584304,	0,	NULL,	'f',	NULL,	NULL),
-('1b7deb00-7ddd-4a7e-8aa9-23125db6e320',	'58d98970-fe89-406a-a0fd-94581cb5a94c',	'52d100cc-4cce-4124-aa64-8cb0e7e9e787',	'Chicken Kaleji Fry',	'active',	'',	0.00,	't',	'f',	NULL,	NULL,	NULL,	NULL,	NULL,	0.00,	'd3a1ad7e-874f-4b8b-ae82-0af81adc06e8',	8,	'f',	'f',	'f',	't',	'f',	'f',	'not-applicable',	'0',	NULL,	'f',	'2025-12-19 16:59:53.542163+05:30',	'2025-12-19 16:59:53.542163+05:30',	NULL,	NULL,	NULL,	'f',	10584305);
+('1b7deb00-7ddd-4a7e-8aa9-23125db6e320',	'58d98970-fe89-406a-a0fd-94581cb5a94c',	'52d100cc-4cce-4124-aa64-8cb0e7e9e787',	'Chicken Kaleji Fry',	'active',	'',	0.00,	't',	'f',	NULL,	NULL,	NULL,	NULL,	NULL,	0.00,	'd3a1ad7e-874f-4b8b-ae82-0af81adc06e8',	8,	'f',	'f',	'f',	't',	'f',	'f',	'not-applicable',	'0',	NULL,	'f',	'2025-12-19 16:59:53.542163+05:30',	'2025-12-19 16:59:53.542163+05:30',	NULL,	NULL,	NULL,	'f',	10584305,	0,	NULL,	'f',	NULL,	NULL);
 
 DROP TABLE IF EXISTS "menu_item_addon_group";
 CREATE TABLE "public"."menu_item_addon_group" (
@@ -2657,6 +2657,7 @@ CREATE TABLE "public"."order_type_table" (
     "deleted_at" timestamptz,
     "is_deleted" boolean DEFAULT false,
     "ext_petpooja_order_type_id" bigint,
+    "restaurant_id" uuid,
     CONSTRAINT "order_type_table_pkey" PRIMARY KEY ("order_type_id")
 )
 WITH (oids = false);
