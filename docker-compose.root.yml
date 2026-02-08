@@ -35,15 +35,10 @@ services:
       - "5433:5432"  # Map to 5433 on host to avoid conflict with local postgres
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # Shell wrapper runs all SQL with ON_ERROR_STOP=0 (tolerates minor errors)
+      # Single merged SQL: extensions + all tables + all data + app tables
+      # Runs via shell wrapper with ON_ERROR_STOP=0 for minor error tolerance
       - ./scripts/db-init.sh:/docker-entrypoint-initdb.d/00-init-all.sh:ro
-      # SQL source files mounted to /sql-init/ (executed by shell wrapper in order)
-      # 00: Extensions (uuid-ossp, pgcrypto)
-      - ./restaurant-chatbot/db/init.sql:/sql-init/00-init.sql:ro
-      # 01: PetPooja schema - ALL tables + menu data (single source of truth for DB structure)
-      - ./petpooja-service/a24_finalschema_20251219_2.sql:/sql-init/01-petpooja-schema.sql:ro
-      # 02: App tables only (restaurant_config, users, sessions - not in PetPooja dump)
-      - ./restaurant-chatbot/db/03-app-tables.sql:/sql-init/02-app-tables.sql:ro
+      - ./db-init-merged.sql:/sql-init/00-full-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d restaurant_ai"]
       interval: 10s
