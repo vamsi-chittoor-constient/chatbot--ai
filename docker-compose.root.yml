@@ -124,6 +124,15 @@ services:
       - AUTH_REQUIRED=false
       # Enable PetPooja kitchen sync (sandbox mode)
       - ENABLE_PETPOOJA_SYNC=true
+      # Frontend & Payment URLs (override localhost for server deployment)
+      - FRONTEND_URL=https://13.60.10.215
+      - PAYMENT_SUCCESS_URL=https://13.60.10.215/payment/success
+      - PAYMENT_FAILURE_URL=https://13.60.10.215/payment/failure
+      - PAYMENT_CALLBACK_URL=https://13.60.10.215/api/v1/payment/callback
+      - PAYMENT_WEBHOOK_URL=https://13.60.10.215/api/v1/webhook/razorpay
+      # Razorpay credentials (override placeholders from .env)
+      - RAZORPAY_KEY_ID=rzp_test_dXwWkc7Rw3f52T
+      - RAZORPAY_KEY_SECRET=bs6Jk9HhctjKCBPN3IE4iPsF
     depends_on:
       postgres:
         condition: service_healthy
@@ -172,7 +181,9 @@ services:
       - API_WORKERS=2
       - DEBUG=false
       - LOG_LEVEL=INFO
-      # Note: PetPooja API settings and secrets are loaded from .env file via env_file
+      # Callback & integration URLs (override localhost for server deployment)
+      - PETPOOJA_CALLBACK_URL=https://13.60.10.215/api/petpooja/webhooks/petpooja/order-status
+      - MAIN_BACKEND_URL=http://chatbot-app:8000
     depends_on:
       postgres:
         condition: service_healthy
