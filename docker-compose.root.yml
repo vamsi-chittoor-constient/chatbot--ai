@@ -35,15 +35,14 @@ services:
       - "5433:5432"  # Map to 5433 on host to avoid conflict with local postgres
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # Database init scripts (executed alphabetically on FIRST start only)
-      # 00: Extensions (uuid-ossp, pgcrypto)
-      - ./restaurant-chatbot/db/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
-      # 01: PetPooja schema (integration tables, 178 tables)
-      - ./petpooja-service/a24_finalschema_20251219_2.sql:/docker-entrypoint-initdb.d/01-petpooja-schema.sql:ro
-      # 02-04: Chatbot schema, data, and app tables (menu_item, restaurant_config, etc.)
-      - ./restaurant-chatbot/db/01-schema.sql:/docker-entrypoint-initdb.d/02-chatbot-schema.sql:ro
-      - ./restaurant-chatbot/db/02-data.sql:/docker-entrypoint-initdb.d/03-chatbot-data.sql:ro
-      - ./restaurant-chatbot/db/03-app-tables.sql:/docker-entrypoint-initdb.d/04-app-tables.sql:ro
+      # Shell wrapper runs all SQL with ON_ERROR_STOP=0 (tolerates minor INSERT mismatches)
+      - ./scripts/db-init.sh:/docker-entrypoint-initdb.d/00-init-all.sh:ro
+      # SQL source files mounted to /sql-init/ (NOT initdb.d - shell wrapper runs them)
+      - ./restaurant-chatbot/db/init.sql:/sql-init/00-init.sql:ro
+      - ./petpooja-service/a24_finalschema_20251219_2.sql:/sql-init/01-petpooja-schema.sql:ro
+      - ./restaurant-chatbot/db/01-schema.sql:/sql-init/02-chatbot-schema.sql:ro
+      - ./restaurant-chatbot/db/02-data.sql:/sql-init/03-chatbot-data.sql:ro
+      - ./restaurant-chatbot/db/03-app-tables.sql:/sql-init/04-app-tables.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d restaurant_ai"]
       interval: 10s
