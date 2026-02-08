@@ -699,6 +699,9 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 }))
 
             def emit_activity(self, activity_type: str, message: str):
+                from app.core.agui_events import _RUN_FINISHED_SESSIONS
+                if session_id in _RUN_FINISHED_SESSIONS:
+                    return  # Gate closed, drop event
                 asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {
