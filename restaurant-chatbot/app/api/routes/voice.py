@@ -784,6 +784,47 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         agui_stream_task = asyncio.create_task(_stream_agui_events_to_voice_ws())
 
         try:
+            # =================================================================
+            # CHECKOUT WORKFLOW INTERCEPTOR (same as chat.py)
+            # Handle checkout messages deterministically, not via LLM agent
+            # =================================================================
+            from app.services.checkout_handler import handle_checkout_message
+            from app.services.payment_handler import handle_payment_message
+
+            checkout_response = await handle_checkout_message(session_id, text)
+
+            if checkout_response:
+                logger.info(
+                    "voice_checkout_handler_processed",
+                    session_id=session_id,
+                    response_length=len(checkout_response)
+                )
+                emitter.emit_run_started()
+                emitter.emit_full_text(checkout_response, chunk_size=1)
+                flush_pending_events(session_id)
+                emitter.emit_run_finished(checkout_response)
+                await asyncio.sleep(0.3)
+                return checkout_response, deferred_quick_replies
+
+            # =================================================================
+            # PAYMENT WORKFLOW INTERCEPTOR (same as chat.py)
+            # Handle payment messages deterministically
+            # =================================================================
+            payment_response = await handle_payment_message(session_id, text)
+
+            if payment_response:
+                logger.info(
+                    "voice_payment_handler_processed",
+                    session_id=session_id,
+                    response_length=len(payment_response)
+                )
+                emitter.emit_run_started()
+                emitter.emit_full_text(payment_response, chunk_size=1)
+                flush_pending_events(session_id)
+                emitter.emit_run_finished(payment_response)
+                await asyncio.sleep(0.3)
+                return payment_response, deferred_quick_replies
+
             # Process with agent
             # VOICE MODE: Always pass language="English" to crew so it does NOT translate.
             # Translation happens ONCE in translate_for_tts() below (English → target language).
@@ -964,7 +1005,7 @@ async def translate_for_tts(text: str, target_language: str, client: AsyncOpenAI
             system_prompt = """You are a translator for a restaurant chatbot. Translate the English text to spoken Hinglish (Hindi-English mix).
 
 Rules:
-- Use Devanagari script for Hindi words
+- Write ALL Hindi words in ROMAN/ENGLISH script only (e.g. "Aapka", "Kya", "hain") - ABSOLUTELY NO Devanagari script (no अ,ब,क characters)
 - Keep English words for: food items (dosa, biryani, paneer), numbers, prices (₹), technical terms
 - Use natural conversational Hindi, not formal/literary Hindi
 - Keep it concise - this is for TTS (text-to-speech)
@@ -972,13 +1013,13 @@ Rules:
 
 Example:
 English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
-Hinglish: "मुझे 3 items मिले आपकी search से। क्या आप Masala Dosa अपने cart में add करना चाहेंगे?"
+Hinglish: "Mujhe 3 items mile aapki search se. Kya aap Masala Dosa apne cart mein add karna chahenge?"
 """
         elif target_language == "Tamil":
             system_prompt = """You are a translator for a restaurant chatbot. Translate the English text to spoken Tanglish (Tamil-English mix).
 
 Rules:
-- Use Tamil script for Tamil words
+- Write ALL Tamil words in ROMAN/ENGLISH script only (e.g. "Ungal", "Enna", "iruku") - ABSOLUTELY NO Tamil script (no அ,ப,க characters)
 - Keep English words for: food items (dosa, biryani, paneer), numbers, prices (₹), technical terms
 - Use natural conversational Tamil, not formal/literary Tamil
 - Keep it concise - this is for TTS (text-to-speech)
@@ -986,7 +1027,7 @@ Rules:
 
 Example:
 English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
-Tanglish: "உங்கள் search-க்கு 3 items கிடைச்சது. Masala Dosa-வை cart-ல add பண்ணணுமா?"
+Tanglish: "Ungal search-ku 3 items kidaichuthu. Masala Dosa-vai cart-la add pannunuma?"
 """
         else:
             return text

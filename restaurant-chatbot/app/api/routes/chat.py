@@ -1221,9 +1221,9 @@ async def chat_endpoint(
 
                     # Add language instruction to user message for Hinglish/Tanglish responses
                     if language == "Hindi":
-                        user_message = f"[RESPOND IN HINGLISH - Use Hindi language but keep food item names, menu terms, prices in English. Example: 'Aapka order mein 2 Masala Dosa add kar diya hai, total ₹250 ho gaya'] {user_message}"
+                        user_message = f"[RESPOND IN HINGLISH - Write Hindi words in ROMAN/ENGLISH script only (NO Devanagari like अ,ब,क). Keep food names, prices in English. Example: 'Aapka order mein 2 Masala Dosa add kar diya hai, total ₹250 ho gaya'] {user_message}"
                     elif language == "Tamil":
-                        user_message = f"[RESPOND IN TANGLISH - Use Tamil language but keep food item names, menu terms, prices in English. Example: 'Ungal order-la 2 Masala Dosa add panniten, total ₹250 aagum'] {user_message}"
+                        user_message = f"[RESPOND IN TANGLISH - Write Tamil words in ROMAN/ENGLISH script only (NO Tamil script like அ,ப,க). Keep food names, prices in English. Example: 'Ungal order-la 2 Masala Dosa add panniten, total ₹250 aagum'] {user_message}"
                 except json.JSONDecodeError:
                     # Handle plain text messages
                     user_message = raw_message

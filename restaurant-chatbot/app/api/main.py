@@ -158,6 +158,44 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Database migrations failed (continuing with existing schema): {str(e)}")
 
+        # Auto-sync menu from PetPooja on first startup (if DB has no menu items)
+        try:
+            async with db_manager.get_session() as session:
+                result = await session.execute(text(
+                    "SELECT COUNT(*) FROM menu_item WHERE is_deleted = FALSE AND menu_item_status = 'active'"
+                ))
+                menu_count = result.scalar() or 0
+
+            if menu_count == 0:
+                logger.info("Empty menu detected - triggering PetPooja menu sync")
+                import httpx
+                petpooja_url = os.getenv("PETPOOJA_SERVICE_URL", "http://petpooja-app:8001")
+
+                async with db_manager.get_session() as session:
+                    result = await session.execute(text("""
+                        SELECT DISTINCT ic.restaurant_id
+                        FROM integration_config_table ic
+                        JOIN integration_provider_table ip ON ic.provider_id = ip.provider_id
+                        WHERE ip.provider_name ILIKE '%petpooja%'
+                        AND ic.is_enabled = TRUE AND ic.is_deleted = FALSE
+                    """))
+                    restaurant_ids = [str(row[0]) for row in result.fetchall()]
+
+                if restaurant_ids:
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        for rid in restaurant_ids:
+                            resp = await client.post(
+                                f"{petpooja_url}/api/menu/fetch",
+                                json={"restaurant_id": rid}
+                            )
+                            logger.info(f"PetPooja menu sync for {rid}: status={resp.status_code}")
+                else:
+                    logger.warning("No PetPooja integrations found in DB - menu will remain empty until sync")
+            else:
+                logger.info(f"Menu has {menu_count} active items - skipping PetPooja sync")
+        except Exception as e:
+            logger.warning(f"Auto menu sync check failed (continuing with existing data): {e}")
+
         # Initialize in-memory menu preloader for instant tool responses
         try:
             from app.core.preloader import preload_all
