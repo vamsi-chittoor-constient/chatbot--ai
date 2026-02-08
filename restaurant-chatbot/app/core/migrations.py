@@ -58,7 +58,7 @@ async def run_migrations():
             # Docker handles initial schema setup, app handles incremental migrations (04+)
             migration_files = sorted([
                 f for f in db_dir.glob("*.sql")
-                if f.name not in ['init.sql', '01-schema.sql', '02-data.sql', '03-app-tables.sql']
+                if f.name not in ['init.sql', '01-schema.sql', '02-data.sql', '03-app-tables.sql', '06-setup-petpooja-integration.sql']
             ])
 
             if not migration_files:
