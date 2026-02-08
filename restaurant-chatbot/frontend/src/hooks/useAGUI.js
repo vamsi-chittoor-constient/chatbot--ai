@@ -37,6 +37,8 @@ function aguiReducer(state, action) {
       }
 
     case 'ACTIVITY_START':
+      // Ignore late ACTIVITY_START after RUN_FINISHED (isStreaming is false)
+      if (!state.isStreaming) return state
       return {
         ...state,
         activity: action.payload.message || action.payload.activity || 'Processing...',

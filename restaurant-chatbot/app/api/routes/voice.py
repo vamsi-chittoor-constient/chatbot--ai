@@ -744,6 +744,7 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         import json as _json
 
         async def _stream_agui_events_to_voice_ws():
+            from app.core.agui_events import _RUN_FINISHED_SESSIONS
             queue = get_event_queue(session_id)
             try:
                 while True:
@@ -751,6 +752,11 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                         event = await asyncio.wait_for(queue.get(), timeout=0.5)
                         event_json = event.to_json() if hasattr(event, 'to_json') else _json.dumps({"type": getattr(event, 'type', 'UNKNOWN')})
                         event_data = _json.loads(event_json)
+                        # Drop late ACTIVITY_START events after RUN_FINISHED
+                        # (RUN_FINISHED is sent directly via WebSocket, but queued
+                        # tool events arrive later — this filters the stale ones)
+                        if event_data.get("type") == "ACTIVITY_START" and session_id in _RUN_FINISHED_SESSIONS:
+                            continue
                         # Defer QUICK_REPLIES so they arrive after response_text
                         if event_data.get("type") == "QUICK_REPLIES":
                             # QuickRepliesEvent serializes as "replies", not "options"
@@ -805,12 +811,16 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 pass
 
             # Drain any remaining events in the queue
+            from app.core.agui_events import _RUN_FINISHED_SESSIONS
             queue = get_event_queue(session_id)
             while not queue.empty():
                 try:
                     event = queue.get_nowait()
                     event_json = event.to_json() if hasattr(event, 'to_json') else _json.dumps({"type": getattr(event, 'type', 'UNKNOWN')})
                     event_data = _json.loads(event_json)
+                    # Drop late ACTIVITY_START events after RUN_FINISHED
+                    if event_data.get("type") == "ACTIVITY_START" and session_id in _RUN_FINISHED_SESSIONS:
+                        continue
                     # Defer QUICK_REPLIES so they arrive after response_text
                     if event_data.get("type") == "QUICK_REPLIES":
                         # QuickRepliesEvent serializes as "replies", not "options"
