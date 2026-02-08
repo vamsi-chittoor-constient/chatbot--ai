@@ -4,7 +4,6 @@ const initialState = {
   messages: [],
   activity: null,
   isStreaming: false,
-  runFinished: false,  // Ignore ACTIVITY_START events after RUN_FINISHED
   currentStreamId: null,
 }
 
@@ -25,7 +24,6 @@ function aguiReducer(state, action) {
       return {
         ...state,
         isStreaming: true,
-        runFinished: false,  // Reset flag when new run starts
         activity: null,
       }
 
@@ -34,16 +32,11 @@ function aguiReducer(state, action) {
       return {
         ...state,
         isStreaming: false,
-        runFinished: true,
         activity: null,
         currentStreamId: null,
       }
 
     case 'ACTIVITY_START':
-      // Ignore ACTIVITY_START events that arrive after RUN_FINISHED
-      if (state.runFinished) {
-        return state
-      }
       return {
         ...state,
         activity: action.payload.message || action.payload.activity || 'Processing...',

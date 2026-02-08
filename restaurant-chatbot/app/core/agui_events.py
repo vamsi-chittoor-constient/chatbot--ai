@@ -34,6 +34,7 @@ logger = structlog.get_logger(__name__)
 # WebSocket instead of the chat queue. This keeps the two systems isolated.
 
 _VOICE_MODE_SESSIONS: Dict[str, Any] = {}  # session_id -> websocket
+_RUN_FINISHED_SESSIONS: set = set()  # Sessions where run has finished - block late ACTIVITY_START
 
 
 def set_voice_mode(session_id: str, websocket=None):
@@ -602,6 +603,7 @@ class AGUIEventEmitter:
 
     def emit_run_started(self):
         """Emit when agent processing begins."""
+        _RUN_FINISHED_SESSIONS.discard(self.session_id)
         self._emit(RunStartedEvent(
             run_id=self.run_id,
             thread_id=self.session_id
@@ -609,6 +611,9 @@ class AGUIEventEmitter:
 
     def emit_run_finished(self, result: Optional[str] = None):
         """Emit when agent processing completes."""
+        # Mark session as finished - blocks any late ACTIVITY_START from tools
+        _RUN_FINISHED_SESSIONS.add(self.session_id)
+
         # End any open message
         if self.current_message_id:
             self.emit_text_end()
@@ -1251,6 +1256,10 @@ async def emit_tool_activity_async(session_id: str, tool_name: str):
         session_id: The session ID
         tool_name: Internal tool name (will be converted to user-friendly message)
     """
+    # Don't emit ACTIVITY_START after run has finished
+    if session_id in _RUN_FINISHED_SESSIONS:
+        return
+
     try:
         message = TOOL_ACTIVITY_MESSAGES.get(tool_name, "Working on that...")
         activity_type = _get_activity_type_for_tool(tool_name)
@@ -1467,6 +1476,10 @@ def emit_tool_activity(session_id: str, tool_name: str):
         session_id: The session ID
         tool_name: Internal tool name (will be converted to user-friendly message)
     """
+    # Don't emit ACTIVITY_START after run has finished
+    if session_id in _RUN_FINISHED_SESSIONS:
+        return
+
     message = TOOL_ACTIVITY_MESSAGES.get(tool_name, "Working on that...")
     activity_type = _get_activity_type_for_tool(tool_name)
 

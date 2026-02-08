@@ -691,6 +691,8 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 self.ws = ws
 
             def emit_run_started(self):
+                from app.core.agui_events import _RUN_FINISHED_SESSIONS
+                _RUN_FINISHED_SESSIONS.discard(session_id)
                 asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {"type": "RUN_STARTED"}
@@ -725,6 +727,8 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 pass  # Errors handled separately
 
             def emit_run_finished(self, response: str = None):
+                from app.core.agui_events import _RUN_FINISHED_SESSIONS
+                _RUN_FINISHED_SESSIONS.add(session_id)
                 asyncio.create_task(_safe_send(self.ws, {
                     "type": "agui_event",
                     "agui": {"type": "RUN_FINISHED"}
