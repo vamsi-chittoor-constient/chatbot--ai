@@ -438,7 +438,7 @@ async def payment_callback(
 
                             # Send directly via WebSocket (same format as agui_task)
                             event_data = _json.loads(event.to_json())
-                            await websocket_manager.send_message_with_metadata(
+                            ws_sent = await websocket_manager.send_message_with_metadata(
                                 session_id=session_id,
                                 message="",
                                 message_type="agui_event",
@@ -448,10 +448,24 @@ async def payment_callback(
                                 }
                             )
 
+                            if ws_sent:
+                                # Mark as delivered so reconnect doesn't re-send
+                                try:
+                                    from app.services.payment_state_service import (
+                                        get_payment_state as _get_ps,
+                                        set_payment_state as _set_ps
+                                    )
+                                    ps = _get_ps(session_id)
+                                    ps["ws_delivered"] = True
+                                    _set_ps(session_id, ps)
+                                except Exception:
+                                    pass  # Non-critical; reconnect will just re-deliver
+
                             logger.info(
                                 "payment_success_sent_direct_websocket",
                                 session_id=session_id,
-                                order_number=order_number
+                                order_number=order_number,
+                                ws_delivered=ws_sent
                             )
                         except Exception as e:
                             logger.warning(

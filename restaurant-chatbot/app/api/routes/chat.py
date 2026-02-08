@@ -1142,6 +1142,60 @@ async def chat_endpoint(
                 logger.warning(f"Used fallback welcome message for session {session_id}")
         # ========================================================================
 
+        # ========================================================================
+        # PENDING PAYMENT DELIVERY ON RECONNECT
+        # ========================================================================
+        # When user clicks Razorpay payment link, the browser navigates away,
+        # killing the WebSocket. The payment callback stores success in Redis
+        # but the WebSocket notification is lost. On reconnect, check Redis
+        # for a completed payment and deliver the PaymentSuccessEvent.
+        try:
+            from app.services.payment_state_service import get_payment_state, set_payment_state
+
+            payment_state = get_payment_state(session_id)
+            if (
+                payment_state.get("step") == "payment_success"
+                and payment_state.get("completed")
+                and not payment_state.get("ws_delivered")
+            ):
+                from app.core.agui_events import PaymentSuccessEvent
+                import json as _json
+
+                event = PaymentSuccessEvent(
+                    order_id=payment_state.get("order_id", ""),
+                    order_number=payment_state.get("order_number", ""),
+                    amount=payment_state.get("amount", 0),
+                    payment_id=payment_state.get("payment_id", ""),
+                    order_type=payment_state.get("order_type", "takeaway"),
+                    quick_replies=[
+                        {"label": "\U0001f4c4 View Receipt", "action": "view_receipt"},
+                        {"label": "\U0001f37d\ufe0f Order More", "action": "order_more"}
+                    ]
+                )
+
+                event_data = _json.loads(event.to_json())
+                sent = await websocket_manager.send_message_with_metadata(
+                    session_id=session_id,
+                    message="",
+                    message_type="agui_event",
+                    metadata={
+                        "agui": event_data,
+                        "target_session": session_id
+                    }
+                )
+
+                if sent:
+                    payment_state["ws_delivered"] = True
+                    set_payment_state(session_id, payment_state)
+                    logger.info(
+                        "pending_payment_delivered_on_reconnect",
+                        session_id=session_id,
+                        order_id=payment_state.get("order_id")
+                    )
+        except Exception as e:
+            logger.warning("pending_payment_check_failed", session_id=session_id, error=str(e))
+        # ========================================================================
+
         # Main message loop
         while True:
             # Receive message from client
