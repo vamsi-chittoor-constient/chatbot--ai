@@ -116,7 +116,7 @@ class MenuPreloader:
                         "description": row['description'] or "",
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
-                        "meal_types": list(row['meal_types']) if row['meal_types'] else [],
+                        "meal_types": list(row['meal_types']) if row['meal_types'] else ["All Day"],
                         "category": row['categories'][0] if row['categories'] and len(row['categories']) > 0 else "Other"
                     }
                     for row in rows
