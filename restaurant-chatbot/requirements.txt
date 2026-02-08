@@ -48,6 +48,7 @@ pybreaker
 
 # Payment Gateway
 razorpay
+reportlab
 
 # Voice Chat (Speech-to-Text & Text-to-Speech)
 torch
