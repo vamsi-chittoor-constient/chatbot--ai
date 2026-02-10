@@ -375,20 +375,23 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Use native language codes for accurate transcription.
-        # language="en" TRANSLATES to English (loses actual spoken words + mangles food names).
-        # language="ta"/"hi" transcribes accurately in native script — user confirmed
-        # native script on screen is fine. Crew translates input to English internally.
-        language_codes = {"English": "en", "Hindi": "hi", "Tamil": "ta"}
-        whisper_lang = language_codes.get(language, "en")
-        transcription = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            language=whisper_lang,
-            prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.0,
-            response_format="verbose_json",
-        )
+        # For code-switched speech (Tanglish/Hinglish), OMIT language param.
+        # - language="en" TRANSLATES to English (loses actual words)
+        # - language="ta" TRANSLATES to formal Tamil (loses casual Tanglish)
+        # - No language param = Whisper auto-detects per segment, best for mixed speech
+        # English gets explicit "en" since it's not code-switched.
+        # Hallucination filters below catch any issues from auto-detect.
+        whisper_kwargs = {
+            "model": "whisper-1",
+            "file": audio_file,
+            "prompt": vocabulary_hint if vocabulary_hint else None,
+            "temperature": 0.0,
+            "response_format": "verbose_json",
+        }
+        if language == "English":
+            whisper_kwargs["language"] = "en"
+
+        transcription = await client.audio.transcriptions.create(**whisper_kwargs)
 
         # Validate transcription quality using confidence scores
         if hasattr(transcription, 'avg_logprob'):
