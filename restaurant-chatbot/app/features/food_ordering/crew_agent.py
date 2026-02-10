@@ -1935,7 +1935,7 @@ def create_add_to_cart_tool(session_id: str):
             - add_to_cart("chick burg", 2) → Finds "Chicken Burger" via fuzzy match
         """
         # Emit activity for frontend (async - no thread overhead)
-        from app.core.agui_events import emit_tool_activity
+        from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "add_to_cart")
 
         from app.core.redis import get_cart_sync, set_cart_sync
@@ -1988,6 +1988,9 @@ def create_add_to_cart_tool(session_id: str):
             set_cart_sync(session_id, cart_data, ttl=3600)
 
             subtotal = sum(i['price'] * i['quantity'] for i in items)
+
+            # Emit cart update to frontend
+            emit_cart_data(session_id, items, subtotal)
 
             # Track last mentioned item (for pronoun resolution like "add more of it")
             try:
@@ -2110,7 +2113,7 @@ def create_remove_from_cart_tool(session_id: str):
             - Customer: "take out all pizzas" → remove_from_cart("pizza", 0)
         """
         # Emit activity for frontend (sync)
-        from app.core.agui_events import emit_tool_activity
+        from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "remove_from_cart")
 
         from app.core.redis import get_cart_sync, set_cart_sync
@@ -2158,6 +2161,9 @@ def create_remove_from_cart_tool(session_id: str):
 
             # Calculate new total
             new_total = sum(i['price'] * i['quantity'] for i in updated_items)
+
+            # Emit cart update to frontend
+            emit_cart_data(session_id, updated_items, new_total)
 
             logger.info(
                 "item_removed_from_cart",
