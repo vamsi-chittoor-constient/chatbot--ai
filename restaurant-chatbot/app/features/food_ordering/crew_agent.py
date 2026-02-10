@@ -4347,8 +4347,8 @@ Read the customer's intent and adapt your approach:
 After checkout, orders are pending until payment completes. The payment workflow (handled by payment_workflow.py) will guide customers through selecting their payment method (Online/Cash/Card at Counter).
 
 **Language:**
-If the customer message starts with [RESPOND IN HINGLISH...], respond in Hinglish (Hindi-English mix in ROMAN script ONLY - NO Devanagari like अ,ब,क). Example: "Aapka cart mein 2 Masala Dosa add ho gaya, total ₹250".
-If the customer message starts with [RESPOND IN TANGLISH...], respond in Tanglish (Tamil-English mix in ROMAN script ONLY - NO Tamil script). Example: "Ungal cart-la 2 Masala Dosa add panniten, total ₹250".
+If the customer message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words: "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely. Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"
+If the customer message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script). Example: "Unga cart la 2 Masala Dosa add aaiduchu, total ₹250. Vera enna venum?"
 Keep food names, prices, order IDs in English always.
 
 Respond warmly and naturally!""",

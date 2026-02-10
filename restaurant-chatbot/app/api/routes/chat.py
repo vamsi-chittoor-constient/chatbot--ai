@@ -70,23 +70,36 @@ async def translate_response(text: str, target_language: str) -> str:
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
         if target_language == "Hindi":
-            system_prompt = """Translate to Hinglish (Hindi-English mix written in Roman/English script). Rules:
-- If the text is ALREADY in Hinglish (mix of Hindi and English in Roman script), return it UNCHANGED
-- Translate ALL English sentences including structured messages with emojis (✅, 📋, 💰, etc.)
-- Write ALL Hindi words in Roman/English letters only (e.g. "Aapka", "Kya", "hain") - NO Devanagari script
-- Keep UNCHANGED: food item names, numbers, prices (₹), order IDs (ORD-...), emojis, markdown (**bold**)
-- Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
-- Be natural and conversational
-- Output ONLY the translation, no explanations"""
+            system_prompt = """Translate to casual Hinglish (Hindi-English mix in ROMAN script). Rules:
+- If the text is ALREADY in Hinglish (Roman script Hindi-English mix), return it UNCHANGED
+- Write like a young Indian texts friends — casual, short, natural. NOT formal/literary Hindi.
+- ROMAN script ONLY — NO Devanagari (अ,ब,क). Write Hindi words phonetically: "chahiye", "dikha do", "karo"
+- Use SIMPLE common Hindi words. Prefer "chahiye/chahte ho" over formal "chahenge", "karo" over "karenge", "dikha do" over "dikhana chahenge"
+- Keep lots of English mixed in — "check karo", "add kar do", "menu dekh lo", "items available hain"
+- Phonetic spelling for TTS: double vowels for long sounds (aa, ee, oo). Example: "aap", "nahi", "theek hai"
+- Keep UNCHANGED: food names, numbers, prices (₹), order IDs (ORD-...), emojis, markdown (**bold**)
+- Preserve ALL details (items, prices, totals) — do NOT shorten or drop information
+- Output ONLY the translation, no explanations
+Examples:
+  English: "Would you like to dine in or take away?" → "Aap dine in chahte ho ya take away?"
+  English: "Your cart has 2 items totaling ₹450" → "Aapke cart mein 2 items hain, total ₹450"
+  English: "No items found for dosa" → "Dosa ke liye koi item nahi mila"
+  BAD: "Kya aap kuch popular options dekhna chahenge" (too formal, TTS can't pronounce chahenge)
+  GOOD: "Kya aap popular options check karna chahte ho?"  """
         else:  # Tamil
-            system_prompt = """Translate to Tanglish (Tamil-English mix written in Roman/English script). Rules:
-- If the text is ALREADY in Tanglish (mix of Tamil and English in Roman script), return it UNCHANGED
-- Translate ALL English sentences including structured messages with emojis (✅, 📋, 💰, etc.)
-- Write ALL Tamil words in Roman/English letters only (e.g. "Ungal", "Enna", "iruku") - NO Tamil script
-- Keep UNCHANGED: food item names, numbers, prices (₹), order IDs (ORD-...), emojis, markdown (**bold**)
-- Preserve the FULL meaning and ALL details (cart items, prices, totals, questions) - do NOT shorten or summarize
-- Be natural and conversational
-- Output ONLY the translation, no explanations"""
+            system_prompt = """Translate to casual Tanglish (Tamil-English mix in ROMAN script). Rules:
+- If the text is ALREADY in Tanglish (Roman script Tamil-English mix), return it UNCHANGED
+- Write like a young South Indian texts friends — casual, short, natural. NOT formal/literary Tamil.
+- ROMAN script ONLY — NO Tamil script (அ,ஆ,இ). Write Tamil words phonetically as they sound.
+- Use SIMPLE common Tamil words mixed with English. Keep English technical/food words as-is.
+- Phonetic spelling for TTS: spell as spoken. "irukku", "pannunga", "paarunga", "sollunga"
+- Keep UNCHANGED: food names, numbers, prices (₹), order IDs (ORD-...), emojis, markdown (**bold**)
+- Preserve ALL details (items, prices, totals) — do NOT shorten or drop information
+- Output ONLY the translation, no explanations
+Examples:
+  English: "Would you like to dine in or take away?" → "Dine in ah illa take away ah?"
+  English: "Your cart has 2 items totaling ₹450" → "Unga cart la 2 items irukku, total ₹450"
+  English: "No items found for dosa" → "Dosa ku onnum kedaikala"  """
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",

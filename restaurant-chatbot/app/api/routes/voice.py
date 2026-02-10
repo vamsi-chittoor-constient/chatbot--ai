@@ -390,21 +390,16 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # For code-switching languages (Hindi, Tamil), use auto-detect instead of forcing
-        # This allows Whisper to naturally handle mixed language within utterances
-        use_auto_detect = language in ["Hindi", "Tamil"]
-
+        # Always use English for Whisper transcription — even for Hindi/Tamil speakers.
+        # Hindi/Tamil speech gets transcribed as English text (e.g., "do you have dosa").
+        # This avoids Devanagari/Tamil script output and hallucinations.
+        # The response pipeline handles translation to Hinglish/Tanglish for display + TTS.
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            # Auto-detect for code-switching languages, explicit for others
-            language=None if use_auto_detect else language_code_map.get(language, "en"),
-            # Multi-language aware prompt guides decoder to preserve English words
+            language="en",
             prompt=vocabulary_hint if vocabulary_hint else None,
-            # Higher temperature (0.2) allows flexibility for code-switching
-            # Still conservative enough to avoid hallucinations
-            temperature=0.2 if use_auto_detect else 0.0,
-            # Get detailed response with confidence scores for quality validation
+            temperature=0.0,
             response_format="verbose_json",
         )
 
@@ -1002,33 +997,31 @@ async def translate_for_tts(text: str, target_language: str, client: AsyncOpenAI
     try:
         # Language-specific translation prompts
         if target_language == "Hindi":
-            system_prompt = """You are a translator for a restaurant chatbot. Translate the English text to spoken Hinglish (Hindi-English mix).
-
-Rules:
-- Write ALL Hindi words in ROMAN/ENGLISH script only (e.g. "Aapka", "Kya", "hain") - ABSOLUTELY NO Devanagari script (no अ,ब,क characters)
-- Keep English words for: food items (dosa, biryani, paneer), numbers, prices (₹), technical terms
-- Use natural conversational Hindi, not formal/literary Hindi
-- Keep it concise - this is for TTS (text-to-speech)
-- Don't add any explanations, just output the translation
+            system_prompt = """Translate to casual spoken Hinglish for TTS (text-to-speech). Rules:
+- ROMAN script ONLY — NO Devanagari (no अ,ब,क). Write Hindi words phonetically.
+- Use SIMPLE casual Hindi words: "chahiye", "karo", "dekh lo", "mil gaya" — NOT formal "chahenge", "karenge", "dikhana chahenge"
+- Phonetic spelling for TTS pronunciation: double vowels for long sounds — "aap", "nahi", "theek", "haan"
+- Mix English freely: food items, numbers, prices (₹), "cart", "order", "add", "checkout"
+- Keep it SHORT and conversational — this will be spoken aloud
+- Output ONLY the translation
 
 Example:
 English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
-Hinglish: "Mujhe 3 items mile aapki search se. Kya aap Masala Dosa apne cart mein add karna chahenge?"
-"""
+Hinglish: "Aapki search mein 3 items mile. Masala Dosa cart mein add karna chahte ho?"
+BAD: "chahenge", "karenge", "dekhenge" (formal, TTS mispronounces)
+GOOD: "chahte ho", "karo", "dekh lo" (casual, TTS-friendly)"""
         elif target_language == "Tamil":
-            system_prompt = """You are a translator for a restaurant chatbot. Translate the English text to spoken Tanglish (Tamil-English mix).
-
-Rules:
-- Write ALL Tamil words in ROMAN/ENGLISH script only (e.g. "Ungal", "Enna", "iruku") - ABSOLUTELY NO Tamil script (no அ,ப,க characters)
-- Keep English words for: food items (dosa, biryani, paneer), numbers, prices (₹), technical terms
-- Use natural conversational Tamil, not formal/literary Tamil
-- Keep it concise - this is for TTS (text-to-speech)
-- Don't add any explanations, just output the translation
+            system_prompt = """Translate to casual spoken Tanglish for TTS (text-to-speech). Rules:
+- ROMAN script ONLY — NO Tamil script (no அ,ப,க). Write Tamil words phonetically as spoken.
+- Use casual Tamil: "irukku", "pannunga", "paarunga", "venum" — NOT formal/literary Tamil
+- Phonetic spelling for TTS: spell as pronounced. "aaiduchu", "sollunga", "kedaikala"
+- Mix English freely: food items, numbers, prices (₹), "cart", "order", "add", "checkout"
+- Keep it SHORT and conversational — this will be spoken aloud
+- Output ONLY the translation
 
 Example:
 English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
-Tanglish: "Ungal search-ku 3 items kidaichuthu. Masala Dosa-vai cart-la add pannunuma?"
-"""
+Tanglish: "Unga search la 3 items kidaichuchu. Masala Dosa cart la add pannunuma?"  """
         else:
             return text
 
