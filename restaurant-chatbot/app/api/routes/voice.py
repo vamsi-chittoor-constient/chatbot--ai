@@ -375,14 +375,16 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Always use language="en" to prevent hallucinations between languages.
-        # Native language codes (ta/hi) cause Whisper to hallucinate when audio
-        # contains mixed languages. language="en" gives stable English transcription
-        # which crew agent can process directly for tool calls.
+        # Use native language codes for accurate transcription.
+        # language="en" TRANSLATES to English (loses actual spoken words + mangles food names).
+        # language="ta"/"hi" transcribes accurately in native script — user confirmed
+        # native script on screen is fine. Crew translates input to English internally.
+        language_codes = {"English": "en", "Hindi": "hi", "Tamil": "ta"}
+        whisper_lang = language_codes.get(language, "en")
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language="en",
+            language=whisper_lang,
             prompt=vocabulary_hint if vocabulary_hint else None,
             temperature=0.0,
             response_format="verbose_json",
