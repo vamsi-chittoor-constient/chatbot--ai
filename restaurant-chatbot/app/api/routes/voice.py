@@ -352,28 +352,23 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — use SAMPLE TEXT in the expected output style.
-        # Whisper's prompt parameter is meant to be a sample of the expected transcription,
-        # NOT instructions. Instructional text causes prompt leaks (Whisper echoes the
-        # instructions as the transcript on silence/noise).
+        # Whisper vocabulary hints — ONLY food/brand names Whisper wouldn't know.
+        # Do NOT include phrases or sentences — Whisper echoes them as hallucinations
+        # when it can't understand the audio well (e.g. Tamil speech with language="en").
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "menu dikhao, Masala Dosa cart mein add karo, checkout karo, "
-                "kitna hua total, dine in ya take away, ek Paneer Biryani chahiye, "
-                "do Idli aur ek Vada Sambar add karo, haan remove karo, "
-                "chaar Cold Coffee aur paanch Apple Juice, online payment karo, "
-                "Rava Dosa dikhao, Ghee Dosa bhi add karo, beeda aur appalam"
+                "Masala Dosa, Rava Dosa, Ghee Dosa, Paneer Biryani, Idli, Vada, "
+                "Sambar, Appalam, Beeda, Parota, Dosai, Cold Coffee, Apple Juice, "
+                "Cheese Slice, Chicken Fillet, Badam Kulfi, Jigardhanda"
             ),
             "Tamil": (
-                "ungala menu la enna items iruku, Masala Dosa cart la add pannunga, "
-                "checkout pannunga, evvalavu aachu total, dine in or take away, "
-                "oru Paneer Biryani venum, randu Idli oru Vada Sambar add pannunga, "
-                "remove pannunga, naalu Cold Coffee anju Apple Juice, "
-                "Rava Dosa kaattunga, Ghee Dosa um add pannunga, order pannunga"
+                "Masala Dosa, Rava Dosa, Ghee Dosa, Paneer Biryani, Idli, Vada, "
+                "Sambar, Appalam, Beeda, Parota, Dosai, Cold Coffee, Apple Juice, "
+                "Cheese Slice, Chicken Fillet, Badam Kulfi, Jigardhanda"
             ),
         }
 
