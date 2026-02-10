@@ -530,21 +530,52 @@ async def process_speech_segment(
                 state["is_processing"] = False
             return
 
+        # =========================================================================
+        # ROMANIZE native script → Roman letters for display
+        # Whisper auto-detect outputs Tamil/Devanagari script for non-English.
+        # Romanize so user sees readable text matching what they actually said.
+        # =========================================================================
+        display_transcript = transcript_text
+        if language in ["Hindi", "Tamil"] and transcript_text:
+            try:
+                roman_resp = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": (
+                            "Transliterate to Roman script (English letters). "
+                            "Keep English words as-is. Do NOT translate meaning. "
+                            "Output ONLY the transliterated text, nothing else."
+                        )},
+                        {"role": "user", "content": transcript_text}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                display_transcript = roman_resp.choices[0].message.content.strip()
+                logger.info(
+                    "voice_romanized",
+                    session_id=session_id,
+                    native=transcript_text[:60],
+                    roman=display_transcript[:60]
+                )
+            except Exception as e:
+                logger.warning("voice_romanize_failed", error=str(e))
+
         logger.info(
             "voice_transcript",
             session_id=session_id,
-            transcript=transcript_text
+            transcript=display_transcript
         )
 
-        # Send transcript to client (native script is fine for display)
+        # Send romanized transcript to client
         await websocket.send_json({
             "type": "transcript",
-            "text": transcript_text
+            "text": display_transcript
         })
 
-        # Process with chat agent (English translation for crew happens in restaurant_crew.py)
+        # Process with chat agent — pass romanized text (crew translates to English internally)
         response_text, deferred_quick_replies = await process_with_chat_agent(
-            transcript_text,
+            display_transcript,
             session_id,
             websocket,
             language=language
