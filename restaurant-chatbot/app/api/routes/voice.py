@@ -390,16 +390,18 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Always use English for Whisper transcription — even for Hindi/Tamil speakers.
-        # Hindi/Tamil speech gets transcribed as English text (e.g., "do you have dosa").
-        # This avoids Devanagari/Tamil script output and hallucinations.
-        # The response pipeline handles translation to Hinglish/Tanglish for display + TTS.
+        # Use actual language code so Whisper TRANSCRIBES what was spoken
+        # (e.g., "ungala menu la enna items iruku") instead of TRANSLATING to English.
+        # The Roman script vocabulary prompt guides Whisper to output in Roman letters,
+        # not Devanagari/Tamil script. Prompt leak hallucinations are caught by the filter below.
+        # English translation for crew processing happens separately in restaurant_crew.py.
+        whisper_lang = language_code_map.get(language, "en")
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language="en",
+            language=whisper_lang,
             prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.0,
+            temperature=0.2 if language in ["Hindi", "Tamil"] else 0.0,
             response_format="verbose_json",
         )
 
@@ -531,13 +533,13 @@ async def process_speech_segment(
             transcript=transcript_text
         )
 
-        # Send transcript to client
+        # Send transcript to client (shows what user actually said)
         await websocket.send_json({
             "type": "transcript",
             "text": transcript_text
         })
 
-        # Process with chat agent (with full AGUI support)
+        # Process with chat agent (English translation for crew happens in restaurant_crew.py)
         response_text, deferred_quick_replies = await process_with_chat_agent(
             transcript_text,
             session_id,
