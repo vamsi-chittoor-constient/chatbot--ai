@@ -352,54 +352,43 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper transcription with language-specific vocabulary hints
-        # Using vocabulary hint in the TARGET language improves accuracy
-        # DO NOT use English hints for Hindi/Tamil - it causes hallucinations!
-
-        # Code-switching aware prompts with natural language guidance
-        # These prompts tell Whisper to EXPECT mixed language and preserve English words
+        # Whisper vocabulary hints — use SAMPLE TEXT in the expected output style.
+        # Whisper's prompt parameter is meant to be a sample of the expected transcription,
+        # NOT instructions. Instructional text causes prompt leaks (Whisper echoes the
+        # instructions as the transcript on silence/noise).
         vocabulary_hints = {
             "English": (
-                # Only include terms Whisper would otherwise mishear.
-                # Common English words (remove, order, cart) and well-known foods
-                # (biryani, dosa) don't need hints — Whisper already knows them.
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "This conversation mixes Hindi and English (Hinglish). "
-                "Transcribe exactly as spoken in ROMAN script, keeping English words unchanged: "
-                "menu, cart, add, remove, checkout, view, show, search, "
-                "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
-                "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
-                "dine in, take away, takeaway, payment, cash, online, beeda, appalam. "
-                "Common Hinglish phrases: menu dikhao, cart mein add karo, order karo, checkout karo, "
-                "ek, do, teen, chaar, paanch, chhe, saat, aath, nau, das, "
-                "kitna, kitne, chahiye, dijiye, hatao, dikhao, dine in, take away."
+                "menu dikhao, Masala Dosa cart mein add karo, checkout karo, "
+                "kitna hua total, dine in ya take away, ek Paneer Biryani chahiye, "
+                "do Idli aur ek Vada Sambar add karo, haan remove karo, "
+                "chaar Cold Coffee aur paanch Apple Juice, online payment karo, "
+                "Rava Dosa dikhao, Ghee Dosa bhi add karo, beeda aur appalam"
             ),
             "Tamil": (
-                "This conversation mixes Tamil and English (Tanglish). "
-                "Transcribe exactly as spoken in ROMAN script, keeping English words unchanged: "
-                "menu, cart, add, remove, checkout, view, show, "
-                "apple juice, orange juice, masala dosa, idli, vada, biryani, paneer. "
-                "Common Tanglish phrases: menu kaatungal, cart, order, checkout, "
-                "irandu, moondru, naanku, ainthu, evvalavu, venum, saappaadu."
+                "ungala menu la enna items iruku, Masala Dosa cart la add pannunga, "
+                "checkout pannunga, evvalavu aachu total, dine in or take away, "
+                "oru Paneer Biryani venum, randu Idli oru Vada Sambar add pannunga, "
+                "remove pannunga, naalu Cold Coffee anju Apple Juice, "
+                "Rava Dosa kaattunga, Ghee Dosa um add pannunga, order pannunga"
             ),
         }
 
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Use actual language code so Whisper TRANSCRIBES what was spoken
-        # (e.g., "ungala menu la enna items iruku") instead of TRANSLATING to English.
-        # The Roman script vocabulary prompt guides Whisper to output in Roman letters,
-        # not Devanagari/Tamil script. Prompt leak hallucinations are caught by the filter below.
-        # English translation for crew processing happens separately in restaurant_crew.py.
-        whisper_lang = language_code_map.get(language, "en")
+        # Always use language="en" so Whisper outputs Roman/English phonetics.
+        # Without an explicit language param Whisper hallucinates on non-English audio.
+        # language="ta"/"hi" forces native script output (Tamil/Devanagari).
+        # language="en" + Roman script sample prompts = English phonetic transcription
+        # of spoken Tanglish/Hinglish words (e.g. "ungala menu la enna items iruku").
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language=whisper_lang,
+            language="en",
             prompt=vocabulary_hint if vocabulary_hint else None,
             temperature=0.2 if language in ["Hindi", "Tamil"] else 0.0,
             response_format="verbose_json",
@@ -426,15 +415,30 @@ async def process_speech_segment(
         import re
 
         # Check 0: Whisper prompt leak — on silence/noise Whisper sometimes
-        # echoes the vocabulary hint prompt as the transcription
+        # echoes the vocabulary hint or meta-words as the transcription.
+        # Includes single-word leaks like "TANGLISH", "HINGLISH" that appear
+        # when Whisper picks up a label from the prompt context.
         _prompt_fragments = [
             "transcribe exactly as spoken",
             "keeping english words unchanged",
             "roman script",
             "common hinglish phrases",
             "common tanglish phrases",
+            "this conversation mixes",
         ]
-        _text_lower = transcript_text.lower()
+        _text_lower = transcript_text.lower().strip()
+        # Single-word or very short prompt leaks (meta labels, not real speech)
+        _meta_words = {"tanglish", "hinglish", "tamil", "hindi", "english", "transcript", "transcription"}
+        if _text_lower in _meta_words:
+            logger.warning(
+                "voice_hallucination_meta_word",
+                session_id=session_id,
+                text=transcript_text
+            )
+            await websocket.send_json({"type": "processing_end"})
+            if state is not None:
+                state["is_processing"] = False
+            return
         if any(frag in _text_lower for frag in _prompt_fragments):
             logger.warning(
                 "voice_hallucination_prompt_leak",
