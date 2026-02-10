@@ -375,22 +375,16 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Use native language codes for accurate transcription:
-        # language="en" TRANSLATES Tamil→English (loses actual words)
-        # language="ta"/"hi" TRANSCRIBES accurately in native script
-        # Native script is then romanized below via GPT-4o-mini.
-        language_code_for_whisper = {
-            "English": "en",
-            "Hindi": "hi",
-            "Tamil": "ta",
-        }
-        whisper_lang = language_code_for_whisper.get(language, "en")
+        # Always use language="en" to prevent hallucinations between languages.
+        # Native language codes (ta/hi) cause Whisper to hallucinate when audio
+        # contains mixed languages. language="en" gives stable English transcription
+        # which crew agent can process directly for tool calls.
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language=whisper_lang,
+            language="en",
             prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.2 if language in ["Hindi", "Tamil"] else 0.0,
+            temperature=0.0,
             response_format="verbose_json",
         )
 
