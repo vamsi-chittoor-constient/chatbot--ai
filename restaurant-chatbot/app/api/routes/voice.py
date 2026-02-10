@@ -417,13 +417,32 @@ async def process_speech_segment(
         transcript_text = transcription.text.strip()
 
         # =========================================================================
-        # HALLUCINATION FILTERING - Detect infinite loops / repetition
+        # HALLUCINATION FILTERING - Detect prompt leaks + infinite loops
         # =========================================================================
-        # Whisper sometimes hallucinates by repeating a phrase infinitely on silence
-        # e.g., "Thank you. Thank you. Thank you." or "how many potatoes" x50
 
         from collections import Counter
         import re
+
+        # Check 0: Whisper prompt leak — on silence/noise Whisper sometimes
+        # echoes the vocabulary hint prompt as the transcription
+        _prompt_fragments = [
+            "transcribe exactly as spoken",
+            "keeping english words unchanged",
+            "roman script",
+            "common hinglish phrases",
+            "common tanglish phrases",
+        ]
+        _text_lower = transcript_text.lower()
+        if any(frag in _text_lower for frag in _prompt_fragments):
+            logger.warning(
+                "voice_hallucination_prompt_leak",
+                session_id=session_id,
+                text=transcript_text[:80]
+            )
+            await websocket.send_json({"type": "processing_end"})
+            if state is not None:
+                state["is_processing"] = False
+            return
 
         # Normalize text for analysis (remove punctuation, lowercase)
         normalized = re.sub(r'[^\w\s]', ' ', transcript_text.lower())
@@ -997,31 +1016,29 @@ async def translate_for_tts(text: str, target_language: str, client: AsyncOpenAI
     try:
         # Language-specific translation prompts
         if target_language == "Hindi":
-            system_prompt = """Translate to casual spoken Hinglish for TTS (text-to-speech). Rules:
-- ROMAN script ONLY — NO Devanagari (no अ,ब,क). Write Hindi words phonetically.
-- Use SIMPLE casual Hindi words: "chahiye", "karo", "dekh lo", "mil gaya" — NOT formal "chahenge", "karenge", "dikhana chahenge"
-- Phonetic spelling for TTS pronunciation: double vowels for long sounds — "aap", "nahi", "theek", "haan"
-- Mix English freely: food items, numbers, prices (₹), "cart", "order", "add", "checkout"
-- Keep it SHORT and conversational — this will be spoken aloud
+            system_prompt = """Translate to Hindi-English mix for TTS (text-to-speech) audio output. Rules:
+- Write Hindi words in DEVANAGARI script (आपके, में, हो गये) — TTS pronounces native script correctly
+- Keep English words in ENGLISH script: food names, "cart", "order", "add", "checkout", numbers, prices (₹)
+- Mix both scripts naturally: "आपके cart में 2 Masala Dosa add हो गये, total ₹250"
+- Use casual conversational Hindi — NOT formal/literary
+- Keep it SHORT — this will be spoken aloud
 - Output ONLY the translation
 
 Example:
 English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
-Hinglish: "Aapki search mein 3 items mile. Masala Dosa cart mein add karna chahte ho?"
-BAD: "chahenge", "karenge", "dekhenge" (formal, TTS mispronounces)
-GOOD: "chahte ho", "karo", "dekh lo" (casual, TTS-friendly)"""
+TTS: "आपकी search में 3 items मिले। Masala Dosa cart में add करना चाहते हो?"  """
         elif target_language == "Tamil":
-            system_prompt = """Translate to casual spoken Tanglish for TTS (text-to-speech). Rules:
-- ROMAN script ONLY — NO Tamil script (no அ,ப,க). Write Tamil words phonetically as spoken.
-- Use casual Tamil: "irukku", "pannunga", "paarunga", "venum" — NOT formal/literary Tamil
-- Phonetic spelling for TTS: spell as pronounced. "aaiduchu", "sollunga", "kedaikala"
-- Mix English freely: food items, numbers, prices (₹), "cart", "order", "add", "checkout"
-- Keep it SHORT and conversational — this will be spoken aloud
+            system_prompt = """Translate to Tamil-English mix for TTS (text-to-speech) audio output. Rules:
+- Write Tamil words in TAMIL script (உங்க, இருக்கு, பண்ணுங்க) — TTS pronounces native script correctly
+- Keep English words in ENGLISH script: food names, "cart", "order", "add", "checkout", numbers, prices (₹)
+- Mix both scripts naturally: "உங்க cart ல 2 Masala Dosa add ஆயிடுச்சு, total ₹250"
+- Use casual conversational Tamil — NOT formal/literary
+- Keep it SHORT — this will be spoken aloud
 - Output ONLY the translation
 
 Example:
 English: "I found 3 items matching your search. Would you like to add Masala Dosa to your cart?"
-Tanglish: "Unga search la 3 items kidaichuchu. Masala Dosa cart la add pannunuma?"  """
+TTS: "உங்க search ல 3 items கிடைச்சுச்சு. Masala Dosa cart ல add பண்ணுமா?"  """
         else:
             return text
 

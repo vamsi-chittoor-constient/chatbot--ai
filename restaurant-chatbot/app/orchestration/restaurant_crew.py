@@ -1034,25 +1034,33 @@ async def process_with_agui_streaming(
         # 🚀 RAG-BASED TOOL RETRIEVAL - Dynamically filter tools per request
         # Convert tools list to dict for RAG
         all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
-        
-        # TRANSLATION LAYER FOR RAG:
-        # If query is non-English (or we want to be safe), translate it to English for better retrieval
-        # Tools are indexed in English, so searching in Hindi/Tamil yields poor results.
-        # We use a lightweight LLM call to translate ONLY the search query.
-        rag_query = user_message
-        if any(ord(c) > 127 for c in user_message): # Simple heuristic: contains non-ASCII characters (likely Hindi/Tamil script)
+
+        # TRANSLATION LAYER: Translate non-English input to English for crew + RAG.
+        # Whisper transcribes to English in voice mode, but in CHAT mode users type
+        # Hinglish/Tanglish ("menu dikhao", "2 bisleri add karo").
+        # The crew agent and RAG tools work best with English input.
+        # We translate once and use the English version for both RAG and crew task.
+        english_input = user_message
+        if language != "English" and language in ["Hindi", "Tamil"]:
             try:
-                emitter.emit_activity("thinking", "Translating for tool search...") # Notify user (optional detail)
-                from app.ai_services.openai_service import OpenAIService
-                openai_service = OpenAIService()
-                # Fast translation to English for search only
-                rag_query = await openai_service.translate_query(user_message, "English")
-                logger.info("rag_query_translated", original=user_message, translated=rag_query)
+                from openai import AsyncOpenAI
+                _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                _resp = await _client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Translate to English. Keep food names, numbers, prices unchanged. Output ONLY the translation."},
+                        {"role": "user", "content": user_message}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                english_input = _resp.choices[0].message.content.strip()
+                logger.info("crew_input_translated", original=user_message, english=english_input)
             except Exception as e:
-                logger.warning("rag_translation_failed", error=str(e))
-                rag_query = user_message
-                
-        relevant_tools = get_relevant_tools(rag_query, all_tools_dict, max_tools=6)
+                logger.warning("crew_input_translation_failed", error=str(e))
+                english_input = user_message
+
+        relevant_tools = get_relevant_tools(english_input, all_tools_dict, max_tools=6)
 
         # Update food ordering agent's tools dynamically (cached crew, fresh tools!)
         crew._food_ordering_agent.tools = relevant_tools
@@ -1074,7 +1082,7 @@ async def process_with_agui_streaming(
         )
 
         inputs = {
-            "user_input": user_message,
+            "user_input": english_input,  # English for reliable tool calling
             "semantic_context": semantic_context if semantic_context else "No tracked context yet",
             "context": context
         }
