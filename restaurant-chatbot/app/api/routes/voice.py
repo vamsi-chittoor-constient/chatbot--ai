@@ -375,21 +375,18 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # For code-switched speech (Tanglish/Hinglish), OMIT language param.
-        # - language="en" TRANSLATES to English (loses actual words)
-        # - language="ta" TRANSLATES to formal Tamil (loses casual Tanglish)
-        # - No language param = Whisper auto-detects per segment, best for mixed speech
-        # English gets explicit "en" since it's not code-switched.
-        # Hallucination filters below catch any issues from auto-detect.
+        # Always use language="en" so Whisper outputs English letters.
+        # For code-switched speech (Tanglish/Hinglish) this transcribes
+        # exactly what the user said in English phonetics.
+        # Crew agent's input translation converts to proper English for tools.
         whisper_kwargs = {
             "model": "whisper-1",
             "file": audio_file,
             "prompt": vocabulary_hint if vocabulary_hint else None,
             "temperature": 0.0,
             "response_format": "verbose_json",
+            "language": "en",
         }
-        if language == "English":
-            whisper_kwargs["language"] = "en"
 
         transcription = await client.audio.transcriptions.create(**whisper_kwargs)
 
@@ -530,52 +527,21 @@ async def process_speech_segment(
                 state["is_processing"] = False
             return
 
-        # =========================================================================
-        # ROMANIZE native script → Roman letters for display
-        # Whisper auto-detect outputs Tamil/Devanagari script for non-English.
-        # Romanize so user sees readable text matching what they actually said.
-        # =========================================================================
-        display_transcript = transcript_text
-        if language in ["Hindi", "Tamil"] and transcript_text:
-            try:
-                roman_resp = await client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": (
-                            "Transliterate to Roman script (English letters). "
-                            "Keep English words as-is. Do NOT translate meaning. "
-                            "Output ONLY the transliterated text, nothing else."
-                        )},
-                        {"role": "user", "content": transcript_text}
-                    ],
-                    temperature=0.1,
-                    max_tokens=200
-                )
-                display_transcript = roman_resp.choices[0].message.content.strip()
-                logger.info(
-                    "voice_romanized",
-                    session_id=session_id,
-                    native=transcript_text[:60],
-                    roman=display_transcript[:60]
-                )
-            except Exception as e:
-                logger.warning("voice_romanize_failed", error=str(e))
-
         logger.info(
             "voice_transcript",
             session_id=session_id,
-            transcript=display_transcript
+            transcript=transcript_text
         )
 
-        # Send romanized transcript to client
+        # Send transcript to client (already in English letters from Whisper)
         await websocket.send_json({
             "type": "transcript",
-            "text": display_transcript
+            "text": transcript_text
         })
 
-        # Process with chat agent — pass romanized text (crew translates to English internally)
+        # Process with chat agent — crew translates to proper English internally for tools
         response_text, deferred_quick_replies = await process_with_chat_agent(
-            display_transcript,
+            transcript_text,
             session_id,
             websocket,
             language=language
