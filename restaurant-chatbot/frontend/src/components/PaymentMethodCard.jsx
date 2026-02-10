@@ -8,9 +8,9 @@ export function PaymentMethodCard({ data, onSelectMethod }) {
     const { title, amount, currency, order_id, methods } = data
 
     const handleSelect = (method) => {
-        setSelectedId(method.id)
+        setSelectedId(method.action || method.id)
         if (onSelectMethod) {
-            onSelectMethod(`Pay with ${method.label}`)
+            onSelectMethod(method.action || method.label)
         }
     }
 
@@ -44,13 +44,13 @@ export function PaymentMethodCard({ data, onSelectMethod }) {
 
             {/* Methods List */}
             <div className="divide-y divide-chat-border/50">
-                {methods.map((method) => {
+                {methods.map((method, index) => {
                     const Icon = getIcon(method.type)
-                    const isSelected = selectedId === method.id
+                    const isSelected = selectedId === (method.action || method.id)
 
                     return (
                         <button
-                            key={method.id}
+                            key={method.action || method.id || index}
                             onClick={() => handleSelect(method)}
                             className={`w-full px-5 py-4 flex items-center justify-between group transition-all duration-200 
                 ${isSelected ? 'bg-accent/10' : 'hover:bg-chat-tertiary/50'}

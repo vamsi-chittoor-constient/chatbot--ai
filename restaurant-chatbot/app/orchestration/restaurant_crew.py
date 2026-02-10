@@ -653,7 +653,11 @@ When customer asks about food, menu, or ordering, delegate to Kavya the Food Ord
 Context: {semantic_context}
 History: {context}
 
-RULES: Always use tools. Return tool output as-is.""",
+RULES:
+- Always use tools. Return tool output as-is.
+- LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in Hinglish (Hindi-English mix in ROMAN script only, NO Devanagari like अ,ब,क). Example: "Aapka cart mein 2 Masala Dosa add ho gaya, total ₹250".
+- LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in Tanglish (Tamil-English mix in ROMAN script only, NO Tamil script). Example: "Ungal cart-la 2 Masala Dosa add panniten, total ₹250".
+- Keep food names, prices, order IDs in English always.""",
         expected_output="Tool output (human-friendly message from tool)",
         agent=food_ordering_agent,
     )

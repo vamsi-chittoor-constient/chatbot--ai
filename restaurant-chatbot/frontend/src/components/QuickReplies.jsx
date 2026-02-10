@@ -4,7 +4,7 @@ export const QuickReplies = ({ options, onSelect }) => {
   if (!options || options.length === 0) return null
 
   const handleClick = (option) => {
-    const value = typeof option === 'string' ? option : (option.value || option.label || option.text)
+    const value = typeof option === 'string' ? option : (option.action || option.value || option.label || option.text)
     onSelect(value)
   }
 

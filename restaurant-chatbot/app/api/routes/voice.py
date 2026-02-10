@@ -368,22 +368,22 @@ async def process_speech_segment(
             ),
             "Hindi": (
                 "This conversation mixes Hindi and English (Hinglish). "
-                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "Transcribe exactly as spoken in ROMAN script, keeping English words unchanged: "
                 "menu, cart, add, remove, checkout, view, show, search, "
                 "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
                 "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
                 "dine in, take away, takeaway, payment, cash, online, beeda, appalam. "
-                "Common Hindi phrases: मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
-                "एक, दो, तीन, चार, पांच, छह, सात, आठ, नौ, दस, "
-                "कितना, कितने, चाहिए, दीजिए, दीजिये, हटाओ, दिखाओ, डाइन इन, टेक अवे।"
+                "Common Hinglish phrases: menu dikhao, cart mein add karo, order karo, checkout karo, "
+                "ek, do, teen, chaar, paanch, chhe, saat, aath, nau, das, "
+                "kitna, kitne, chahiye, dijiye, hatao, dikhao, dine in, take away."
             ),
             "Tamil": (
                 "This conversation mixes Tamil and English (Tanglish). "
-                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "Transcribe exactly as spoken in ROMAN script, keeping English words unchanged: "
                 "menu, cart, add, remove, checkout, view, show, "
                 "apple juice, orange juice, masala dosa, idli, vada, biryani, paneer. "
-                "Common Tamil phrases: மெனு காட்டுங்கள், கார்ட், ஆர்டர், செக்அவுட், "
-                "இரண்டு, மூன்று, நான்கு, ஐந்து, எவ்வளவு, வேண்டும், சாப்பாடு।"
+                "Common Tanglish phrases: menu kaatungal, cart, order, checkout, "
+                "irandu, moondru, naanku, ainthu, evvalavu, venum, saappaadu."
             ),
         }
 
@@ -908,7 +908,7 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
         )
         # Return localized error message
         if language == "Hindi":
-            return "Maaf kijiye, kuch तकनीकी (technical) dikkat aa gayi. Please dobara boliye.", []
+            return "Maaf kijiye, kuch technical dikkat aa gayi. Please dobara boliye.", []
         elif language == "Tamil":
             return "Mannikkavum, oru technical problem erpattullathu. Thayavu seidhu meeNdum sollungal.", []
 
