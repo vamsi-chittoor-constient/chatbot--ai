@@ -948,7 +948,8 @@ async def process_with_agui_streaming(
     user_id: Optional[str] = None,
     welcome_msg: Optional[str] = None,
     device_id: Optional[str] = None,
-    language: str = "English"
+    language: str = "English",
+    voice_mode: bool = False
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Process user message with AG-UI event streaming.
@@ -1132,10 +1133,10 @@ async def process_with_agui_streaming(
         emitter.emit_activity_end()
 
         # Translate crew response if needed.
-        # The crew sometimes responds in English despite the language prefix, so translation is needed.
-        # The prompt includes "if already in Hinglish/Tanglish, return UNCHANGED" to avoid double-translation.
-        logger.info("crew_language_check", session_id=session_id, language=language, will_translate=(language != "English" and language in ["Hindi", "Tamil"]), response_preview=response[:50] if response else "")
-        if language != "English" and language in ["Hindi", "Tamil"]:
+        # In VOICE mode: skip — translate_for_tts() in voice.py handles response translation.
+        # In CHAT mode: translate here (crew responds in English, user expects Hinglish/Tanglish).
+        logger.info("crew_language_check", session_id=session_id, language=language, voice_mode=voice_mode, will_translate=(language != "English" and language in ["Hindi", "Tamil"] and not voice_mode), response_preview=response[:50] if response else "")
+        if language != "English" and language in ["Hindi", "Tamil"] and not voice_mode:
             logger.info("crew_translating_response", session_id=session_id, language=language)
             response = await _translate_response(response, language)
             logger.info("crew_translation_done", session_id=session_id, translated_preview=response[:50] if response else "")

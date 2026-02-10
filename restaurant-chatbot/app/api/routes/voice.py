@@ -840,17 +840,17 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
                 return payment_response, deferred_quick_replies
 
             # Process with agent
-            # VOICE MODE: Always pass language="English" to crew so it does NOT translate.
-            # Translation happens ONCE in translate_for_tts() below (English → target language).
-            # Passing the real language here caused double-translation: crew translated to
-            # Roman Hinglish, then translate_for_tts translated again → inconsistent output.
+            # Pass real language so crew's INPUT translation fires (romanized
+            # Tanglish/Hinglish → English for tool calls). voice_mode=True
+            # skips crew's response translation — translate_for_tts handles it.
             response, _ = await process_with_agui_streaming(
                 user_message=text,
                 session_id=session_id,
                 conversation_history=conversation_history,
                 emitter=emitter,
                 user_id=user_id,
-                language="English"
+                language=language,
+                voice_mode=True
             )
 
             # Flush any remaining staged events to voice WebSocket
