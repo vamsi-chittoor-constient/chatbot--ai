@@ -28,11 +28,12 @@ async def handle_checkout_message(
 
     # ---- Detect standalone order type selection (follow-up to "dine in or take away?" prompt) ----
     # When checkout handler previously asked "dine in or take away?", the user may respond
-    # with just the order type (e.g. "Take Away", "Dine In") without the word "checkout".
+    # with the order type in natural language (e.g. "Take away karo", "Dine in please").
+    # Use substring matching — not exact match — to handle variations.
     standalone_order_type = None
-    if message_lower in ["dine in", "dine-in", "dinein", "dine"]:
+    if any(word in message_lower for word in ["dine in", "dine-in", "dinein"]):
         standalone_order_type = "dine_in"
-    elif message_lower in ["take away", "takeaway", "take-away", "pickup", "take out"]:
+    elif any(word in message_lower for word in ["take away", "takeaway", "take-away", "pickup", "take out"]):
         standalone_order_type = "take_away"
 
     if standalone_order_type:
@@ -218,8 +219,11 @@ def is_checkout_message(message: str) -> bool:
         return True
 
     # Standalone order type selections (follow-up to "dine in or take away?" prompt)
-    if message_lower in ["dine in", "dine-in", "dinein", "dine",
-                          "take away", "takeaway", "take-away", "pickup", "take out"]:
+    # Substring match to handle "take away karo", "dine in please", etc.
+    if any(word in message_lower for word in [
+        "dine in", "dine-in", "dinein",
+        "take away", "takeaway", "take-away", "pickup", "take out"
+    ]):
         return True
 
     return False
