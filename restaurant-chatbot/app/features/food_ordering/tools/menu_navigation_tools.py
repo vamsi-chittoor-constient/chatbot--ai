@@ -170,13 +170,23 @@ async def get_menu_items_by_time_range(
         )
     ).subquery()
 
-    # Main query to get menu items
+    # Items that have ANY availability schedule entry (used to find items WITHOUT schedules)
+    all_scheduled_items = (
+        select(MenuItemAvailabilitySchedule.menu_item_id)
+        .where(MenuItemAvailabilitySchedule.is_deleted == False)
+        .distinct()
+    ).subquery()
+
+    # Main query: items with matching time schedules OR items without any schedule (always available)
     query = (
         select(MenuItemEnrichedView)
         .where(
             and_(
                 MenuItemEnrichedView.is_deleted == False,
-                MenuItemEnrichedView.menu_item_id.in_(select(subquery.c.menu_item_id))
+                or_(
+                    MenuItemEnrichedView.menu_item_id.in_(select(subquery.c.menu_item_id)),
+                    ~MenuItemEnrichedView.menu_item_id.in_(select(all_scheduled_items.c.menu_item_id))
+                )
             )
         )
     )
@@ -573,8 +583,16 @@ class GetMenuItemsByFiltersTool(ToolBase):
                 if meal_timing:
                     # Meal timings is an ARRAY field, use contains
                     # Capitalize first letter to match database format (e.g., "dinner" -> "Dinner")
+                    # Also include "All Day" items and items with no meal timing restrictions
                     meal_timing_formatted = meal_timing.capitalize()
-                    query = query.where(MenuItemEnrichedView.meal_timings.contains([meal_timing_formatted]))
+                    query = query.where(
+                        or_(
+                            MenuItemEnrichedView.meal_timings.contains([meal_timing_formatted]),
+                            MenuItemEnrichedView.meal_timings.contains(['All Day']),
+                            MenuItemEnrichedView.meal_timings.is_(None),
+                            func.coalesce(func.array_length(MenuItemEnrichedView.meal_timings, 1), 0) == 0,
+                        )
+                    )
                     filters_applied['meal_timing'] = meal_timing
 
                 if min_price is not None:
@@ -747,29 +765,26 @@ class GetCurrentMealSuggestionsTool(ToolBase):
                 if meal_time_override:
                     meal_time = meal_time_override
 
-                # Step 2: Get menu items using time-based query
-                current_time = datetime.now().time()
+                # Step 2: Get menu items using meal_timings from enriched view
+                # This correctly handles:
+                # - Items with specific meal times (e.g., ['Breakfast', 'Lunch'])
+                # - Items with 'All Day' meal timing
+                # - Items with NO meal timing restrictions (NULL/empty = always available)
+                meal_type_name = meal_time.capitalize()  # e.g., "Dinner", "Breakfast", "Lunch"
 
-                # Query menu_item_availability_schedule where current time falls within time_from/time_to
-                availability_subquery = (
-                    select(MenuItemAvailabilitySchedule.menu_item_id)
-                    .where(
-                        and_(
-                            MenuItemAvailabilitySchedule.is_deleted == False,
-                            MenuItemAvailabilitySchedule.is_available == True,
-                            MenuItemAvailabilitySchedule.time_from <= current_time,
-                            MenuItemAvailabilitySchedule.time_to >= current_time
-                        )
-                    )
-                ).subquery()
-
-                # Step 3: Build main query to get menu items from enriched view
+                # Step 3: Build main query using enriched view meal_timings array
                 query = select(MenuItemEnrichedView).where(
                     and_(
                         MenuItemEnrichedView.is_deleted == False,
                         MenuItemEnrichedView.menu_item_in_stock == True,
-                        MenuItemEnrichedView.menu_item_id.in_(
-                            select(availability_subquery.c.menu_item_id)
+                        or_(
+                            # Items specifically available for current meal time
+                            MenuItemEnrichedView.meal_timings.contains([meal_type_name]),
+                            # Items available "All Day"
+                            MenuItemEnrichedView.meal_timings.contains(['All Day']),
+                            # Items with no meal timing restrictions (always available)
+                            MenuItemEnrichedView.meal_timings.is_(None),
+                            func.coalesce(func.array_length(MenuItemEnrichedView.meal_timings, 1), 0) == 0,
                         )
                     )
                 )

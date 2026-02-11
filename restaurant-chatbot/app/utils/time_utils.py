@@ -198,8 +198,8 @@ def is_item_available_for_time(
     # Normalize to lowercase for comparison
     item_availability_time = item_availability_time.lower().strip()
 
-    # All-day items are always available
-    if item_availability_time == "all_day":
+    # All-day items are always available (handle both "all_day" and "all day" formats)
+    if item_availability_time in ("all_day", "all day"):
         return True
 
     # If no current meal time provided, assume available (fallback)
@@ -208,6 +208,10 @@ def is_item_available_for_time(
 
     # Handle comma-separated availability times (e.g., "breakfast,lunch")
     available_times = [t.strip() for t in item_availability_time.split(",")]
+
+    # If "all day" or "all_day" is in the list, item is always available
+    if "all day" in available_times or "all_day" in available_times:
+        return True
 
     return current_meal_time in available_times
 

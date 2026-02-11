@@ -21,7 +21,7 @@ from datetime import datetime
 import structlog
 import json
 
-from app.features.food_ordering.models import MenuItem, MenuCategory, MenuItemCategoryMapping
+from app.features.food_ordering.models import MenuItem, MenuCategory, MenuItemCategoryMapping, MenuItemAvailabilitySchedule
 from app.core.database import get_db_session
 from app.core.redis import get_redis_client
 from sqlalchemy import select
@@ -119,10 +119,13 @@ class MenuCacheService:
                 # Create category lookup map
                 category_map = {str(cat.menu_category_id): cat for cat in categories}
 
-                # Get all active menu items with their category mappings
+                # Get all active menu items with their category mappings and availability schedules
                 items_result = await db_session.execute(
                     select(MenuItem)
-                    .options(selectinload(MenuItem.category_mappings))
+                    .options(
+                        selectinload(MenuItem.category_mappings),
+                        selectinload(MenuItem.availability_schedules).selectinload(MenuItemAvailabilitySchedule.meal_type)
+                    )
                     .where(MenuItem.menu_item_in_stock == True)
                     .where(MenuItem.is_deleted == False)
                 )
@@ -171,6 +174,17 @@ class MenuCacheService:
                             if category_id in category_map:
                                 category_name = category_map[category_id].menu_category_name
 
+                        # Derive availability_time from availability_schedules + meal_type
+                        meal_timings = []
+                        if item.availability_schedules:
+                            for schedule in item.availability_schedules:
+                                if schedule.meal_type and not schedule.is_deleted:
+                                    meal_name = schedule.meal_type.meal_type_name.lower()
+                                    if meal_name not in meal_timings:
+                                        meal_timings.append(meal_name)
+                        # None = no restrictions (always available), "all_day" = explicit all day
+                        availability_time = ",".join(meal_timings) if meal_timings else None
+
                         item_data = {
                             "id": item_id,
                             "name": item.menu_item_name,
@@ -183,6 +197,7 @@ class MenuCacheService:
                             "spice_level": item.menu_item_spice_level or "",
                             "calories": item.menu_item_calories or 0,
                             "prep_time_minutes": item.menu_item_minimum_preparation_time or 0,
+                            "availability_time": availability_time,
                             "cached_at": datetime.now().isoformat()
                         }
 
@@ -240,10 +255,13 @@ class MenuCacheService:
 
         try:
             async with get_db_session() as db_session:
-                # Get item from database with category mappings
+                # Get item from database with category mappings and availability schedules
                 result = await db_session.execute(
                     select(MenuItem)
-                    .options(selectinload(MenuItem.category_mappings))
+                    .options(
+                        selectinload(MenuItem.category_mappings),
+                        selectinload(MenuItem.availability_schedules).selectinload(MenuItemAvailabilitySchedule.meal_type)
+                    )
                     .where(MenuItem.menu_item_id == item_id)
                 )
                 item = result.scalar_one_or_none()
@@ -269,6 +287,16 @@ class MenuCacheService:
                     if category:
                         category_name = category.menu_category_name
 
+                # Derive availability_time from availability_schedules + meal_type
+                meal_timings = []
+                if item.availability_schedules:
+                    for schedule in item.availability_schedules:
+                        if schedule.meal_type and not schedule.is_deleted:
+                            meal_name = schedule.meal_type.meal_type_name.lower()
+                            if meal_name not in meal_timings:
+                                meal_timings.append(meal_name)
+                availability_time = ",".join(meal_timings) if meal_timings else None
+
                 # Update cache
                 item_key = self._get_menu_item_key(str(item.menu_item_id))
 
@@ -284,6 +312,7 @@ class MenuCacheService:
                     "spice_level": item.menu_item_spice_level or "",
                     "calories": item.menu_item_calories or 0,
                     "prep_time_minutes": item.menu_item_minimum_preparation_time or 0,
+                    "availability_time": availability_time,
                     "cached_at": datetime.now().isoformat()
                 }
 
