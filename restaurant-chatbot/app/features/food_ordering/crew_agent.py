@@ -1930,30 +1930,30 @@ def create_add_to_cart_tool(session_id: str):
     """Factory to create add_to_cart tool with session context."""
 
     @tool("add_to_cart")
-    def add_to_cart(item: str, quantity: int) -> str:
+    def add_to_cart(items: str) -> str:
         """
-        Add a food item to the customer's cart with specified quantity.
+        Add one or more food items to the customer's cart in a SINGLE call.
 
-        IMPORTANT: Both item and quantity are REQUIRED. Do NOT call this tool
-        unless the customer has explicitly stated the quantity. If the customer
-        says "add biryani" without a number, ASK them "How many would you like?"
-        first. NEVER assume quantity is 1.
-
-        Performs fuzzy matching on item names to find the closest menu match.
+        IMPORTANT: Quantity is REQUIRED for every item. Do NOT call this tool
+        unless the customer has explicitly stated the quantity for each item.
+        If the customer says "add biryani" without a number, ASK them
+        "How many would you like?" first. NEVER assume quantity is 1.
 
         Args:
-            item: Name or partial name of menu item (e.g., "Butter Chicken", "burger", "coke")
-            quantity: Number of items to add (REQUIRED - must be explicitly stated by customer)
+            items: JSON array of items to add. Each object has "item" (name) and "quantity" (number).
+                Single item:  [{"item": "Butter Chicken", "quantity": 2}]
+                Multiple:     [{"item": "Burger", "quantity": 2}, {"item": "Coke", "quantity": 1}]
 
         Returns:
-            Confirmation message that item was added to cart with details.
+            Confirmation of all items added to cart with updated total.
 
         Examples:
-            - Customer: "Add 2 burgers" → add_to_cart("burger", 2)
-            - Customer: "I want 1 Butter Chicken" → add_to_cart("Butter Chicken", 1)
-            - Customer: "Add biryani" → Do NOT call this tool. Ask: "How many biryani would you like?"
+            - "Add 2 burgers" → add_to_cart('[{"item": "burger", "quantity": 2}]')
+            - "I want 1 Butter Chicken and 2 Naan" → add_to_cart('[{"item": "Butter Chicken", "quantity": 1}, {"item": "Naan", "quantity": 2}]')
+            - "Add biryani" → Do NOT call. Ask: "How many would you like?"
         """
-        # Emit activity for frontend (async - no thread overhead)
+        import json as _json
+
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "add_to_cart")
 
@@ -1961,79 +1961,98 @@ def create_add_to_cart_tool(session_id: str):
         from app.core.preloader import get_menu_preloader
 
         try:
-            # VALIDATION: Quantity must be positive and reasonable
-            if quantity <= 0:
-                return f"[INVALID QUANTITY] I can't add {quantity} items. Please specify a positive number (e.g., 1, 2, 3)."
+            # Parse items JSON
+            try:
+                items_list = _json.loads(items)
+                if isinstance(items_list, dict):
+                    items_list = [items_list]
+            except (_json.JSONDecodeError, TypeError):
+                return f"Invalid items format. Use JSON array: [{'{'}\"item\": \"name\", \"quantity\": N{'}'}]"
 
-            if quantity > 50:
-                return f"[INVALID QUANTITY] That's a lot! Our maximum order quantity per item is 50. If you need more, please contact us directly."
+            if not items_list:
+                return "No items specified."
 
-            item_name = item.strip()
-
-            # Find the item (uses preloader - sync)
             preloader = get_menu_preloader()
-            found_item = preloader.find_item(item_name) if preloader.is_loaded else None
-
-            if not found_item:
-                return f"Item '{item_name}' not found. Try searching the menu first."
-
-            # Get current cart (sync Redis)
             cart_data = get_cart_sync(session_id) or {"items": [], "total": 0}
-            items = cart_data.get('items', [])
+            cart_items = cart_data.get('items', [])
 
-            # Check if item already in cart
-            existing_item = None
-            for existing in items:
-                if existing.get('item_id') == str(found_item.get('id', '')):
-                    existing_item = existing
-                    break
+            added = []
+            not_found = []
 
-            if existing_item:
-                existing_item['quantity'] += quantity
-                final_quantity = existing_item['quantity']
-            else:
-                items.append({
-                    'item_id': str(found_item.get('id', '')),
-                    'name': found_item.get('name'),
-                    'price': float(found_item.get('price', 0)),
-                    'quantity': quantity,
-                    'category': ''
-                })
-                final_quantity = quantity
+            for entry in items_list:
+                item_name = str(entry.get("item", "")).strip()
+                quantity = int(entry.get("quantity", 0))
 
-            # Save cart (sync Redis)
-            cart_data['items'] = items
+                if not item_name:
+                    continue
+
+                if quantity <= 0:
+                    return f"[INVALID QUANTITY] Quantity for '{item_name}' must be positive."
+                if quantity > 50:
+                    return f"[INVALID QUANTITY] Maximum 50 per item. '{item_name}' has quantity {quantity}."
+
+                found_item = preloader.find_item(item_name) if preloader.is_loaded else None
+                if not found_item:
+                    not_found.append(item_name)
+                    continue
+
+                # Check if already in cart
+                existing = None
+                for ci in cart_items:
+                    if ci.get('item_id') == str(found_item.get('id', '')):
+                        existing = ci
+                        break
+
+                if existing:
+                    existing['quantity'] += quantity
+                else:
+                    cart_items.append({
+                        'item_id': str(found_item.get('id', '')),
+                        'name': found_item.get('name'),
+                        'price': float(found_item.get('price', 0)),
+                        'quantity': quantity,
+                        'category': ''
+                    })
+
+                added.append(f"{quantity}x {found_item.get('name')}")
+
+                # Track last mentioned item
+                try:
+                    from app.core.semantic_context import get_entity_graph
+                    graph = get_entity_graph(session_id)
+                    graph.update_last_mentioned(found_item['name'])
+                except Exception:
+                    pass
+
+            if not added and not_found:
+                return f"Items not found: {', '.join(not_found)}. Try searching the menu first."
+
+            # Save cart
+            cart_data['items'] = cart_items
             cart_data['updated_at'] = str(datetime.now())
             set_cart_sync(session_id, cart_data, ttl=3600)
 
-            subtotal = sum(i['price'] * i['quantity'] for i in items)
+            subtotal = sum(i['price'] * i['quantity'] for i in cart_items)
 
-            # Emit cart update to frontend
-            emit_cart_data(session_id, items, subtotal)
-
-            # Track last mentioned item (for pronoun resolution like "add more of it")
-            try:
-                from app.core.semantic_context import get_entity_graph
-                graph = get_entity_graph(session_id)
-                graph.update_last_mentioned(found_item['name'])
-                logger.debug("entity_graph_item_tracked", session_id=session_id, item=found_item['name'])
-            except Exception as e:
-                logger.debug("entity_graph_update_failed", error=str(e))
+            # Emit ONE cart card with all items
+            emit_cart_data(session_id, cart_items, subtotal)
 
             logger.info(
-                "item_added_to_cart",
+                "items_added_to_cart",
                 session_id=session_id,
-                item=found_item['name'],
-                quantity=final_quantity,
+                added=added,
+                not_found=not_found,
                 subtotal=subtotal
             )
 
-            # Don't return cart total - force LLM to call view_cart for cart details
-            return f"Added {quantity}x {found_item['name']} to cart."
+            result = f"Added to cart: {', '.join(added)}."
+            if not_found:
+                result += f" Not found: {', '.join(not_found)}."
+            return result
 
         except Exception as e:
             logger.error("add_to_cart_error", error=str(e), session_id=session_id)
-            return f"Error adding item: {str(e)}"
+            return f"Error adding items: {str(e)}"
 
     return add_to_cart
 
@@ -2181,8 +2200,7 @@ def create_remove_from_cart_tool(session_id: str):
             # Calculate new total
             new_total = sum(i['price'] * i['quantity'] for i in updated_items)
 
-            # Emit cart update to frontend
-            emit_cart_data(session_id, updated_items, new_total)
+            # NOTE: Cart card not emitted here - shown only on explicit view_cart
 
             logger.info(
                 "item_removed_from_cart",
@@ -4451,7 +4469,9 @@ You rely on your tools to ensure every recommendation, price, cart detail, and o
 
 **Order Accuracy (CRITICAL):**
 NEVER call add_to_cart without an explicit quantity from the customer. If they say "add biryani" or "I want pizza" without a number, you MUST ask "How many would you like?" BEFORE calling add_to_cart. Do NOT assume quantity is 1.
-Example: "I want pizza" → "How many pizzas would you like?" (wait for answer, THEN call add_to_cart)
+When adding multiple items, add them ALL in ONE add_to_cart call using a JSON array:
+Example: "2 burgers and 1 coke" → add_to_cart('[{"item": "burger", "quantity": 2}, {"item": "coke", "quantity": 1}]')
+Example: "I want pizza" → Ask "How many?" first, then add_to_cart('[{"item": "pizza", "quantity": N}]')
 
 **Ambiguity Resolution:**
 When confirmations are unclear (like "yes" after offering multiple options), ask which specific option the customer prefers.

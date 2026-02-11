@@ -88,7 +88,7 @@ function aguiReducer(state, action) {
     case 'CART_DATA':
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'cart'), {
           id: Date.now(),
           role: 'system',
           type: 'cart',
