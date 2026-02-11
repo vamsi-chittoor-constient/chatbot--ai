@@ -1190,6 +1190,14 @@ QUICK_ACTION_SETS = {
     "none": [],
 }
 
+# Default fallback quick replies - shown when classifier fails or returns empty
+DEFAULT_QUICK_REPLIES = [
+    {"label": "🍔 Show Menu", "action": "show menu"},
+    {"label": "🛒 View Cart", "action": "view cart"},
+    {"label": "✅ Checkout", "action": "checkout"},
+    {"label": "❓ Help", "action": "help"},
+]
+
 QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant chatbot. Your job is to proactively guide users through the ordering journey by showing contextual action buttons.
 
 🎯 CORE PRINCIPLE: Be the user's driver! Users don't know what the chatbot can do - show them the way at every step.
@@ -1353,18 +1361,20 @@ def get_response_quick_replies(response: str) -> List[Dict[str, str]]:
                 })
                 return replies
             elif action_set in QUICK_ACTION_SETS:
-                return QUICK_ACTION_SETS[action_set]
+                replies = QUICK_ACTION_SETS[action_set]
+                # If the selected set is empty (e.g. "none"), use default fallback
+                return replies if replies else DEFAULT_QUICK_REPLIES
             else:
-                return []
+                logger.warning("quick_reply_agent_unknown_set", action_set=action_set)
+                return DEFAULT_QUICK_REPLIES
 
         except json.JSONDecodeError as e:
             logger.warning("quick_reply_agent_json_error", error=str(e), content=content[:100])
-            return []
+            return DEFAULT_QUICK_REPLIES
 
     except Exception as e:
         logger.warning("quick_reply_agent_failed", error=str(e))
-        # No fallback - if agent fails, just don't show quick replies
-        return []
+        return DEFAULT_QUICK_REPLIES
 
 
 def _emit_response_quick_replies(session_id: str, response: str):

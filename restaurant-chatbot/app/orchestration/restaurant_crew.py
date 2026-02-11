@@ -1173,14 +1173,24 @@ async def process_with_agui_streaming(
 
         if not _skip_quick_replies:
             try:
-                from app.features.food_ordering.crew_agent import get_response_quick_replies
+                from app.features.food_ordering.crew_agent import get_response_quick_replies, DEFAULT_QUICK_REPLIES
                 quick_replies = get_response_quick_replies(response)
-                if quick_replies:
-                    emitter.emit_quick_replies(quick_replies)
-                    logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
+                if not quick_replies:
+                    quick_replies = DEFAULT_QUICK_REPLIES
+                emitter.emit_quick_replies(quick_replies)
+                logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
             except Exception as e:
-                logger.debug("quick_reply_emit_failed", error=str(e))
-                # Fallback will be used by frontend
+                logger.warning("quick_reply_emit_failed", error=str(e))
+                # Last resort fallback - emit default buttons even if import/classification totally fails
+                try:
+                    emitter.emit_quick_replies([
+                        {"label": "🍔 Show Menu", "action": "show menu"},
+                        {"label": "🛒 View Cart", "action": "view cart"},
+                        {"label": "✅ Checkout", "action": "checkout"},
+                        {"label": "❓ Help", "action": "help"},
+                    ])
+                except Exception:
+                    pass
 
         # Ensure activity indicator is cleared before finishing
         # (redundant safety - already called at line 758, but ensures it's sent after streaming)
