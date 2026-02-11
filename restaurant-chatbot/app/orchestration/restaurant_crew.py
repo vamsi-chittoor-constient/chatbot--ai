@@ -1160,15 +1160,27 @@ async def process_with_agui_streaming(
         # Uses GPT-4o-mini to classify response and determine appropriate buttons
         # IMPORTANT: Use emitter.emit_quick_replies() for immediate/synchronous emission
         # (not the global emit_quick_replies() which uses call_soon_threadsafe and can race)
+        # SKIP if payment workflow is about to run (PaymentMethodCard will replace quick replies)
+        _skip_quick_replies = False
         try:
-            from app.features.food_ordering.crew_agent import get_response_quick_replies
-            quick_replies = get_response_quick_replies(response)
-            if quick_replies:
-                emitter.emit_quick_replies(quick_replies)
-                logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
-        except Exception as e:
-            logger.debug("quick_reply_emit_failed", error=str(e))
-            # Fallback will be used by frontend
+            from app.core.redis import get_sync_redis_client as _get_redis
+            _qr_redis = _get_redis()
+            if _qr_redis.get(f"checkout_payment_info:{session_id}"):
+                _skip_quick_replies = True
+                logger.debug("quick_replies_skipped_payment_pending", session_id=session_id)
+        except Exception:
+            pass
+
+        if not _skip_quick_replies:
+            try:
+                from app.features.food_ordering.crew_agent import get_response_quick_replies
+                quick_replies = get_response_quick_replies(response)
+                if quick_replies:
+                    emitter.emit_quick_replies(quick_replies)
+                    logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
+            except Exception as e:
+                logger.debug("quick_reply_emit_failed", error=str(e))
+                # Fallback will be used by frontend
 
         # Ensure activity indicator is cleared before finishing
         # (redundant safety - already called at line 758, but ensures it's sent after streaming)

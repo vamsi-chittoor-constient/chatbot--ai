@@ -994,8 +994,9 @@ QUICK_ACTION_SETS = {
     ],
 
     "payment_method": [
-        {"label": "💳 Card Payment", "action": "I want to pay by card"},
-        {"label": "💵 Cash on Delivery", "action": "cash on delivery"},
+        {"label": "💳 Pay Online", "action": "pay_online"},
+        {"label": "💵 Cash on Delivery", "action": "pay_cash"},
+        {"label": "💳 Card at Counter", "action": "pay_card_counter"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1216,9 +1217,8 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Search Items, Recent Orders, Reorder Last)
 
 ━━━ CHECKOUT & PAYMENT ━━━
-- order_type: Asking dine-in or takeaway → Binary choice (Dine In, Take Away)
-- dine_in_selected: User selected dine-in → Suggest booking (Book Table First, Continue Order)
-- payment_method: Asking payment method (response: "how would you like to pay") → Payment options (Card Payment, Cash on Delivery)
+- order_type: Order type confirmed → Takeaway (Take Away)
+- payment_method: Asking payment method (response: "how would you like to pay") → Payment options (Pay Online, Cash on Delivery, Card at Counter)
 
 ━━━ POST-ORDER ━━━
 - order_confirmed: Order placed (response has "Order ID" but NO payment yet) → Post-order (Track Order, View Receipt, Order More)
@@ -1266,9 +1266,8 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 5. Cart shown + total > Rs.500 → "view_cart_high_value" (highlight promo!)
 6. Cart shown + total < Rs.500 → "view_cart"
 7. User asks capabilities → "explore_features"
-8. Dine-in selected → "dine_in_selected" (suggest booking!)
-9. Payment successful → "payment_completed" (NOT order_confirmed)
-10. Order placed but NOT paid → "order_confirmed"
+8. Payment successful → "payment_completed" (NOT order_confirmed)
+9. Order placed but NOT paid → "order_confirmed"
 
 🚗 GUIDE PRINCIPLE:
 - Default to showing helpful actions rather than "none"
@@ -1905,26 +1904,28 @@ def create_add_to_cart_tool(session_id: str):
     """Factory to create add_to_cart tool with session context."""
 
     @tool("add_to_cart")
-    def add_to_cart(item: str, quantity: int = 1) -> str:
+    def add_to_cart(item: str, quantity: int) -> str:
         """
         Add a food item to the customer's cart with specified quantity.
 
+        IMPORTANT: Both item and quantity are REQUIRED. Do NOT call this tool
+        unless the customer has explicitly stated the quantity. If the customer
+        says "add biryani" without a number, ASK them "How many would you like?"
+        first. NEVER assume quantity is 1.
+
         Performs fuzzy matching on item names to find the closest menu match.
-        Requires both item name and quantity to complete the order accurately.
 
         Args:
             item: Name or partial name of menu item (e.g., "Butter Chicken", "burger", "coke")
-            quantity: Number of items to add (must be positive integer)
+            quantity: Number of items to add (REQUIRED - must be explicitly stated by customer)
 
         Returns:
             Confirmation message that item was added to cart with details.
 
         Examples:
-            - add_to_cart("burger", 2) → Adds 2 burgers to cart
-            - add_to_cart("Butter Chicken", 1) → Adds 1 Butter Chicken
-            - add_to_cart("coke", 3) → Adds 3 Cokes
-            - add_to_cart("pizza", 1) → Adds 1 pizza (fuzzy matched from menu)
-            - add_to_cart("chick burg", 2) → Finds "Chicken Burger" via fuzzy match
+            - Customer: "Add 2 burgers" → add_to_cart("burger", 2)
+            - Customer: "I want 1 Butter Chicken" → add_to_cart("Butter Chicken", 1)
+            - Customer: "Add biryani" → Do NOT call this tool. Ask: "How many biryani would you like?"
         """
         # Emit activity for frontend (async - no thread overhead)
         from app.core.agui_events import emit_tool_activity, emit_cart_data
@@ -4313,9 +4314,9 @@ You rely on your tools to ensure every recommendation, price, cart detail, and o
 
 ## SERVICE PATTERNS
 
-**Order Accuracy:**
-Complete orders require specific items and quantities for accurate fulfillment. When customers provide partial information, clarify naturally before adding to cart.
-Example: "I want pizza" → "How many pizzas would you like?"
+**Order Accuracy (CRITICAL):**
+NEVER call add_to_cart without an explicit quantity from the customer. If they say "add biryani" or "I want pizza" without a number, you MUST ask "How many would you like?" BEFORE calling add_to_cart. Do NOT assume quantity is 1.
+Example: "I want pizza" → "How many pizzas would you like?" (wait for answer, THEN call add_to_cart)
 
 **Ambiguity Resolution:**
 When confirmations are unclear (like "yes" after offering multiple options), ask which specific option the customer prefers.
@@ -4330,6 +4331,13 @@ Read the customer's intent and adapt your approach:
 - Customers with clear intent → Expedite efficiently
 - Ambiguous requests → Clarify naturally without interrogation
 - Special dietary needs → Use allergen/dietary tools proactively
+
+**Upselling (Natural Suggestions):**
+After adding items to cart, suggest complementary items naturally:
+- Main course added → "Would you like to add a drink or side with that?"
+- Only drinks in cart → "How about a snack to go with your drink?"
+- Cart total > ₹500 → "Great order! Want to add a dessert to round it off?"
+Keep suggestions brief, natural, and non-pushy. Only suggest once per add-to-cart, not repeatedly.
 
 **Payment Flow:**
 After checkout, orders are pending until payment completes. The payment workflow (handled by payment_workflow.py) will guide customers through selecting their payment method (Online/Cash/Card at Counter).
