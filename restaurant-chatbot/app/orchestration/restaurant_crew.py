@@ -543,9 +543,11 @@ When customer says EXACTLY these phrases, you MUST call these tools:
 
 🛒 ADDING TO CART vs SEARCHING:
 - "add two beeda" / "add 2 beeda" / "I'll take two beeda" → call add_to_cart("beeda", 2) DIRECTLY
-- "add beeda to cart" / "get me a beeda" / "one beeda please" → call add_to_cart("beeda", 1) DIRECTLY
-- Any request with "add" + item + quantity → use add_to_cart() DIRECTLY
+- "one beeda please" / "I'll have a beeda" → call add_to_cart("beeda", 1) DIRECTLY
+- "add beeda to cart" / "order beeda" / "get me beeda" (NO quantity mentioned) → ASK "How many would you like?" BEFORE adding
+- Any request with "add" + item + EXPLICIT quantity → use add_to_cart() DIRECTLY
 - "do you have beeda?" / "what is beeda?" / "show me beeda" → call search_menu(query="beeda") to show options
+- IMPORTANT: If the customer does NOT specify a quantity, ASK them how many they want before calling add_to_cart()
 
 🚨 PRESERVE EXACT ITEM NAMES - DO NOT CORRECT SPELLINGS 🚨
 When calling add_to_cart(), batch_add_to_cart(), or search_menu(), use the EXACT item name the customer typed.

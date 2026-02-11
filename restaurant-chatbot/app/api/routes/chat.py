@@ -1292,7 +1292,9 @@ async def chat_endpoint(
                             else:
                                 result = "No items added"
 
-                            # Stream any AGUI events (cart updates, etc.)
+                            # Flush staged events to queue, then stream to WebSocket
+                            from app.core.agui_events import flush_pending_events
+                            flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
                             # Send the final response (with translation if needed)
@@ -1335,6 +1337,8 @@ async def chat_endpoint(
                                     new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
 
                             emit_cart_data(session_id, items_list, new_total)
+                            from app.core.agui_events import flush_pending_events
+                            flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
 
@@ -1366,6 +1370,8 @@ async def chat_endpoint(
                                     new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
 
                             emit_cart_data(session_id, items_list, new_total)
+                            from app.core.agui_events import flush_pending_events
+                            flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
                 # ========================================================================
