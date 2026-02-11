@@ -181,12 +181,17 @@ class SessionEventTracker:
             )
 
             # 3. Update session state (last mentioned item)
+            # Use subquery to validate user_id exists in customer_profile_table (FK constraint)
             await db.execute(
                 """
                 INSERT INTO session_state (
                     session_id, user_id, last_mentioned_item_id, last_mentioned_item_name
                 )
-                VALUES ($1, $2, $3, $4)
+                VALUES (
+                    $1,
+                    (SELECT customer_id FROM customer_profile_table WHERE customer_id = $2::uuid),
+                    $3, $4
+                )
                 ON CONFLICT (session_id)
                 DO UPDATE SET
                     last_mentioned_item_id = EXCLUDED.last_mentioned_item_id,
@@ -396,7 +401,11 @@ class SessionEventTracker:
             await db.execute(
                 """
                 INSERT INTO session_state (session_id, user_id, current_step, awaiting_input_for)
-                VALUES ($1, $2, $3, $4)
+                VALUES (
+                    $1,
+                    (SELECT customer_id FROM customer_profile_table WHERE customer_id = $2::uuid),
+                    $3, $4
+                )
                 ON CONFLICT (session_id)
                 DO UPDATE SET
                     current_step = COALESCE(EXCLUDED.current_step, session_state.current_step),
@@ -505,12 +514,19 @@ class SyncSessionEventTracker:
                 )
 
                 # Update session state
+                # Use subquery to validate user_id exists in customer_profile_table
+                # (FK constraint requires it; auth users may not be in that table yet)
+                valid_user_id = str(self.user_id) if self.user_id else None
                 cur.execute(
                     """
                     INSERT INTO session_state (
                         session_id, user_id, last_mentioned_item_id, last_mentioned_item_name
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (
+                        %s,
+                        (SELECT customer_id FROM customer_profile_table WHERE customer_id = %s::uuid),
+                        %s, %s
+                    )
                     ON CONFLICT (session_id)
                     DO UPDATE SET
                         last_mentioned_item_id = EXCLUDED.last_mentioned_item_id,
@@ -520,7 +536,7 @@ class SyncSessionEventTracker:
                     """,
                     (
                         self.session_id,
-                        str(self.user_id) if self.user_id else None,
+                        valid_user_id,
                         str(item_id),
                         item_name
                     )

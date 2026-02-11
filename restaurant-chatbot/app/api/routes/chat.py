@@ -1783,6 +1783,7 @@ async def process_message_with_ai(
                     logger.warning(f"Error waiting for event stream: {str(e)}")
 
         # SECURITY: Sanitize crew response before sending to frontend
+        from app.core.response_sanitizer import sanitize_response
         ai_response = sanitize_response(ai_response)
 
         # Log cycle metadata for analytics
