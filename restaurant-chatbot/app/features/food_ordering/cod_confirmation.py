@@ -35,6 +35,8 @@ def confirm_cod_order(session_id: str) -> str:
         order_id = pending_order.get('order_id')
         items = pending_order.get('items', [])
         total = pending_order.get('total', 0)
+        subtotal = pending_order.get('subtotal', total)
+        packaging_charges = pending_order.get('packaging_charges', 0)
         order_type = pending_order.get('order_type', 'take_away')
 
         # Save to MongoDB
@@ -58,6 +60,8 @@ def confirm_cod_order(session_id: str) -> str:
                 "order_id": order_id,
                 "session_id": session_id,
                 "items": order_items_data,
+                "subtotal": subtotal,
+                "packaging_charges": packaging_charges,
                 "total": total,
                 "order_type": order_type,
                 "status": "confirmed",
@@ -90,21 +94,23 @@ def confirm_cod_order(session_id: str) -> str:
             order_type=order_type
         )
 
-        order_type_display = "dine-in" if order_type == "dine_in" else "take-away"
         items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
         if len(items) > 3:
             items_summary += f" and {len(items) - 3} more"
 
+        total_quantity = sum(i.get('quantity', 1) for i in items)
         return (
             f"✅ Order confirmed!\n\n"
             f"📋 Order ID: {order_id}\n"
             f"🍽️ Items: {items_summary}\n"
+            f"💰 Subtotal: Rs.{subtotal}\n"
+            f"📦 Packaging: Rs.{packaging_charges} ({total_quantity} items x Rs.30)\n"
             f"💰 Total: Rs.{total}\n"
-            f"📍 Type: {order_type_display}\n"
+            f"📍 Type: Take-away\n"
             f"💵 Payment: Cash on Delivery\n\n"
             f"Please pay Rs.{total} in cash when your order arrives.\n"
             f"You can view your receipt by saying 'show receipt for {order_id}'\n\n"
-            f"Thank you for your order! 🎉"
+            f"Thank you for your order!"
         )
 
     except Exception as e:

@@ -1,10 +1,16 @@
 import React from 'react'
 import { ShoppingCart } from 'lucide-react'
 
+const PACKAGING_CHARGE_PER_ITEM = 30
+
 export const CartCard = ({ data }) => {
   const { items = [], total = 0 } = data
 
   if (!items.length) return null
+
+  const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 1), 0)
+  const packagingCharges = totalQuantity * PACKAGING_CHARGE_PER_ITEM
+  const grandTotal = total + packagingCharges
 
   return (
     <div className="bg-chat-secondary border border-chat-border rounded-xl p-4 animate-fadeIn">
@@ -24,9 +30,19 @@ export const CartCard = ({ data }) => {
         ))}
       </div>
 
-      <div className="flex justify-between mt-3 pt-3 border-t-2 border-chat-border font-semibold text-base">
-        <span>Total</span>
-        <span className="text-accent">Rs.{total.toFixed(0)}</span>
+      <div className="mt-3 pt-3 border-t-2 border-chat-border space-y-1">
+        <div className="flex justify-between text-sm text-gray-400">
+          <span>Subtotal</span>
+          <span>Rs.{total.toFixed(0)}</span>
+        </div>
+        <div className="flex justify-between text-sm text-gray-400">
+          <span>Packaging ({totalQuantity} items x Rs.{PACKAGING_CHARGE_PER_ITEM})</span>
+          <span>Rs.{packagingCharges}</span>
+        </div>
+        <div className="flex justify-between font-semibold text-base pt-1">
+          <span>Total</span>
+          <span className="text-accent">Rs.{grandTotal.toFixed(0)}</span>
+        </div>
       </div>
     </div>
   )

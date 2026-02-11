@@ -265,8 +265,11 @@ Thank you for choosing A24 Restaurant!"""
             # from app.shared.models import OrderItem
             from app.features.food_ordering.models import OrderItem
 
+            from app.features.food_ordering.models import OrderTotal
+
             order_query = select(Order).where(Order.order_id == order_id).options(
-                selectinload(Order.items).selectinload(OrderItem.menu_item)
+                selectinload(Order.items).selectinload(OrderItem.menu_item),
+                selectinload(Order.totals)
             )
             order_result = await session.execute(order_query)
             order = order_result.scalar_one_or_none()
@@ -284,10 +287,14 @@ Thank you for choosing A24 Restaurant!"""
                     data={"error": "Order has no items"}
                 )
 
-            # Sum up base_price from all order items (base_price = unit_price * quantity)
-            amount = sum(
-                Decimal(str(item.base_price or 0)) for item in order.items
-            )
+            # Use OrderTotal.final_amount (includes packaging charges) if available,
+            # otherwise fall back to summing item base_prices
+            if order.totals and order.totals.final_amount:
+                amount = Decimal(str(order.totals.final_amount))
+            else:
+                amount = sum(
+                    Decimal(str(item.base_price or 0)) for item in order.items
+                )
 
             if amount <= 0:
                 return ToolResult(

@@ -484,19 +484,8 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
     if not cart_data or not cart_data.get("items"):
         return "[EMPTY CART] Your cart is looking a bit empty! 😊 Let me help you add some delicious items before we proceed to checkout. What would you like to order?"
 
-    # Validate order_type
-    order_type_lower = order_type.lower().strip() if order_type else ""
-    is_dine_in = "dine" in order_type_lower or order_type_lower == "dine_in"
-    is_take_away = "take" in order_type_lower or "away" in order_type_lower or order_type_lower == "take_away"
-
-    if not order_type or (not is_dine_in and not is_take_away):
-        emit_quick_replies(session_id, [
-            {"label": "Dine In", "action": "dine in", "icon": "dineIn", "variant": "primary"},
-            {"label": "Take Away", "action": "take away", "icon": "takeaway", "variant": "primary"},
-        ])
-        return "Would you like to dine in or take away?"
-
-    order_type_clean = "take_away" if is_take_away else "dine_in"
+    # Always takeaway - no dine-in option
+    order_type_clean = "take_away"
 
     # Prepare order and trigger payment workflow
     try:
@@ -516,7 +505,13 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             if "total" in normalized:
                 normalized["total"] = float(normalized["total"])
             items.append(normalized)
-        total = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
+        subtotal = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
+
+        # Packaging charge: Rs.30 per item (per quantity, not per unique item)
+        PACKAGING_CHARGE_PER_ITEM = 30
+        total_quantity = sum(i.get("quantity", 1) for i in items)
+        packaging_charges = total_quantity * PACKAGING_CHARGE_PER_ITEM
+        total = subtotal + packaging_charges
 
         # Generate order display ID
         order_display_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
@@ -530,6 +525,8 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             "order_id": order_display_id,
             "session_id": session_id,
             "items": items,
+            "subtotal": subtotal,
+            "packaging_charges": packaging_charges,
             "total": total,
             "order_type": order_type_clean,
             "status": "pending_payment",
@@ -567,7 +564,6 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         )
 
         # Return simple confirmation - checkout_handler will trigger payment workflow
-        order_type_display = "dine-in" if order_type_clean == "dine_in" else "take-away"
         items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
         if len(items) > 3:
             items_summary += f" and {len(items) - 3} more"
@@ -575,9 +571,11 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         return (
             f"✅ **Order Prepared!**\n\n"
             f"📋 Reference: {order_display_id}\n"
-            f"📦 Type: {order_type_display}\n"
+            f"📦 Type: Take-away\n"
             f"🍽️ Items: {items_summary}\n"
-            f"💰 Amount: ₹{total:.2f}\n\n"
+            f"💰 Subtotal: ₹{subtotal:.2f}\n"
+            f"📦 Packaging: ₹{packaging_charges:.2f} ({total_quantity} items x ₹{PACKAGING_CHARGE_PER_ITEM})\n"
+            f"💰 Total: ₹{total:.2f}\n\n"
             f"💳 **Please complete payment to confirm your order.**\nSelecting payment method..."
         )
 
@@ -992,13 +990,7 @@ QUICK_ACTION_SETS = {
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     "order_type": [
-        {"label": "🏠 Dine In", "action": "dine in"},
         {"label": "📦 Take Away", "action": "take away"},
-    ],
-
-    "dine_in_selected": [
-        {"label": "📅 Book Table First", "action": "book a table"},
-        {"label": "✅ Continue Order", "action": "continue with dine in order"},
     ],
 
     "payment_method": [
@@ -2231,18 +2223,8 @@ def _create_checkout_tool_async_DISABLED(session_id: str):
         from app.core.agui_events import emit_tool_activity_async, emit_quick_replies_async
         await emit_tool_activity_async(session_id, "checkout")
 
-        # IMPORTANT: Validate order_type is explicitly specified
-        order_type_lower = order_type.lower().strip() if order_type else ""
-        is_dine_in = "dine" in order_type_lower or order_type_lower == "dine_in"
-        is_take_away = "take" in order_type_lower or "away" in order_type_lower or order_type_lower == "take_away"
-
-        if not order_type or (not is_dine_in and not is_take_away):
-            # Emit quick replies for the user to choose (async)
-            await emit_quick_replies_async(session_id, [
-                {"label": "Dine In", "action": "dine in", "icon": "dineIn", "variant": "primary"},
-                {"label": "Take Away", "action": "take away", "icon": "takeaway", "variant": "primary"},
-            ])
-            return "ORDER_TYPE_REQUIRED: Please ask the customer if they want to dine in or take away before completing checkout."
+        # Always takeaway - no dine-in option
+        order_type = "take_away"
 
         from app.core.redis import get_cart, set_cart
         import uuid

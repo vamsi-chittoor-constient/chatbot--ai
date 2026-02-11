@@ -31,7 +31,7 @@ export const PaymentSuccessCard = ({ data, onQuickReply }) => {
           </div>
           <div className="flex justify-between items-center py-2 border-b border-gray-700/30">
             <span className="text-gray-400 text-sm">Order Type</span>
-            <span className="font-medium text-white capitalize">{order_type}</span>
+            <span className="font-medium text-white">Takeaway</span>
           </div>
           {payment_id && (
             <div className="flex justify-between items-center py-2">

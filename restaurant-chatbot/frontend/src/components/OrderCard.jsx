@@ -41,7 +41,7 @@ export const OrderCard = ({ data }) => {
 
       <div className="flex justify-between items-center pt-3 border-t border-chat-border">
         <span className="text-gray-400 text-sm">
-          {order.order_type === 'take_away' ? 'Takeaway' : 'Dine-in'}
+          Takeaway
         </span>
         <span className="font-semibold text-accent">
           Total: Rs.{order.total || 0}

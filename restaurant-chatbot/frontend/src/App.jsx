@@ -121,7 +121,7 @@ function ChatInterface() {
 
   // Handle checkout button click
   const handleCheckout = useCallback(() => {
-    handleSendMessage('I want to checkout for dine-in')
+    handleSendMessage('I want to checkout')
   }, [handleSendMessage])
 
   // Handle form submission
@@ -316,7 +316,7 @@ function ChatInterface() {
               <ul className="text-gray-400 space-y-2 mb-8">
                 <li>Browse our menu and recommendations</li>
                 <li>Add items to your cart</li>
-                <li>Place orders for dine-in or takeaway</li>
+                <li>Place takeaway orders</li>
                 <li>Track your order status</li>
               </ul>
               <QuickReplies

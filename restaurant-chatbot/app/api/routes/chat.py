@@ -1133,13 +1133,13 @@ async def chat_endpoint(
                 if is_authenticated and authenticated_user_name:
                     fallback_msg = (
                         f"Hello {authenticated_user_name}! Welcome back to our restaurant. I'm your AI assistant, "
-                        "and I can help you browse our menu, place an order for dine-in or takeout, make a reservation, "
+                        "and I can help you browse our menu, place a takeaway order, make a reservation, "
                         "or answer any questions. What would you like to do?"
                     )
                 else:
                     fallback_msg = (
                         "Hello! Welcome to our restaurant. I'm your AI assistant, and I can help you "
-                        "browse our menu, place an order for dine-in or takeout, make a reservation, "
+                        "browse our menu, place a takeaway order, make a reservation, "
                         "or answer any questions about our restaurant. What would you like to do?"
                     )
                 await websocket_manager.send_message(

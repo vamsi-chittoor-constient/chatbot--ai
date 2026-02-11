@@ -126,17 +126,21 @@ async def handle_payment_message(
             amount = payment_state.get("amount", 0.0)
             existing_items = payment_state.get("items")
             existing_order_type = payment_state.get("order_type")
+            existing_subtotal = payment_state.get("subtotal")
+            existing_packaging = payment_state.get("packaging_charges")
 
             try:
                 # Run payment workflow with selected method
-                # Pass existing items/order_type so init doesn't lose them
+                # Pass existing items/order_type/packaging so init doesn't lose them
                 final_state = await run_payment_workflow(
                     session_id=session_id,
                     order_id=order_id,
                     amount=amount,
                     initial_method=method,
                     items=existing_items,
-                    order_type=existing_order_type
+                    order_type=existing_order_type,
+                    subtotal=existing_subtotal,
+                    packaging_charges=existing_packaging
                 )
 
                 # Workflow has completed - return confirmation

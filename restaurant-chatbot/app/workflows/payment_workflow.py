@@ -133,7 +133,8 @@ async def generate_payment_link_node(state: PaymentWorkflowState) -> PaymentWork
         # ================================================================
         import uuid as uuid_module
         from app.core.database import get_db_session
-        from app.features.food_ordering.models import Order, OrderItem
+        from app.features.food_ordering.models import Order, OrderItem, OrderTotal
+        from decimal import Decimal
 
         pending_order_key = f"pending_order:{session_id}"
         pending_order_data = redis_client.get(pending_order_key)
@@ -167,6 +168,20 @@ async def generate_payment_link_node(state: PaymentWorkflowState) -> PaymentWork
                     base_price=item_price * item_qty,
                 )
                 db_session.add(order_item)
+
+            # Create OrderTotal with packaging charges
+            items_total = Decimal(str(pending_order.get("subtotal", amount)))
+            packaging = Decimal(str(pending_order.get("packaging_charges", 0)))
+            final = Decimal(str(pending_order.get("total", amount)))
+            order_total = OrderTotal(
+                order_total_id=uuid_module.uuid4(),
+                order_id=db_order_id,
+                items_total=items_total,
+                charges_total=packaging,
+                subtotal=items_total,
+                final_amount=final,
+            )
+            db_session.add(order_total)
 
             await db_session.commit()
 
@@ -271,7 +286,8 @@ async def handle_cash_payment_node(state: PaymentWorkflowState) -> PaymentWorkfl
         pending_order = json.loads(pending_order_data)
 
         from app.core.database import get_db_session
-        from app.features.food_ordering.models import Order, OrderItem
+        from app.features.food_ordering.models import Order, OrderItem, OrderTotal
+        from decimal import Decimal
         import uuid
 
         async with get_db_session() as db_session:
@@ -295,6 +311,20 @@ async def handle_cash_payment_node(state: PaymentWorkflowState) -> PaymentWorkfl
                     base_price=item_price * item_qty,
                 )
                 db_session.add(order_item)
+
+            # Create OrderTotal with packaging charges
+            items_total = Decimal(str(pending_order.get("subtotal", amount)))
+            packaging = Decimal(str(pending_order.get("packaging_charges", 0)))
+            final = Decimal(str(pending_order.get("total", amount)))
+            order_total = OrderTotal(
+                order_total_id=uuid.uuid4(),
+                order_id=db_order_id,
+                items_total=items_total,
+                charges_total=packaging,
+                subtotal=items_total,
+                final_amount=final,
+            )
+            db_session.add(order_total)
 
             await db_session.commit()
 
@@ -345,7 +375,8 @@ async def handle_card_counter_payment_node(state: PaymentWorkflowState) -> Payme
         pending_order = json.loads(pending_order_data)
 
         from app.core.database import get_db_session
-        from app.features.food_ordering.models import Order, OrderItem
+        from app.features.food_ordering.models import Order, OrderItem, OrderTotal
+        from decimal import Decimal
         import uuid
 
         async with get_db_session() as db_session:
@@ -369,6 +400,20 @@ async def handle_card_counter_payment_node(state: PaymentWorkflowState) -> Payme
                     base_price=item_price * item_qty,
                 )
                 db_session.add(order_item)
+
+            # Create OrderTotal with packaging charges
+            items_total = Decimal(str(pending_order.get("subtotal", amount)))
+            packaging = Decimal(str(pending_order.get("packaging_charges", 0)))
+            final = Decimal(str(pending_order.get("total", amount)))
+            order_total = OrderTotal(
+                order_total_id=uuid.uuid4(),
+                order_id=db_order_id,
+                items_total=items_total,
+                charges_total=packaging,
+                subtotal=items_total,
+                final_amount=final,
+            )
+            db_session.add(order_total)
 
             await db_session.commit()
 
@@ -474,7 +519,9 @@ async def run_payment_workflow(
     amount: float,
     initial_method: str | None = None,
     items: list | None = None,
-    order_type: str | None = None
+    order_type: str | None = None,
+    subtotal: float | None = None,
+    packaging_charges: float | None = None
 ) -> Dict[str, Any]:
     """
     Run the payment workflow for an order.
@@ -482,10 +529,12 @@ async def run_payment_workflow(
     Args:
         session_id: Session identifier
         order_id: Order ID to pay for
-        amount: Total amount
+        amount: Total amount (includes packaging)
         initial_method: Pre-selected payment method (optional)
         items: Cart items for receipt generation (optional)
         order_type: Order type for receipt (optional)
+        subtotal: Item subtotal before packaging (optional)
+        packaging_charges: Total packaging charges (optional)
 
     Returns:
         Final workflow state
@@ -499,7 +548,11 @@ async def run_payment_workflow(
     )
 
     # Initialize payment state in Redis (with items for receipt)
-    init_payment_workflow(session_id, order_id, amount, items=items, order_type=order_type)
+    init_payment_workflow(
+        session_id, order_id, amount,
+        items=items, order_type=order_type,
+        subtotal=subtotal, packaging_charges=packaging_charges
+    )
 
     # Create initial state
     initial_state: PaymentWorkflowState = {

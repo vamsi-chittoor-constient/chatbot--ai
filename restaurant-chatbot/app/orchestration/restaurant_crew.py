@@ -1199,14 +1199,19 @@ async def process_with_agui_streaming(
                 _order_type = None
                 _pending_key = f"pending_order:{session_id}"
                 _pending_data = _redis.get(_pending_key)
+                _subtotal = None
+                _packaging = None
                 if _pending_data:
                     _pending = _json.loads(_pending_data)
                     _items = _pending.get("items")
                     _order_type = _pending.get("order_type")
+                    _subtotal = _pending.get("subtotal")
+                    _packaging = _pending.get("packaging_charges")
                 from app.workflows.payment_workflow import run_payment_workflow
                 await run_payment_workflow(
                     session_id, _pinfo["order_display_id"], _pinfo["total"],
-                    items=_items, order_type=_order_type
+                    items=_items, order_type=_order_type,
+                    subtotal=_subtotal, packaging_charges=_packaging
                 )
                 # Flush the payment workflow events too
                 flushed_payment = flush_pending_events(session_id)

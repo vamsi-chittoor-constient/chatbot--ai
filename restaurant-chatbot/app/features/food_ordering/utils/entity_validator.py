@@ -82,9 +82,9 @@ def validate_entities(
         # Checkout requires order type
         order_type = entities.get("order_type") or state.get("order_type")
 
+        # Order type is always takeaway - no need to ask
         if not order_type:
-            missing.append("order_type")
-            return False, missing, "Perfect! Before we proceed, will this order be for dine-in or takeout?"
+            state["order_type"] = "take_away"
 
     elif sub_intent == "browse_menu":
         # Browse menu with category requires category_name
@@ -163,7 +163,7 @@ def get_clarification_question(
         "quantity": "Sounds delicious! How many would you like me to add?",
         "category_name": "Sure! Which category would you like to explore?",
         "dietary_restrictions": "Of course! Do you have any dietary preferences I should keep in mind? (vegetarian, vegan, gluten-free, etc.)",
-        "order_type": "Almost there! Will this be for dine-in or takeout?",
+        "order_type": "Your order will be prepared for takeaway.",
         "action": "I'm here to help! Would you like to add items, view your cart, or proceed to checkout?",
         "item_identifier": "Sure thing! Which item are you referring to? You can tell me the name or its number.",
         "search_criteria": "I'd be happy to help you find something! What type of dish are you in the mood for?"

@@ -168,9 +168,17 @@ def generate_receipt_pdf(payment_state: Dict[str, Any]) -> bytes:
     # ── Items Table ──────────────────────────────────────────
     items: List[Dict[str, Any]] = payment_state.get("items", [])
     amount = float(payment_state.get("amount", 0))
+    receipt_subtotal = payment_state.get("subtotal")
+    receipt_packaging = payment_state.get("packaging_charges")
 
     if items:
         elements.append(Paragraph("Order Items", heading_style))
+
+        # Calculate item subtotal from items
+        items_subtotal = sum(
+            float(item.get("price", 0)) * int(item.get("quantity", 1))
+            for item in items
+        )
 
         table_data = [["Item", "Qty", "Price", "Total"]]
         for item in items:
@@ -185,13 +193,22 @@ def generate_receipt_pdf(payment_state: Dict[str, Any]) -> bytes:
                 f"Rs.{line_total:.2f}",
             ])
 
-        # Subtotal row
-        table_data.append(["", "", "Subtotal:", f"Rs.{amount:.2f}"])
+        # Subtotal row (item prices only)
+        subtotal_val = float(receipt_subtotal) if receipt_subtotal is not None else items_subtotal
+        table_data.append(["", "", "Subtotal:", f"Rs.{subtotal_val:.2f}"])
+
+        # Packaging charges row
+        packaging_val = float(receipt_packaging) if receipt_packaging is not None else 0
+        if packaging_val > 0:
+            table_data.append(["", "", "Packaging:", f"Rs.{packaging_val:.2f}"])
 
         items_table = Table(
             table_data,
             colWidths=[80 * mm, 15 * mm, 30 * mm, 35 * mm],
         )
+
+        # Style rows - subtotal row is second-to-last (or last if no packaging)
+        subtotal_row_idx = len(table_data) - (2 if packaging_val > 0 else 1)
         items_table.setStyle(TableStyle([
             # Header
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -207,9 +224,9 @@ def generate_receipt_pdf(payment_state: Dict[str, Any]) -> bytes:
             ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
             # Grid
             ("LINEBELOW", (0, 0), (-1, 0), 1, colors.Color(0.8, 0.8, 0.8)),
-            ("LINEABOVE", (0, -1), (-1, -1), 1, colors.Color(0.8, 0.8, 0.8)),
-            # Subtotal bold
-            ("FONTNAME", (2, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, subtotal_row_idx), (-1, subtotal_row_idx), 1, colors.Color(0.8, 0.8, 0.8)),
+            # Subtotal and packaging bold
+            ("FONTNAME", (2, subtotal_row_idx), (-1, -1), "Helvetica-Bold"),
         ]))
         elements.append(items_table)
     else:
