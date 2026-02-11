@@ -112,6 +112,12 @@ class ResponseSanitizer:
                 '', response
             )
 
+            # Step 4c: Remove leaked language directive prefixes
+            response = re.sub(
+                r'\[RESPOND IN (?:HINGLISH|TANGLISH)[^\]]*\]\s*',
+                '', response, flags=re.IGNORECASE
+            )
+
             # Step 5: Ensure response is not empty after sanitization
             response = response.strip()
             if not response or len(response) < 5:

@@ -222,6 +222,7 @@ function ChatInterface() {
   const {
     connect: connectVoice,
     toggleVoiceMode,
+    stopAgentSpeech,
     voiceModeEnabled,
     isRecording: isVoiceRecording,
     isProcessing: isVoiceProcessing,
@@ -297,6 +298,7 @@ function ChatInterface() {
           isUserSpeaking={isUserSpeaking}
           isAISpeaking={isAISpeaking}
           onExitVoiceMode={toggleVoiceMode}
+          onStopAgent={stopAgentSpeech}
         />
       )}
 

@@ -102,7 +102,8 @@ async def voice_chat_websocket(
     is_speaking = False
     silence_frames = 0  # Counter for consecutive silent frames (hangover mechanism)
     # Mutable state container for sharing between main loop and background tasks
-    state = {"is_processing": False}
+    # stop_requested: set by client control message to cancel TTS mid-stream
+    state = {"is_processing": False, "stop_requested": False}
     SAMPLE_RATE = 16000  # All VAD engines work at 16kHz
     VAD_CHUNK_SIZE = 512  # Chunk size (32ms at 16kHz)
 
@@ -133,6 +134,14 @@ async def voice_chat_websocket(
                     continue
 
                 message = json.loads(data)
+
+                if message.get("type") == "control":
+                    action = message.get("action", "")
+                    if action == "stop_speech":
+                        # Client requested to stop AI speech (user clicked Stop button)
+                        state["stop_requested"] = True
+                        logger.info("voice_stop_requested", session_id=session_id)
+                    continue
 
                 if message["type"] == "audio_chunk":
                     # Decode base64 audio (PCM 16-bit)
@@ -405,15 +414,17 @@ async def process_speech_segment(
 
         # =========================================================================
         # HALLUCINATION FILTERING - Detect prompt leaks + infinite loops
+        # On hallucination: ask user to repeat instead of silently dropping.
         # =========================================================================
 
         from collections import Counter
         import re
 
+        _is_hallucination = False
+        _hallucination_reason = ""
+
         # Check 0: Whisper prompt leak — on silence/noise Whisper sometimes
         # echoes the vocabulary hint or meta-words as the transcription.
-        # Includes single-word leaks like "TANGLISH", "HINGLISH" that appear
-        # when Whisper picks up a label from the prompt context.
         _prompt_fragments = [
             "transcribe exactly as spoken",
             "keeping english words unchanged",
@@ -423,103 +434,110 @@ async def process_speech_segment(
             "this conversation mixes",
         ]
         _text_lower = transcript_text.lower().strip()
+
         # Single-word or very short prompt leaks (meta labels, not real speech)
         _meta_words = {"tanglish", "hinglish", "tamil", "hindi", "english", "transcript", "transcription"}
         if _text_lower in _meta_words:
-            logger.warning(
-                "voice_hallucination_meta_word",
-                session_id=session_id,
-                text=transcript_text
-            )
-            await websocket.send_json({"type": "processing_end"})
-            if state is not None:
-                state["is_processing"] = False
-            return
-        if any(frag in _text_lower for frag in _prompt_fragments):
-            logger.warning(
-                "voice_hallucination_prompt_leak",
-                session_id=session_id,
-                text=transcript_text[:80]
-            )
-            await websocket.send_json({"type": "processing_end"})
-            if state is not None:
-                state["is_processing"] = False
-            return
+            _is_hallucination = True
+            _hallucination_reason = f"meta_word: {transcript_text}"
+
+        if not _is_hallucination and any(frag in _text_lower for frag in _prompt_fragments):
+            _is_hallucination = True
+            _hallucination_reason = f"prompt_leak: {transcript_text[:80]}"
+
+        # Check 0b: Vocabulary hint echo — Whisper echoes the food-name hints
+        # when it can't understand the audio. Detect if transcript closely
+        # matches the vocabulary hint string (>60% word overlap).
+        if not _is_hallucination:
+            _vocab_hint = vocabulary_hints.get(language, "").lower()
+            if _vocab_hint and len(_text_lower.split()) >= 3:
+                _hint_words = set(re.sub(r'[^\w\s]', ' ', _vocab_hint).split())
+                _transcript_words = set(re.sub(r'[^\w\s]', ' ', _text_lower).split())
+                if _transcript_words and _hint_words:
+                    _overlap = len(_transcript_words & _hint_words) / len(_transcript_words)
+                    if _overlap > 0.6:
+                        _is_hallucination = True
+                        _hallucination_reason = f"vocab_hint_echo: overlap={_overlap:.0%}"
 
         # Normalize text for analysis (remove punctuation, lowercase)
         normalized = re.sub(r'[^\w\s]', ' ', transcript_text.lower())
         words = normalized.split()
 
-        if len(words) >= 6:
+        if not _is_hallucination and len(words) >= 6:
             # Check 1: Single word repetition (>40% same word = hallucination)
             word_counts = Counter(words)
             most_common_word = word_counts.most_common(1)
             if most_common_word and most_common_word[0][1] > len(words) * 0.4:
-                logger.warning(
-                    "voice_hallucination_word_repetition",
-                    session_id=session_id,
-                    word=most_common_word[0][0],
-                    count=most_common_word[0][1],
-                    total=len(words)
-                )
-                await websocket.send_json({"type": "processing_end"})
-                if state is not None:
-                    state["is_processing"] = False
-                return
+                _is_hallucination = True
+                _hallucination_reason = f"word_repetition: {most_common_word[0][0]} x{most_common_word[0][1]}"
 
             # Check 2: N-gram repetition (2, 3, or 4 word phrases repeated 3+ times)
-            for n in [2, 3, 4]:
-                if len(words) >= n * 3:  # Need at least 3 repetitions
-                    grams = [" ".join(words[i:i+n]) for i in range(len(words)-n+1)]
-                    gram_counts = Counter(grams)
-                    most_common_gram = gram_counts.most_common(1)
-                    if most_common_gram and most_common_gram[0][1] >= 3:
-                        logger.warning(
-                            "voice_hallucination_ngram_repetition",
-                            session_id=session_id,
-                            phrase=most_common_gram[0][0],
-                            count=most_common_gram[0][1],
-                            n=n
-                        )
-                        await websocket.send_json({"type": "processing_end"})
-                        if state is not None:
-                            state["is_processing"] = False
-                        return
+            if not _is_hallucination:
+                for n in [2, 3, 4]:
+                    if len(words) >= n * 3:
+                        grams = [" ".join(words[i:i+n]) for i in range(len(words)-n+1)]
+                        gram_counts = Counter(grams)
+                        most_common_gram = gram_counts.most_common(1)
+                        if most_common_gram and most_common_gram[0][1] >= 3:
+                            _is_hallucination = True
+                            _hallucination_reason = f"ngram_repetition: '{most_common_gram[0][0]}' x{most_common_gram[0][1]}"
+                            break
 
             # Check 3: Very long transcripts are suspicious (>100 words from short audio)
-            if len(words) > 100:
-                logger.warning(
-                    "voice_hallucination_too_long",
-                    session_id=session_id,
-                    word_count=len(words)
-                )
-                await websocket.send_json({"type": "processing_end"})
-                if state is not None:
-                    state["is_processing"] = False
-                return
+            if not _is_hallucination and len(words) > 100:
+                _is_hallucination = True
+                _hallucination_reason = f"too_long: {len(words)} words"
 
         # Filter out known garbage patterns (Whisper artifacts)
-        garbage_patterns = [
-            "This is a conversation with a restaurant",
-            "Thank you for watching",
-            "Thanks for watching",
-            "Please subscribe",
-            "Like and subscribe",
-            "Notes:",
-            "Transcribed by",
-            "Amara.org"
-        ]
-        for pattern in garbage_patterns:
-            if pattern.lower() in transcript_text.lower():
-                logger.warning(
-                    "voice_garbage_transcript_filtered",
-                    session_id=session_id,
-                    transcript=transcript_text
-                )
-                await websocket.send_json({"type": "processing_end"})
-                if state is not None:
-                    state["is_processing"] = False
-                return
+        if not _is_hallucination:
+            garbage_patterns = [
+                "This is a conversation with a restaurant",
+                "Thank you for watching",
+                "Thanks for watching",
+                "Please subscribe",
+                "Like and subscribe",
+                "Notes:",
+                "Transcribed by",
+                "Amara.org"
+            ]
+            for pattern in garbage_patterns:
+                if pattern.lower() in transcript_text.lower():
+                    _is_hallucination = True
+                    _hallucination_reason = f"garbage_pattern: {pattern}"
+                    break
+
+        # Handle hallucination: ask user to repeat instead of silently dropping
+        if _is_hallucination:
+            logger.warning(
+                "voice_hallucination_detected",
+                session_id=session_id,
+                reason=_hallucination_reason,
+                transcript=transcript_text[:100]
+            )
+            # Ask user to repeat (send as response so they get audio feedback)
+            _repeat_msg = "I'm sorry, I didn't catch that clearly. Could you please repeat?"
+            await _safe_send(websocket, {"type": "response_text", "text": _repeat_msg})
+            # Also generate TTS so user hears it
+            try:
+                client = await get_openai_client()
+                await _safe_send(websocket, {"type": "audio_start"})
+                async with client.audio.speech.with_streaming_response.create(
+                    model="tts-1", voice="nova", input=_repeat_msg,
+                    response_format="pcm", speed=1.0
+                ) as tts_response:
+                    async for chunk in tts_response.iter_bytes(chunk_size=4096):
+                        if chunk:
+                            await _safe_send(websocket, {
+                                "type": "audio_chunk",
+                                "audio": base64.b64encode(chunk).decode('utf-8')
+                            })
+                await _safe_send(websocket, {"type": "audio_end"})
+            except Exception as _tts_err:
+                logger.debug("hallucination_tts_failed", error=str(_tts_err))
+            await _safe_send(websocket, {"type": "processing_end"})
+            if state is not None:
+                state["is_processing"] = False
+            return
 
         if not transcript_text:
             await websocket.send_json({"type": "processing_end"})
@@ -561,6 +579,16 @@ async def process_speech_segment(
             '', response_text
         ).strip()
 
+        # Strip leaked language directive prefixes
+        response_text = _re.sub(
+            r'\[RESPOND IN (?:HINGLISH|TANGLISH)[^\]]*\]\s*',
+            '', response_text, flags=_re.IGNORECASE
+        ).strip()
+
+        # Sanitize to catch any remaining prompt leaks, JSON, errors
+        from app.core.response_sanitizer import sanitize_response as _sanitize
+        response_text = _sanitize(response_text)
+
         logger.info(
             "voice_response",
             session_id=session_id,
@@ -584,6 +612,9 @@ async def process_speech_segment(
             "text": display_text
         })
 
+        # Clear stop flag before starting TTS (fresh for this response)
+        state["stop_requested"] = False
+
         # Stream TTS audio sentence-by-sentence for real-time playback
         logger.info("voice_tts_started", session_id=session_id, text_length=len(display_text), language=language)
         await websocket.send_json({"type": "audio_start"})
@@ -591,10 +622,17 @@ async def process_speech_segment(
         # Split into sentences for faster streaming (audio starts before full text is processed)
         sentences = split_into_sentences(display_text)
         CHUNK_SIZE = 4096
+        _tts_stopped = False
 
         for sentence in sentences:
             if not sentence.strip():
                 continue
+
+            # Check if client requested stop before starting next sentence
+            if state.get("stop_requested"):
+                logger.info("voice_tts_stopped_by_user", session_id=session_id)
+                _tts_stopped = True
+                break
 
             # Stream TTS for each sentence immediately
             async with client.audio.speech.with_streaming_response.create(
@@ -605,15 +643,23 @@ async def process_speech_segment(
                 speed=1.0
             ) as tts_response:
                 async for chunk in tts_response.iter_bytes(chunk_size=CHUNK_SIZE):
+                    # Check stop flag between chunks
+                    if state.get("stop_requested"):
+                        logger.info("voice_tts_stopped_mid_sentence", session_id=session_id)
+                        _tts_stopped = True
+                        break
                     if chunk:
                         base64_chunk = base64.b64encode(chunk).decode('utf-8')
                         await websocket.send_json({
                             "type": "audio_chunk",
                             "audio": base64_chunk
                         })
+            if _tts_stopped:
+                break
 
         await websocket.send_json({"type": "audio_end"})
-        logger.info("voice_tts_complete", session_id=session_id)
+        state["stop_requested"] = False  # Reset for next interaction
+        logger.info("voice_tts_complete", session_id=session_id, stopped=_tts_stopped)
 
         # Send deferred quick replies AFTER response_text and audio are done.
         # This ensures they arrive after TEXT_MESSAGE_START has cleared stale ones.

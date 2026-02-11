@@ -18,6 +18,8 @@ export function useVoiceChat(sessionId, onEvent) {
     const audioQueueRef = useRef([]);
     const isPlayingRef = useRef(false);
     const voiceModeEnabledRef = useRef(false);
+    const isAISpeakingRef = useRef(false); // Ref for instant access in audio processor
+    const currentSourceRef = useRef(null); // Track current playing AudioBufferSource for stop
 
     const connect = useCallback((language = 'English') => {
         if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -103,6 +105,7 @@ export function useVoiceChat(sessionId, onEvent) {
 
             case 'audio_start':
                 setIsAISpeaking(true);
+                isAISpeakingRef.current = true;
                 audioQueueRef.current = [];
                 break;
 
@@ -119,9 +122,15 @@ export function useVoiceChat(sessionId, onEvent) {
                 break;
 
             case 'audio_end':
-                setIsAISpeaking(false);
-                // In continuous voice mode, microphone keeps running
-                // No need to restart anything
+                // Don't immediately set isAISpeaking=false here.
+                // Wait until audio queue is fully drained and last chunk finishes playing.
+                // Mark that no more chunks are coming.
+                audioQueueRef.current._audioEndReceived = true;
+                // If nothing is playing and queue is empty, end now
+                if (!isPlayingRef.current && audioQueueRef.current.length === 0) {
+                    setIsAISpeaking(false);
+                    isAISpeakingRef.current = false;
+                }
                 break;
 
             case 'agui_event':
@@ -182,6 +191,12 @@ export function useVoiceChat(sessionId, onEvent) {
                     return;
                 }
 
+                // MUTE MIC: Don't send audio while AI is speaking or processing
+                // This prevents echo/feedback and ensures clean turn-taking
+                if (isAISpeakingRef.current) {
+                    return;
+                }
+
                 const inputData = e.inputBuffer.getChannelData(0);
 
                 // Convert Float32 to Int16 PCM
@@ -228,6 +243,12 @@ export function useVoiceChat(sessionId, onEvent) {
         // This prevents race conditions when multiple chunks arrive simultaneously
         if (isPlayingRef.current || audioQueueRef.current.length === 0) {
             isPlayingRef.current = false;
+            // If audio_end was received and queue is now empty, AI is done speaking
+            if (audioQueueRef.current._audioEndReceived && audioQueueRef.current.length === 0) {
+                setIsAISpeaking(false);
+                isAISpeakingRef.current = false;
+                audioQueueRef.current._audioEndReceived = false;
+            }
             return;
         }
 
@@ -252,8 +273,10 @@ export function useVoiceChat(sessionId, onEvent) {
             const source = audioContextRef.current.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioContextRef.current.destination);
+            currentSourceRef.current = source; // Track for stop
 
             source.onended = () => {
+                currentSourceRef.current = null;
                 // Release mutex before processing next chunk
                 isPlayingRef.current = false;
                 playNextAudioChunk();
@@ -263,12 +286,48 @@ export function useVoiceChat(sessionId, onEvent) {
 
         } catch (err) {
             console.error('Error playing audio:', err);
+            currentSourceRef.current = null;
             // Ensure mutex is released on error
             isPlayingRef.current = false;
             // Try next chunk
             playNextAudioChunk();
         }
     };
+
+    // Stop agent speech: clear queue, stop current audio, notify backend
+    const stopAgentSpeech = useCallback(() => {
+        console.log('Stopping agent speech');
+
+        // 1. Clear the audio queue
+        audioQueueRef.current = [];
+        audioQueueRef.current._audioEndReceived = false;
+
+        // 2. Stop currently playing audio source
+        if (currentSourceRef.current) {
+            try {
+                currentSourceRef.current.onended = null; // Prevent callback
+                currentSourceRef.current.stop();
+            } catch (e) {
+                // Already stopped
+            }
+            currentSourceRef.current = null;
+        }
+
+        // 3. Release playback mutex
+        isPlayingRef.current = false;
+
+        // 4. Update state - AI is no longer speaking
+        setIsAISpeaking(false);
+        isAISpeakingRef.current = false;
+
+        // 5. Notify backend to cancel any ongoing TTS streaming
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({
+                type: 'control',
+                action: 'stop_speech'
+            }));
+        }
+    }, []);
 
     // Toggle voice mode ON/OFF
     const toggleVoiceMode = useCallback(async () => {
@@ -287,10 +346,13 @@ export function useVoiceChat(sessionId, onEvent) {
             voiceModeEnabledRef.current = false;
             setIsUserSpeaking(false);
 
+            // Stop any playing audio
+            stopAgentSpeech();
+
             // Stop microphone
             stopMicrophoneStream();
         }
-    }, [voiceModeEnabled]);
+    }, [voiceModeEnabled, stopAgentSpeech]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -343,6 +405,7 @@ export function useVoiceChat(sessionId, onEvent) {
     return {
         connect,
         toggleVoiceMode,
+        stopAgentSpeech,
         voiceModeEnabled,
         isConnected,
         isRecording,

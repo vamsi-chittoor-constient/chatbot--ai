@@ -1153,6 +1153,17 @@ async def process_with_agui_streaming(
             '', response
         ).strip()
 
+        # Strip leaked language directive prefixes (e.g. [RESPOND IN HINGLISH ...])
+        # These are injected into user messages for the LLM but must never appear in output.
+        response = re.sub(
+            r'\[RESPOND IN (?:HINGLISH|TANGLISH)[^\]]*\]\s*',
+            '', response, flags=re.IGNORECASE
+        ).strip()
+
+        # Sanitize response to catch any remaining prompt leaks, JSON, errors
+        from app.core.response_sanitizer import sanitize_response as _sanitize
+        response = _sanitize(response)
+
         # Stream the response word by word
         emitter.emit_full_text(response, chunk_size=1)
 
