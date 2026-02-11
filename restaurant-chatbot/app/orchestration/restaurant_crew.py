@@ -480,6 +480,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_verify_payment_otp_tool,
         create_check_payment_status_tool,
         create_cancel_payment_tool,
+        create_select_payment_method_tool,
     )
 
     # Import complaint tools (session-aware sync wrappers)
@@ -515,6 +516,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
         create_verify_payment_otp_tool(session_id),
         create_check_payment_status_tool(session_id),
         create_cancel_payment_tool(session_id),
+        create_select_payment_method_tool(session_id),
     ]
 
     food_ordering_agent = Agent(
@@ -1177,37 +1179,25 @@ async def process_with_agui_streaming(
         # Uses GPT-4o-mini to classify response and determine appropriate buttons
         # IMPORTANT: Use emitter.emit_quick_replies() for immediate/synchronous emission
         # (not the global emit_quick_replies() which uses call_soon_threadsafe and can race)
-        # SKIP if payment workflow is about to run (PaymentMethodCard will replace quick replies)
-        _skip_quick_replies = False
         try:
-            from app.core.redis import get_sync_redis_client as _get_redis
-            _qr_redis = _get_redis()
-            if _qr_redis.get(f"checkout_payment_info:{session_id}"):
-                _skip_quick_replies = True
-                logger.debug("quick_replies_skipped_payment_pending", session_id=session_id)
-        except Exception:
-            pass
-
-        if not _skip_quick_replies:
+            from app.features.food_ordering.crew_agent import get_response_quick_replies, DEFAULT_QUICK_REPLIES
+            quick_replies = get_response_quick_replies(response)
+            if not quick_replies:
+                quick_replies = DEFAULT_QUICK_REPLIES
+            emitter.emit_quick_replies(quick_replies)
+            logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
+        except Exception as e:
+            logger.warning("quick_reply_emit_failed", error=str(e))
+            # Last resort fallback - emit default buttons even if import/classification totally fails
             try:
-                from app.features.food_ordering.crew_agent import get_response_quick_replies, DEFAULT_QUICK_REPLIES
-                quick_replies = get_response_quick_replies(response)
-                if not quick_replies:
-                    quick_replies = DEFAULT_QUICK_REPLIES
-                emitter.emit_quick_replies(quick_replies)
-                logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
-            except Exception as e:
-                logger.warning("quick_reply_emit_failed", error=str(e))
-                # Last resort fallback - emit default buttons even if import/classification totally fails
-                try:
-                    emitter.emit_quick_replies([
-                        {"label": "🍔 Show Menu", "action": "show menu"},
-                        {"label": "🛒 View Cart", "action": "view cart"},
-                        {"label": "✅ Checkout", "action": "checkout"},
-                        {"label": "❓ Help", "action": "help"},
-                    ])
-                except Exception:
-                    pass
+                emitter.emit_quick_replies([
+                    {"label": "🍔 Show Menu", "action": "show menu"},
+                    {"label": "🛒 View Cart", "action": "view cart"},
+                    {"label": "✅ Checkout", "action": "checkout"},
+                    {"label": "❓ Help", "action": "help"},
+                ])
+            except Exception:
+                pass
 
         # Ensure activity indicator is cleared before finishing
         # (redundant safety - already called at line 758, but ensures it's sent after streaming)
@@ -1221,43 +1211,6 @@ async def process_with_agui_streaming(
         flushed = flush_pending_events(session_id)
         if flushed > 0:
             logger.debug("tool_events_flushed_before_run_finished", session_id=session_id, count=flushed)
-
-        # Check if crew agent triggered checkout (via checkout tool) and trigger payment workflow
-        # _checkout_impl stores payment info in Redis; this triggers the payment workflow inline
-        try:
-            from app.core.redis import get_sync_redis_client
-            import json as _json
-            _redis = get_sync_redis_client()
-            _pinfo_key = f"checkout_payment_info:{session_id}"
-            _pinfo_data = _redis.get(_pinfo_key)
-            if _pinfo_data:
-                _pinfo = _json.loads(_pinfo_data)
-                _redis.delete(_pinfo_key)
-                # Read pending order items for receipt generation
-                _items = None
-                _order_type = None
-                _pending_key = f"pending_order:{session_id}"
-                _pending_data = _redis.get(_pending_key)
-                _subtotal = None
-                _packaging = None
-                if _pending_data:
-                    _pending = _json.loads(_pending_data)
-                    _items = _pending.get("items")
-                    _order_type = _pending.get("order_type")
-                    _subtotal = _pending.get("subtotal")
-                    _packaging = _pending.get("packaging_charges")
-                from app.workflows.payment_workflow import run_payment_workflow
-                await run_payment_workflow(
-                    session_id, _pinfo["order_display_id"], _pinfo["total"],
-                    items=_items, order_type=_order_type,
-                    subtotal=_subtotal, packaging_charges=_packaging
-                )
-                # Flush the payment workflow events too
-                flushed_payment = flush_pending_events(session_id)
-                if flushed_payment > 0:
-                    logger.debug("payment_events_flushed", session_id=session_id, count=flushed_payment)
-        except Exception as _pe:
-            logger.warning("payment_workflow_fallback_failed", error=str(_pe), session_id=session_id)
 
         # Emit run finished
         emitter.emit_run_finished(response)

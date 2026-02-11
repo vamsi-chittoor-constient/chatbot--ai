@@ -541,6 +541,19 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
 
         logger.info("pending_order_created", session_id=session_id, order_id=order_display_id)
 
+        # Clear session_cart in PostgreSQL so cart shows empty after checkout
+        from app.core.db_pool import SyncDBConnection
+        try:
+            with SyncDBConnection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE session_cart SET is_active = FALSE, updated_at = NOW() WHERE session_id = %s AND is_active = TRUE",
+                        (session_id,)
+                    )
+                    conn.commit()
+        except Exception as clear_err:
+            logger.warning("cart_clear_after_checkout_failed", error=str(clear_err))
+
         # =====================================================================
         # PAYMENT WORKFLOW - Emit payment method card directly
         # =====================================================================
@@ -2919,7 +2932,7 @@ def create_update_quantity_tool(session_id: str):
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "update_quantity")
 
-        from app.core.redis import get_cart_sync, set_cart_sync
+        from app.core.db_pool import SyncDBConnection
 
         try:
             # VALIDATION: Quantity must be positive and reasonable
@@ -2929,60 +2942,43 @@ def create_update_quantity_tool(session_id: str):
             if new_quantity > 50:
                 return f"[INVALID QUANTITY] That's a lot! Our maximum order quantity per item is 50. If you need more, please contact us directly."
 
-            item_name_clean = item_name.strip().lower()
+            item_name_clean = item_name.strip()
 
-            # Get cart (sync Redis)
-            cart_data = get_cart_sync(session_id) or {"items": []}
-            items = cart_data.get("items", [])
+            with SyncDBConnection() as conn:
+                with conn.cursor() as cur:
+                    # Update quantity in SQL session_cart (same store as event-sourced tools)
+                    cur.execute(
+                        """UPDATE session_cart
+                           SET quantity = %s, updated_at = NOW()
+                           WHERE session_id = %s AND LOWER(item_name) = LOWER(%s) AND is_active = TRUE""",
+                        (new_quantity, session_id, item_name_clean)
+                    )
+                    rows_updated = cur.rowcount
+                    conn.commit()
 
-            if not items:
-                return "Cart is empty. Nothing to update."
+                    if rows_updated == 0:
+                        return f"Item '{item_name}' not found in cart."
 
-            # Find and update item — prefer exact match over substring
-            updated = False
-            target_item = None
-            # Pass 1: exact match
-            for item in items:
-                if item.get("name", "").lower() == item_name_clean:
-                    target_item = item
-                    break
-            # Pass 2: substring match, prefer longest name (most specific)
-            if not target_item:
-                best_len = 0
-                for item in items:
-                    name_lower = item.get("name", "").lower()
-                    if item_name_clean in name_lower or name_lower in item_name_clean:
-                        if len(name_lower) > best_len:
-                            best_len = len(name_lower)
-                            target_item = item
-            if target_item:
-                item = target_item
-                old_qty = item.get("quantity", 1)
-                item["quantity"] = new_quantity
-                updated = True
+                    # Get updated cart
+                    cur.execute("SELECT * FROM get_session_cart(%s)", (session_id,))
+                    columns = [desc[0] for desc in cur.description] if cur.description else []
+                    items = [dict(zip(columns, row)) for row in cur.fetchall()]
 
-                # Save cart (sync Redis)
-                cart_data['items'] = items
-                cart_data['updated_at'] = str(datetime.now())
-                set_cart_sync(session_id, cart_data, ttl=3600)
+                    cur.execute("SELECT get_cart_total(%s)", (session_id,))
+                    total_row = cur.fetchone()
+                    new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
 
-                new_total = sum(i['price'] * i['quantity'] for i in items)
+            # Emit updated cart card
+            emit_cart_data(session_id, items, new_total)
 
-                # Emit cart update
-                emit_cart_data(session_id, items, new_total)
+            logger.info(
+                "quantity_updated",
+                session_id=session_id,
+                item=item_name_clean,
+                new_qty=new_quantity
+            )
 
-                logger.info(
-                    "quantity_updated",
-                    session_id=session_id,
-                    item=item.get("name"),
-                    old_qty=old_qty,
-                    new_qty=new_quantity
-                )
-
-                return f"Updated {item.get('name')} to {new_quantity}. Cart total: Rs.{new_total:.0f}"
-
-            if not updated:
-                return f"Item '{item_name}' not found in cart."
+            return f"Updated {item_name} to {new_quantity}. Cart total: Rs.{new_total:.0f}"
 
         except Exception as e:
             logger.error("update_quantity_error", error=str(e), session_id=session_id)
