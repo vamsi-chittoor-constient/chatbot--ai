@@ -2,7 +2,7 @@
 RAG-based Tool Retrieval System with Agent-Specific Collections (ChromaDB)
 ===========================================================================
 Each agent has its own ChromaDB collection for focused tool retrieval.
-- Food Ordering Agent: 25 tools
+- Food Ordering Agent: 24 tools
 - Booking Agent: 4 tools
 - Uses in-memory ChromaDB (already included in CrewAI dependencies)
 - No additional dependencies required
@@ -18,12 +18,14 @@ logger = structlog.get_logger(__name__)
 AgentType = Literal["food_ordering", "booking"]
 
 # =============================================================================
-# FOOD ORDERING AGENT TOOLS (29 tools)
+# FOOD ORDERING AGENT TOOLS (24 tools)
 # =============================================================================
+# IMPORTANT: These names MUST match the @tool("name") decorators in the actual
+# tool factories. Mismatches cause phantom tools that waste RAG retrieval slots.
 
 FOOD_ORDERING_TOOLS = {
     # =========================================================================
-    # Menu Browsing (3 tools)
+    # Menu Browsing (2 tools)
     # =========================================================================
     "search_menu": {
         "name": "search_menu",
@@ -39,14 +41,6 @@ FOOD_ORDERING_TOOLS = {
         "category": "menu_browsing",
         "priority": 10
     },
-    "show_popular_items": {
-        "name": "show_popular_items",
-        "description": "Display popular and recommended menu items based on ratings and recommendations",
-        "usage": "When customer asks for popular, recommended, best-sellers, or trending items",
-        "examples": ["show popular items", "what's recommended", "best sellers", "trending food"],
-        "category": "menu_browsing",
-        "priority": 9
-    },
     "filter_by_cuisine": {
         "name": "filter_by_cuisine",
         "description": "Filter menu items by cuisine type (Italian, Chinese, Indian, etc.)",
@@ -61,8 +55,8 @@ FOOD_ORDERING_TOOLS = {
     # =========================================================================
     "add_to_cart": {
         "name": "add_to_cart",
-        "description": "Add menu items to customer's cart with specified quantity. Use when customer wants to order any food item.",
-        "usage": "When customer wants to add items to cart, order something, select items, or says 'add X' or 'I want X'",
+        "description": "Add a single menu item to customer's cart with specified quantity.",
+        "usage": "When customer wants to add ONE item to cart, order something, select an item, or says 'add X' or 'I want X'",
         "examples": [
             "add 2 burgers", "I want pizza", "add to cart", "order chicken",
             "add dosa", "add 2 dosa", "add masala dosa", "I want idli", "add biryani",
@@ -72,11 +66,34 @@ FOOD_ORDERING_TOOLS = {
         "category": "cart_management",
         "priority": 10
     },
+    "batch_add_to_cart": {
+        "name": "batch_add_to_cart",
+        "description": "Add multiple different items to cart in one call. Use when customer orders 2+ items at once.",
+        "usage": "When customer mentions multiple items in one message, e.g. '2 dosa and 1 idli'",
+        "examples": [
+            "add 2 dosa and 1 idli", "I want pizza and coke", "order burger fries and drink",
+            "add masala dosa and vada", "get me 2 biryani and 1 raita", "one naan and two paneer"
+        ],
+        "category": "cart_management",
+        "priority": 10
+    },
+    "correct_order": {
+        "name": "correct_order",
+        "description": "Fix order mistakes by removing wrong items and adding correct ones in a single call.",
+        "usage": "When customer corrects their order, says 'I meant X not Y', or wants to swap items",
+        "examples": [
+            "I said ghee dosa not plain dosa", "no I wanted chicken not paneer",
+            "that's wrong I asked for masala", "change it to butter naan",
+            "remove burger and add pizza instead", "swap the fries for salad"
+        ],
+        "category": "cart_management",
+        "priority": 9
+    },
     "view_cart": {
         "name": "view_cart",
         "description": "Display current cart contents with items, quantities, and total price",
-        "usage": "When customer wants to see cart, review order, check what's in cart",
-        "examples": ["view cart", "show my cart", "what's in my order", "cart summary"],
+        "usage": "When customer wants to see cart, review order, check what's in cart, how much total",
+        "examples": ["view cart", "show my cart", "what's in my order", "cart summary", "what's the total", "how much"],
         "category": "cart_management",
         "priority": 9
     },
@@ -96,39 +113,27 @@ FOOD_ORDERING_TOOLS = {
         "category": "cart_management",
         "priority": 7
     },
-    "clear_cart": {
-        "name": "clear_cart",
-        "description": "Remove all items from the cart and start fresh",
-        "usage": "When customer wants to empty cart, clear everything, start over",
-        "examples": ["clear cart", "empty my cart", "remove everything", "start over"],
+    "set_special_instructions": {
+        "name": "set_special_instructions",
+        "description": "Set special cooking instructions or notes for a cart item",
+        "usage": "When customer wants to add special requests like extra spicy, no onions, less oil",
+        "examples": ["extra spicy", "no onions please", "less oil", "make it extra crispy", "special instructions"],
         "category": "cart_management",
         "priority": 6
     },
-    "get_cart_total": {
-        "name": "get_cart_total",
-        "description": "Get the total price of all items in the cart",
-        "usage": "When customer asks for total, price, cost, or amount",
-        "examples": ["what's the total", "how much", "cart price", "total cost"],
-        "category": "cart_management",
-        "priority": 7
-    },
-    "get_cart_item_count": {
-        "name": "get_cart_item_count",
-        "description": "Get the number of items currently in the cart",
-        "usage": "When customer asks how many items in cart",
-        "examples": ["how many items", "cart count", "number of items"],
-        "category": "cart_management",
-        "priority": 5
-    },
 
     # =========================================================================
-    # Order Processing (7 tools)
+    # Order Processing (6 tools)
     # =========================================================================
     "checkout": {
         "name": "checkout",
-        "description": "Complete the order and place it with optional order type (dine-in, takeaway, delivery)",
+        "description": "Complete the order, place it, and show payment options. MUST be called when customer is ready to order.",
         "usage": "When customer wants to checkout, place order, finalize, pay, or complete purchase",
-        "examples": ["checkout", "place order", "proceed to checkout", "checkout for dine in", "pay now"],
+        "examples": [
+            "checkout", "place order", "proceed to checkout", "I want to checkout",
+            "place my order", "done ordering", "that's all", "ready to pay",
+            "finalize order", "complete order", "order now", "let's pay"
+        ],
         "category": "order_processing",
         "priority": 10
     },
@@ -164,65 +169,37 @@ FOOD_ORDERING_TOOLS = {
         "category": "order_processing",
         "priority": 6
     },
-    "reorder_previous": {
-        "name": "reorder_previous",
-        "description": "Reorder items from a previous order",
-        "usage": "When customer wants to order same thing again, repeat order",
-        "examples": ["order again", "same as last time", "reorder", "repeat my order"],
+    "reorder_last_order": {
+        "name": "reorder_last_order",
+        "description": "Reorder items from the customer's most recent order",
+        "usage": "When customer wants to order same thing again, repeat last order",
+        "examples": ["order again", "same as last time", "reorder", "repeat my order", "reorder last order"],
         "category": "order_processing",
         "priority": 5
-    },
-    "get_estimated_delivery_time": {
-        "name": "get_estimated_delivery_time",
-        "description": "Get estimated delivery or preparation time for order",
-        "usage": "When customer asks how long, when will it arrive, delivery time",
-        "examples": ["how long", "when will it arrive", "delivery time", "estimated time"],
-        "category": "order_processing",
-        "priority": 6
     },
 
     # =========================================================================
-    # Payment Processing (9 tools)
+    # Item Details (1 tool)
     # =========================================================================
-    "apply_coupon": {
-        "name": "apply_coupon",
-        "description": "Apply a discount coupon code to the order",
-        "usage": "When customer has coupon, discount code, promo code",
-        "examples": ["apply coupon", "use discount code", "I have a promo", "coupon code"],
-        "category": "payment",
+    "get_item_details": {
+        "name": "get_item_details",
+        "description": "Get detailed information about a specific menu item including ingredients, allergens, nutrition",
+        "usage": "When customer asks about ingredients, allergens, nutrition, or details of a specific item",
+        "examples": ["what's in the burger", "ingredients of dosa", "is it vegan", "allergen info", "nutrition facts"],
+        "category": "menu_browsing",
         "priority": 7
     },
-    "remove_coupon": {
-        "name": "remove_coupon",
-        "description": "Remove applied coupon from the order",
-        "usage": "When customer wants to remove coupon",
-        "examples": ["remove coupon", "cancel discount", "don't use coupon"],
+
+    # =========================================================================
+    # Payment Processing (5 tools)
+    # =========================================================================
+    "select_payment_method": {
+        "name": "select_payment_method",
+        "description": "Select a payment method for the order (online, cash, or card at counter)",
+        "usage": "When customer chooses how to pay after checkout",
+        "examples": ["pay by card", "cash on delivery", "UPI payment", "pay online", "cash", "card at counter"],
         "category": "payment",
-        "priority": 5
-    },
-    "get_available_payment_methods": {
-        "name": "get_available_payment_methods",
-        "description": "Get list of available payment methods",
-        "usage": "When customer asks about payment options, how to pay",
-        "examples": ["payment methods", "how can I pay", "payment options", "accepted payments"],
-        "category": "payment",
-        "priority": 6
-    },
-    "set_payment_method": {
-        "name": "set_payment_method",
-        "description": "Set the payment method for the order",
-        "usage": "When customer specifies payment method",
-        "examples": ["pay by card", "cash on delivery", "UPI payment", "credit card"],
-        "category": "payment",
-        "priority": 7
-    },
-    "validate_payment": {
-        "name": "validate_payment",
-        "description": "Validate and process payment for the order",
-        "usage": "Internal tool for payment validation",
-        "examples": [],
-        "category": "payment",
-        "priority": 4
+        "priority": 10
     },
     "initiate_payment": {
         "name": "initiate_payment",
@@ -230,15 +207,7 @@ FOOD_ORDERING_TOOLS = {
         "usage": "When customer wants to pay online, pay by card, complete payment, or proceed with online payment after checkout",
         "examples": ["pay online", "pay by card", "I want to pay now", "online payment", "card payment", "pay with UPI", "generate payment link"],
         "category": "payment",
-        "priority": 10
-    },
-    "verify_payment_otp": {
-        "name": "verify_payment_otp",
-        "description": "Verify OTP for payment authentication",
-        "usage": "When customer needs to verify payment OTP",
-        "examples": ["verify OTP", "payment OTP", "enter OTP"],
-        "category": "payment",
-        "priority": 6
+        "priority": 9
     },
     "check_payment_status": {
         "name": "check_payment_status",
@@ -247,6 +216,14 @@ FOOD_ORDERING_TOOLS = {
         "examples": ["payment status", "check payment", "was payment successful", "did payment go through"],
         "category": "payment",
         "priority": 8
+    },
+    "verify_payment_otp": {
+        "name": "verify_payment_otp",
+        "description": "Verify OTP for payment authentication",
+        "usage": "When customer needs to verify payment OTP",
+        "examples": ["verify OTP", "payment OTP", "enter OTP"],
+        "category": "payment",
+        "priority": 6
     },
     "cancel_payment": {
         "name": "cancel_payment",
@@ -260,29 +237,29 @@ FOOD_ORDERING_TOOLS = {
     # =========================================================================
     # Support & Complaints (3 tools)
     # =========================================================================
-    "submit_feedback": {
-        "name": "submit_feedback",
-        "description": "Submit customer feedback or complaint",
-        "usage": "When customer has feedback, complaint, issue, or problem",
-        "examples": ["submit feedback", "I have a complaint", "report issue", "problem with order"],
+    "create_complaint": {
+        "name": "create_complaint",
+        "description": "Submit customer feedback, complaint, or report an issue with food or service",
+        "usage": "When customer has feedback, complaint, issue, or problem with food or service",
+        "examples": ["I have a complaint", "report issue", "problem with order", "food was cold", "bad service"],
         "category": "support",
         "priority": 6
     },
-    "get_support_info": {
-        "name": "get_support_info",
-        "description": "Get customer support contact information",
-        "usage": "When customer asks for help, support, contact",
-        "examples": ["contact support", "help", "customer service", "talk to human"],
+    "get_user_complaints": {
+        "name": "get_user_complaints",
+        "description": "View customer's previously submitted complaints",
+        "usage": "When customer wants to see their complaints or check complaint history",
+        "examples": ["my complaints", "show my complaints", "complaint history", "previous complaints"],
         "category": "support",
         "priority": 5
     },
-    "escalate_issue": {
-        "name": "escalate_issue",
-        "description": "Escalate customer issue to human support",
-        "usage": "When customer wants to talk to manager, human, or escalate issue",
-        "examples": ["talk to manager", "human support", "escalate", "supervisor"],
+    "check_complaint_status": {
+        "name": "check_complaint_status",
+        "description": "Check the status of a specific complaint",
+        "usage": "When customer wants to check if their complaint has been resolved",
+        "examples": ["complaint status", "is my complaint resolved", "check complaint", "complaint update"],
         "category": "support",
-        "priority": 7
+        "priority": 5
     },
 }
 
@@ -490,17 +467,43 @@ def get_relevant_tools_for_agent(
 
     # Convert tool names to callables
     relevant_tools = []
+    included_names = set()
     for tool_name in relevant_tool_names:
         if tool_name in all_tools:
             relevant_tools.append(all_tools[tool_name])
+            included_names.add(tool_name)
         else:
-            logger.warning(f"tool_not_found", tool_name=tool_name)
+            logger.warning("rag_tool_not_in_registry", tool_name=tool_name)
+
+    # =========================================================================
+    # CRITICAL TOOL FAILSAFE
+    # =========================================================================
+    # Ensure critical tools are always available when the user intent clearly
+    # matches, even if RAG scoring didn't rank them in the top-k.
+    if agent_type == "food_ordering":
+        msg_lower = user_message.lower()
+        _must_include: List[str] = []
+
+        # Checkout intent
+        if any(kw in msg_lower for kw in ["checkout", "place order", "place my order", "ready to pay", "done ordering", "that's all i want", "finalize"]):
+            _must_include.append("checkout")
+
+        # View cart intent
+        if any(kw in msg_lower for kw in ["view cart", "show cart", "my cart", "what's in my cart"]):
+            _must_include.append("view_cart")
+
+        for must_tool in _must_include:
+            if must_tool not in included_names and must_tool in all_tools:
+                relevant_tools.append(all_tools[must_tool])
+                included_names.add(must_tool)
+                logger.info("critical_tool_force_included", tool_name=must_tool, query=user_message[:50])
 
     logger.info(
         "relevant_tools_selected",
         agent_type=agent_type,
         total_tools=len(all_tools),
         relevant_count=len(relevant_tools),
+        tool_names=list(included_names),
         reduction_pct=int((1 - len(relevant_tools) / len(all_tools)) * 100) if all_tools else 0
     )
 
