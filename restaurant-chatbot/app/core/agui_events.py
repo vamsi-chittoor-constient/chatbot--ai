@@ -264,12 +264,17 @@ class ActivityEndEvent(AGUIEvent):
     type: EventType = EventType.ACTIVITY_END
 
 
+# Single source of truth for packaging charge - used by backend checkout and frontend CartCard
+PACKAGING_CHARGE_PER_ITEM = 30
+
+
 @dataclass
 class CartDataEvent(AGUIEvent):
     """Emitted with cart data for rich UI display"""
     type: EventType = EventType.CART_DATA
     items: List[Dict[str, Any]] = field(default_factory=list)
     total: float = 0.0
+    packaging_charge_per_item: int = PACKAGING_CHARGE_PER_ITEM
 
 
 @dataclass

@@ -1,10 +1,8 @@
 import React from 'react'
 import { ShoppingCart, Plus, Minus, Trash2 } from 'lucide-react'
 
-const PACKAGING_CHARGE_PER_ITEM = 30
-
 export const CartCard = ({ data, onUpdateQuantity, onRemoveItem, onCheckout }) => {
-  const { items = [], total = 0 } = data
+  const { items = [], total = 0, packaging_charge_per_item: PACKAGING_CHARGE_PER_ITEM = 30 } = data
 
   if (!items.length) return null
 

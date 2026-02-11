@@ -95,6 +95,7 @@ function aguiReducer(state, action) {
           data: {
             items: action.payload.items,
             total: action.payload.total,
+            packaging_charge_per_item: action.payload.packaging_charge_per_item || 30,
           },
           timestamp: new Date(),
         }],

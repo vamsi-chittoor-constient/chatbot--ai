@@ -432,7 +432,7 @@ def _summarize_old_conversation(messages: List[str]) -> str:
         return "general conversation about restaurant services"
 
 
-def create_restaurant_crew_fixed(session_id: str) -> Crew:
+def create_restaurant_crew_fixed(session_id: str, customer_id: Optional[str] = None) -> Crew:
     """
     Create unified restaurant crew with multiple agents.
 
@@ -491,7 +491,7 @@ def create_restaurant_crew_fixed(session_id: str) -> Crew:
     )
 
     # Create event-sourced tools (search_menu, add_to_cart, view_cart, remove_from_cart)
-    event_sourced_tools = create_event_sourced_tools(session_id)
+    event_sourced_tools = create_event_sourced_tools(session_id, customer_id)
 
     # Create ALL tools (event-sourced + legacy tools)
     all_food_tools = [
@@ -781,7 +781,7 @@ async def process_with_restaurant_crew(
 
     if cache_key not in _CREW_CACHE:
         logger.info("creating_restaurant_crew", session_id=session_id, version=_CREW_VERSION)
-        _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id)
+        _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id, customer_id=user_id)
     else:
         logger.debug("reusing_cached_crew", session_id=session_id)
 
@@ -790,7 +790,7 @@ async def process_with_restaurant_crew(
     # 🚀 RAG-BASED TOOL RETRIEVAL - Dynamically filter tools per request
     # Convert tools list to dict for RAG
     all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
-    
+
     # TRANSLATION LAYER FOR RAG:
     # If query is non-English (or we want to be safe), translate it to English for better retrieval
     # Tools are indexed in English, so searching in Hindi/Tamil yields poor results.
@@ -1036,7 +1036,7 @@ async def process_with_agui_streaming(
         if cache_key not in _CREW_CACHE:
             emitter.emit_activity("thinking", "Setting things up...")
             logger.info("creating_restaurant_crew", session_id=session_id, version=_CREW_VERSION)
-            _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id)
+            _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id, customer_id=user_id)
 
         crew = _CREW_CACHE[cache_key]
 

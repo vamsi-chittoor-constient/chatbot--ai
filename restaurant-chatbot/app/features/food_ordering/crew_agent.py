@@ -354,113 +354,6 @@ def _search_menu_impl(query: str, session_id: str) -> str:
     return f"Menu items: {', '.join(menu_items)}" + (f" (+{len(items)-15} more)" if len(items) > 15 else "")
 
 
-def _add_to_cart_impl(item_name: str, quantity: int, session_id: str) -> str:
-    """Sync implementation of add_to_cart for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_update, emit_quick_replies
-    from app.core.redis import get_cart_sync, save_cart_sync
-    from app.core.preloader import get_menu_preloader
-
-    emit_tool_activity(session_id, "add_to_cart")
-
-    # Find item
-    preloader = get_menu_preloader()
-    item = preloader.find_item(item_name) if preloader.is_loaded else None
-
-    if not item:
-        return f"Sorry, I couldn't find '{item_name}' on our menu. Try 'show menu' to see available items."
-
-    # Get cart
-    cart_data = get_cart_sync(session_id) or {"items": [], "total": 0}
-    cart_items = cart_data.get("items", [])
-
-    # Check if already in cart
-    for cart_item in cart_items:
-        if cart_item.get("name", "").lower() == item.get("name", "").lower():
-            cart_item["quantity"] = cart_item.get("quantity", 1) + quantity
-            break
-    else:
-        cart_items.append({
-            "name": item.get("name"),
-            "price": item.get("price"),
-            "quantity": quantity,
-            "item_id": str(item.get("id", "")),
-        })
-
-    # Calculate total
-    total = sum(i.get("price", 0) * i.get("quantity", 1) for i in cart_items)
-    cart_data = {"items": cart_items, "total": total}
-
-    # Save cart
-    save_cart_sync(session_id, cart_data)
-
-    # Emit cart update
-    emit_cart_update(session_id, cart_items, total)
-
-    # DETERMINISTIC CHECKOUT: Always show checkout quick reply after cart update
-    emit_quick_replies(session_id, [
-        {"label": "Checkout", "action": "checkout", "icon": "cart", "variant": "primary"},
-        {"label": "View Cart", "action": "show my cart", "icon": "view", "variant": "secondary"},
-        {"label": "Add More", "action": "show menu", "icon": "menu", "variant": "secondary"},
-    ])
-
-    # SECURITY: Return natural language response only (no JSON)
-    return f"Added {quantity}x {item.get('name')} to cart. Total: Rs.{total}. Anything else?"
-
-
-def _view_cart_impl(session_id: str) -> str:
-    """Sync implementation of view_cart for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_card
-    from app.core.redis import get_cart_sync
-
-    emit_tool_activity(session_id, "view_cart")
-
-    cart_data = get_cart_sync(session_id)
-    if not cart_data or not cart_data.get("items"):
-        return "Your cart is empty. Would you like to see our menu?"
-
-    items = cart_data.get("items", [])
-    total = cart_data.get("total", 0)
-
-    # Emit cart card
-    emit_cart_card(session_id, items, total)
-
-    cart_list = [f"{i.get('name')} x{i.get('quantity')} (Rs.{i.get('price') * i.get('quantity')})" for i in items]
-    return f"[CART CARD DISPLAYED] Your cart: {', '.join(cart_list)}. Total: Rs.{total}. Ready to checkout?"
-
-
-def _remove_from_cart_impl(item_name: str, session_id: str) -> str:
-    """Sync implementation of remove_from_cart for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_update, emit_quick_replies
-    from app.core.redis import get_cart_sync, save_cart_sync
-
-    emit_tool_activity(session_id, "remove_from_cart")
-
-    cart_data = get_cart_sync(session_id)
-    if not cart_data or not cart_data.get("items"):
-        return "Your cart is empty."
-
-    items = cart_data.get("items", [])
-    item_lower = item_name.lower()
-
-    new_items = [i for i in items if i.get("name", "").lower() != item_lower]
-
-    if len(new_items) == len(items):
-        return f"'{item_name}' not found in your cart."
-
-    total = sum(i.get("price", 0) * i.get("quantity", 1) for i in new_items)
-    cart_data = {"items": new_items, "total": total}
-    save_cart_sync(session_id, cart_data)
-    emit_cart_update(session_id, new_items, total)
-
-    # DETERMINISTIC CHECKOUT: Show checkout quick reply if cart still has items
-    if new_items:
-        emit_quick_replies(session_id, [
-            {"label": "Checkout", "action": "checkout", "icon": "cart", "variant": "primary"},
-            {"label": "View Cart", "action": "show my cart", "icon": "view", "variant": "secondary"},
-            {"label": "Add More", "action": "show menu", "icon": "menu", "variant": "secondary"},
-        ])
-
-    return f"Removed {item_name} from cart. Total: Rs.{total}."
 
 
 def _checkout_impl(order_type: str, session_id: str) -> str:
@@ -507,8 +400,8 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             items.append(normalized)
         subtotal = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
 
-        # Packaging charge: Rs.30 per item (per quantity, not per unique item)
-        PACKAGING_CHARGE_PER_ITEM = 30
+        # Packaging charge per item - single source of truth in agui_events
+        from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM
         total_quantity = sum(i.get("quantity", 1) for i in items)
         packaging_charges = total_quantity * PACKAGING_CHARGE_PER_ITEM
         total = subtotal + packaging_charges
@@ -620,50 +513,6 @@ def _cancel_order_impl(session_id: str) -> str:
     return "Order cancellation requires an order ID. What order would you like to cancel?"
 
 
-def _clear_cart_impl(session_id: str) -> str:
-    """Sync implementation of clear_cart for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_update
-    from app.core.redis import clear_cart_sync
-
-    emit_tool_activity(session_id, "clear_cart")
-    clear_cart_sync(session_id)
-    emit_cart_update(session_id, [], 0)
-    return "Cart cleared. Would you like to see our menu?"
-
-
-def _update_quantity_impl(item_name: str, quantity: int, session_id: str) -> str:
-    """Sync implementation of update_quantity for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_cart_update
-    from app.core.redis import get_cart_sync, save_cart_sync
-
-    emit_tool_activity(session_id, "update_quantity")
-
-    cart_data = get_cart_sync(session_id)
-    if not cart_data or not cart_data.get("items"):
-        return "Your cart is empty."
-
-    items = cart_data.get("items", [])
-    item_lower = item_name.lower()
-    found = False
-
-    for item in items:
-        if item.get("name", "").lower() == item_lower:
-            if quantity <= 0:
-                items.remove(item)
-            else:
-                item["quantity"] = quantity
-            found = True
-            break
-
-    if not found:
-        return f"'{item_name}' not found in your cart."
-
-    total = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
-    cart_data = {"items": items, "total": total}
-    save_cart_sync(session_id, cart_data)
-    emit_cart_update(session_id, items, total)
-
-    return f"Updated {item_name} quantity to {quantity}. Total: Rs.{total}."
 
 
 def _get_item_details_impl(item_name: str, session_id: str) -> str:

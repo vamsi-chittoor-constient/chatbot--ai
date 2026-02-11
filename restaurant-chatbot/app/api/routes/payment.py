@@ -18,7 +18,7 @@ import structlog
 
 from app.core.database import get_db_session
 # from app.shared.models import PaymentOrder, Order, OrderItem
-from app.features.food_ordering.models import PaymentOrder, Order, OrderItem
+from app.features.food_ordering.models import PaymentOrder, Order
 from app.core.config import config
 
 router = APIRouter()
@@ -128,76 +128,28 @@ async def verify_payment(
                     payment_order.razorpay_payment_id = razorpay_payment_id
 
                 # ================================================================
-                # CREATE DATABASE ORDER AFTER PAYMENT SUCCESS
+                # LOOK UP EXISTING ORDER (already created by payment workflow)
                 # ================================================================
-                # Retrieve pending order from Redis
-                from app.core.redis import get_sync_redis_client
-                import json
-
-                redis_client = get_sync_redis_client()
-                # Try to get pending order by order_id from payment_order notes
-                notes = payment_order.notes or {}
-                pending_session_id = notes.get("session_id")
-
                 order = None
-                if pending_session_id:
-                    pending_order_key = f"pending_order:{pending_session_id}"
-                    pending_order_data = redis_client.get(pending_order_key)
-
-                    if pending_order_data:
-                        pending_order = json.loads(pending_order_data)
-
-                        # Create actual database order now that payment succeeded
-                        from app.features.food_ordering.models import OrderType, OrderSourceType, OrderStatusType
-                        from datetime import timedelta
-                        import uuid
-
-                        # Create order
-                        order = Order(
-                            order_id=uuid.uuid4(),
-                            order_number=pending_order["order_id"],  # Use the reference ID
-                            restaurant_id=uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),  # Default restaurant
-                            user_id=payment_order.user_id if payment_order.user_id else None,
-                            order_type_id=uuid.UUID("d1e2f3a4-b5c6-7890-abcd-123456789def"),  # Default order type
-                            order_source_type_id=uuid.UUID("11111111-2222-3333-4444-555555555555"),  # Chat source
-                            order_status_type_id=uuid.UUID("a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5"),  # Confirmed status
-                            total_amount=pending_order["total"],
-                            payment_status="paid",
-                            status="confirmed",
-                            estimated_ready_time=datetime.now(timezone.utc) + timedelta(minutes=25),
-                            created_at=datetime.now(timezone.utc)
-                        )
-                        session.add(order)
-                        await session.flush()  # Get order.order_id
-
-                        # Create order items
-                        for item in pending_order.get("items", []):
-                            order_item = OrderItem(
-                                order_item_id=uuid.uuid4(),
-                                order_id=order.order_id,
-                                menu_item_id=uuid.UUID(item.get("menu_item_id")) if item.get("menu_item_id") else None,
-                                quantity=item.get("quantity", 1),
-                                unit_price=item.get("price", 0),
-                                total_price=item.get("price", 0) * item.get("quantity", 1)
-                            )
-                            session.add(order_item)
-
-                        # Delete pending order from Redis (order now confirmed)
-                        redis_client.delete(pending_order_key)
-
-                        logger.info(
-                            "order_created_after_payment",
-                            order_id=order.order_number,
-                            order_uuid=str(order.order_id),
-                            payment_order_id=payment_order.id,
-                            amount=payment_order.amount / 100
-                        )
-                else:
-                    logger.warning(
-                        "pending_order_not_found_in_redis",
-                        payment_order_id=payment_order.id,
-                        session_id=pending_session_id
+                if payment_order.order_id:
+                    order_query = select(Order).where(
+                        Order.order_id == payment_order.order_id
                     )
+                    order_result = await session.execute(order_query)
+                    order = order_result.scalar_one_or_none()
+
+                    if order:
+                        logger.info(
+                            "payment_verified_order_found",
+                            order_id=str(order.order_id),
+                            payment_order_id=payment_order.payment_order_id
+                        )
+                    else:
+                        logger.warning(
+                            "payment_verified_order_not_found",
+                            order_id=str(payment_order.order_id),
+                            payment_order_id=payment_order.payment_order_id
+                        )
 
                 await session.commit()
 
@@ -217,7 +169,7 @@ async def verify_payment(
                         logger.info(
                             "payment_verified_websocket_sent",
                             session_id=session_id,
-                            order_id=order.id if order else None
+                            order_id=str(order.order_id) if order else None
                         )
 
                         # Send follow-up message to continue conversation
@@ -285,21 +237,21 @@ async def verify_payment(
                         if sms_result.get("success"):
                             logger.info(
                                 "payment_verified_sms_sent",
-                                order_id=order.id,
+                                order_id=str(order.order_id),
                                 phone=order.contact_phone[-4:],
                                 amount=amount_rupees
                             )
                         else:
                             logger.warning(
                                 "payment_verified_sms_failed",
-                                order_id=order.id,
+                                order_id=str(order.order_id),
                                 error=sms_result.get("error")
                             )
 
                 except Exception as e:
                     logger.error(
                         "payment_verified_sms_exception",
-                        order_id=order.id if order else None,
+                        order_id=str(order.order_id) if order else None,
                         error=str(e)
                     )
 

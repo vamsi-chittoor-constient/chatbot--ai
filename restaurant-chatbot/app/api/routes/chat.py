@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 import structlog
 
 from app.api.middleware.logging import log_chat_message, log_system_event
@@ -477,50 +478,50 @@ websocket_manager = WebSocketManager()
 
 async def manage_cart_ownership(session_id: str, user_id: str):
     """
-    Ensure cart belongs to the authenticated user.
-    If cart was owned by someone else -> CLEAR IT.
+    Ensure cart belongs to the authenticated user (SQL session_cart).
+    If cart was owned by someone else -> CLEAR IT (data leakage risk).
     If cart was anonymous or owned by same user -> KEEP IT (resume).
-    Always tag cart with current user_id.
+    Always tag session_state with current user_id.
     """
     try:
-        from app.core.redis import get_redis_client
-        redis = await get_redis_client()
-        cart_key = f"cart:{session_id}"
+        from app.core.database import get_db_session
 
-        cart_json = await redis.get(cart_key)
-        if not cart_json:
-            # Create empty cart tagged with user
-            await redis.setex(
-                cart_key,
-                3600,
-                json.dumps({"items": [], "user_id": user_id})
+        async with get_db_session() as db:
+            # Check existing owner in session_state
+            result = await db.execute(
+                text("SELECT user_id FROM session_state WHERE session_id = :sid"),
+                {"sid": session_id}
             )
-            return
+            row = result.fetchone()
+            existing_owner = str(row[0]) if row and row[0] else None
 
-        cart_data = json.loads(cart_json)
-        existing_owner = cart_data.get("user_id")
+            if existing_owner and existing_owner != user_id:
+                # CRITICAL: Different user -> clear cart to prevent data leakage
+                logger.info(
+                    "Clearing cart due to user switch",
+                    session_id=session_id,
+                    old_user=existing_owner,
+                    new_user=user_id
+                )
+                await db.execute(
+                    text("UPDATE session_cart SET is_active = FALSE, updated_at = NOW() WHERE session_id = :sid AND is_active = TRUE"),
+                    {"sid": session_id}
+                )
 
-        # CRITICAL: If cart has owner and it's NOT the current user -> Data Leakage Risk -> CLEAR IT
-        if existing_owner and existing_owner != user_id:
-            logger.info(
-                "Clearing cart due to user switch",
-                session_id=session_id,
-                old_user=existing_owner,
-                new_user=user_id
+            # Upsert session_state with current user_id
+            await db.execute(
+                text("""
+                    INSERT INTO session_state (session_id, user_id, last_activity_at)
+                    VALUES (:sid, :uid::uuid, NOW())
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET user_id = :uid::uuid, last_activity_at = NOW()
+                """),
+                {"sid": session_id, "uid": user_id}
             )
-            # Reset cart but tag with new user
-            await redis.setex(
-                cart_key,
-                3600,
-                json.dumps({"items": [], "user_id": user_id})
-            )
-        else:
-            # Cart is anonymous or belongs to this user -> Claim it / Resume
+            await db.commit()
+
             if not existing_owner:
                 logger.info("User claiming anonymous cart", session_id=session_id, user_id=user_id)
-                cart_data["user_id"] = user_id
-                await redis.setex(cart_key, 3600, json.dumps(cart_data))
-            # If matches, do nothing (Resume)
 
     except Exception as e:
         logger.error(f"Failed to manage cart ownership: {str(e)}")
