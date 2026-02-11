@@ -85,21 +85,31 @@ function aguiReducer(state, action) {
         ),
       }
 
-    case 'CART_DATA':
+    case 'CART_DATA': {
+      const newCartData = {
+        items: action.payload.items,
+        total: action.payload.total,
+        packaging_charge_per_item: action.payload.packaging_charge_per_item || 30,
+      }
+      const existingCartIndex = state.messages.findIndex(msg => msg.type === 'cart')
+      if (existingCartIndex !== -1) {
+        // Update in place - keep position, just update data
+        const updated = [...state.messages]
+        updated[existingCartIndex] = { ...updated[existingCartIndex], data: newCartData, timestamp: new Date() }
+        return { ...state, messages: updated.filter(msg => msg.type !== 'quick_replies') }
+      }
+      // No existing cart - append new one
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'cart'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'cart',
-          data: {
-            items: action.payload.items,
-            total: action.payload.total,
-            packaging_charge_per_item: action.payload.packaging_charge_per_item || 30,
-          },
+          data: newCartData,
           timestamp: new Date(),
         }],
       }
+    }
 
     case 'MENU_DATA':
       return {
