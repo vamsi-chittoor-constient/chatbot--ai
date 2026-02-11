@@ -847,45 +847,10 @@ async def process_with_chat_agent(text: str, session_id: str, websocket: WebSock
 
         try:
             # =================================================================
-            # CHECKOUT WORKFLOW INTERCEPTOR (same as chat.py)
-            # Handle checkout messages deterministically, not via LLM agent
+            # ALL MESSAGES GO TO AI AGENT - No interceptors
+            # Checkout and payment handled by AI via tools:
+            # checkout, select_payment_method, initiate_payment, cancel_payment
             # =================================================================
-            from app.services.checkout_handler import handle_checkout_message
-            from app.services.payment_handler import handle_payment_message
-
-            checkout_response = await handle_checkout_message(session_id, text)
-
-            if checkout_response:
-                logger.info(
-                    "voice_checkout_handler_processed",
-                    session_id=session_id,
-                    response_length=len(checkout_response)
-                )
-                emitter.emit_run_started()
-                emitter.emit_full_text(checkout_response, chunk_size=1)
-                flush_pending_events(session_id)
-                emitter.emit_run_finished(checkout_response)
-                await asyncio.sleep(0.3)
-                return checkout_response, deferred_quick_replies
-
-            # =================================================================
-            # PAYMENT WORKFLOW INTERCEPTOR (same as chat.py)
-            # Handle payment messages deterministically
-            # =================================================================
-            payment_response = await handle_payment_message(session_id, text)
-
-            if payment_response:
-                logger.info(
-                    "voice_payment_handler_processed",
-                    session_id=session_id,
-                    response_length=len(payment_response)
-                )
-                emitter.emit_run_started()
-                emitter.emit_full_text(payment_response, chunk_size=1)
-                flush_pending_events(session_id)
-                emitter.emit_run_finished(payment_response)
-                await asyncio.sleep(0.3)
-                return payment_response, deferred_quick_replies
 
             # Process with agent
             # Pass real language so crew's INPUT translation fires (romanized

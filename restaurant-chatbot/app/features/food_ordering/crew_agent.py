@@ -542,41 +542,57 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         logger.info("pending_order_created", session_id=session_id, order_id=order_display_id)
 
         # =====================================================================
-        # PAYMENT WORKFLOW - Triggered by checkout_handler after this returns
+        # PAYMENT WORKFLOW - Emit payment method card directly
         # =====================================================================
-        # Store payment info in Redis so checkout_handler can trigger workflow
-        payment_info = {
-            "order_display_id": order_display_id,
-            "total": total,
-            "session_id": session_id,
-        }
-        redis_client.setex(
-            f"checkout_payment_info:{session_id}",
-            3600,
-            json.dumps(payment_info)
+        # Initialize payment state and show payment method selection card
+        # so the AI agent can handle payment via select_payment_method tool.
+        from app.services.payment_state_service import init_payment_workflow
+        from app.core.agui_events import emit_payment_method_selection
+
+        init_payment_workflow(
+            session_id, order_display_id, total,
+            items=items, order_type=order_type_clean,
+            subtotal=subtotal, packaging_charges=packaging_charges
         )
 
+        emit_payment_method_selection(session_id, [
+            {
+                "label": "💳 Pay Online",
+                "action": "pay_online",
+                "description": "Secure payment via Razorpay (Card/UPI/NetBanking)"
+            },
+            {
+                "label": "💵 Cash",
+                "action": "pay_cash",
+                "description": "Pay cash on delivery or at counter"
+            },
+            {
+                "label": "💳 Card at Counter",
+                "action": "pay_card_counter",
+                "description": "Pay by card when you arrive"
+            }
+        ], amount=total, order_id=order_display_id)
+
         logger.info(
-            "checkout_payment_info_stored",
+            "checkout_payment_card_emitted",
             session_id=session_id,
             order_id=order_display_id,
             amount=total
         )
 
-        # Return simple confirmation - checkout_handler will trigger payment workflow
+        # Return confirmation - AI agent will handle payment method selection
         items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
         if len(items) > 3:
             items_summary += f" and {len(items) - 3} more"
 
         return (
-            f"✅ **Order Prepared!**\n\n"
-            f"📋 Reference: {order_display_id}\n"
-            f"📦 Type: Take-away\n"
-            f"🍽️ Items: {items_summary}\n"
-            f"💰 Subtotal: ₹{subtotal:.2f}\n"
-            f"📦 Packaging: ₹{packaging_charges:.2f} ({total_quantity} items x ₹{PACKAGING_CHARGE_PER_ITEM})\n"
-            f"💰 Total: ₹{total:.2f}\n\n"
-            f"💳 **Please complete payment to confirm your order.**\nSelecting payment method..."
+            f"[CHECKOUT COMPLETE] Order {order_display_id} created. "
+            f"Items: {items_summary}. "
+            f"Subtotal: Rs.{subtotal:.0f}, Packaging: Rs.{packaging_charges:.0f}, "
+            f"Total: Rs.{total:.0f} (Take-away). "
+            f"Payment method card is now displayed to the customer. "
+            f"IMPORTANT: Ask the customer how they would like to pay. "
+            f"When they choose, call select_payment_method with their choice."
         )
 
     except Exception as e:
@@ -4195,6 +4211,113 @@ def create_cancel_payment_tool(session_id: str):
     return cancel_payment
 
 
+def create_select_payment_method_tool(session_id: str):
+    """Factory to create select_payment_method tool with session context."""
+
+    @tool("select_payment_method")
+    def select_payment_method(method: str) -> str:
+        """
+        Select a payment method for the current order after checkout.
+
+        Call this when the customer chooses how to pay. The checkout tool
+        shows payment options to the customer; this tool processes their choice.
+
+        Args:
+            method: Payment method chosen by customer. Must be one of:
+                - "online" or "pay_online" — Pay via Razorpay (Card/UPI/NetBanking)
+                - "cash" or "pay_cash" — Pay cash on delivery or at counter
+                - "card_at_counter" or "pay_card_counter" — Pay by card at counter
+
+        Returns:
+            Payment confirmation or payment link details.
+
+        Common triggers:
+            - "pay online" / "online payment" / "UPI" / "card" → select_payment_method("online")
+            - "cash" / "pay cash" / "COD" → select_payment_method("cash")
+            - "card at counter" / "pay later" → select_payment_method("card_at_counter")
+        """
+        async def _async_select():
+            from app.services.payment_state_service import get_payment_state, PaymentStep
+            from app.workflows.payment_workflow import run_payment_workflow
+            from app.core.agui_events import emit_tool_activity
+
+            emit_tool_activity(session_id, "select_payment_method")
+
+            # Normalize method name
+            method_map = {
+                "online": "online",
+                "pay_online": "online",
+                "upi": "online",
+                "razorpay": "online",
+                "card": "online",
+                "cash": "cash",
+                "pay_cash": "cash",
+                "cod": "cash",
+                "card_at_counter": "card_at_counter",
+                "pay_card_counter": "card_at_counter",
+                "card at counter": "card_at_counter",
+            }
+            normalized = method_map.get(method.lower().strip(), method.lower().strip())
+
+            # Get current payment state
+            payment_state = get_payment_state(session_id)
+            order_id = payment_state.get("order_id")
+            amount = payment_state.get("amount", 0)
+
+            if not order_id:
+                return "No pending order found. Please checkout first before selecting a payment method."
+
+            logger.info(
+                "select_payment_method_tool",
+                session_id=session_id,
+                method=normalized,
+                order_id=order_id,
+                amount=amount
+            )
+
+            try:
+                # Run payment workflow with selected method
+                final_state = await run_payment_workflow(
+                    session_id=session_id,
+                    order_id=order_id,
+                    amount=amount,
+                    initial_method=normalized,
+                    items=payment_state.get("items"),
+                    order_type=payment_state.get("order_type"),
+                    subtotal=payment_state.get("subtotal"),
+                    packaging_charges=payment_state.get("packaging_charges")
+                )
+
+                step = final_state.get("step", "")
+
+                if step == PaymentStep.CASH_SELECTED.value:
+                    return (
+                        f"[PAYMENT CONFIRMED] Cash payment confirmed for order {order_id}. "
+                        f"Amount: Rs.{amount:.0f}. Customer will pay at counter/delivery. "
+                        f"Order is confirmed!"
+                    )
+                elif step == PaymentStep.AWAITING_PAYMENT.value:
+                    link = final_state.get("payment_link", "")
+                    return (
+                        f"[PAYMENT LINK SENT] Online payment link generated for order {order_id}. "
+                        f"Amount: Rs.{amount:.0f}. Payment link has been displayed to the customer. "
+                        f"They can complete payment via the link. Order will be confirmed after payment."
+                    )
+                elif step == PaymentStep.PAYMENT_FAILED.value:
+                    error = final_state.get("error", "Unknown error")
+                    return f"Payment setup failed: {error}. Please try again."
+                else:
+                    return f"Payment method '{normalized}' selected for order {order_id}."
+
+            except Exception as e:
+                logger.error("select_payment_method_error", error=str(e), session_id=session_id)
+                return f"Error processing payment: {str(e)}. Please try again."
+
+        return run_async(_async_select())
+
+    return select_payment_method
+
+
 # ============================================================================
 # CREW CREATION
 # ============================================================================
@@ -4248,6 +4371,7 @@ def create_food_ordering_crew(session_id: str, customer_id: Optional[str] = None
     verify_otp_tool = create_verify_payment_otp_tool(session_id)
     payment_status_tool = create_check_payment_status_tool(session_id)
     cancel_payment_tool = create_cancel_payment_tool(session_id)
+    select_payment_tool = create_select_payment_method_tool(session_id)
 
     # Phase 1 tools: Customer profile, FAQ, feedback (15 new tools)
     phase1_tools = get_all_phase1_tools(session_id, customer_id)
@@ -4265,21 +4389,22 @@ def create_food_ordering_crew(session_id: str, customer_id: Optional[str] = None
     phase5_tools = get_all_phase5_tools(session_id)
 
     logger.info("crew_tools_loaded",
-                base_tools=15,
+                base_tools=16,
                 phase1_tools=len(phase1_tools),
                 phase2_tools=len(phase2_tools),
                 phase3_tools=len(phase3_tools),
                 phase4_tools=len(phase4_tools),
                 phase5_tools=len(phase5_tools),
-                total_tools=15 + len(phase1_tools) + len(phase2_tools) + len(phase3_tools) + len(phase4_tools) + len(phase5_tools),
+                total_tools=16 + len(phase1_tools) + len(phase2_tools) + len(phase3_tools) + len(phase4_tools) + len(phase5_tools),
                 customer_authenticated=customer_id is not None,
                 session=session_id)
 
-    # Collect all tools (20 base + 35 new = 55 total)
+    # Collect all tools (16 base + phase tools)
     base_tools = [
         search_tool, add_tool, view_tool, remove_tool, checkout_tool, cancel_tool,
         status_tool, history_tool, reorder_tool, receipt_tool,
-        initiate_payment_tool, submit_card_tool, verify_otp_tool, payment_status_tool, cancel_payment_tool
+        initiate_payment_tool, submit_card_tool, verify_otp_tool, payment_status_tool, cancel_payment_tool,
+        select_payment_tool
     ]
     all_tools = base_tools + phase1_tools + phase2_tools + phase3_tools + phase4_tools + phase5_tools
 
@@ -4349,8 +4474,15 @@ After adding items to cart, suggest complementary items naturally:
 - Cart total > ₹500 → "Great order! Want to add a dessert to round it off?"
 Keep suggestions brief, natural, and non-pushy. Only suggest once per add-to-cart, not repeatedly.
 
-**Payment Flow:**
-After checkout, orders are pending until payment completes. The payment workflow (handled by payment_workflow.py) will guide customers through selecting their payment method (Online/Cash/Card at Counter).
+**Checkout & Payment Flow:**
+When customer says "checkout" / "place order" → call checkout tool. This creates the order and shows payment options.
+After checkout, you MUST ask: "How would you like to pay? You can pay online, cash, or card at counter."
+When the customer chooses a payment method → call select_payment_method with their choice:
+- "pay online" / "online" / "UPI" / "card" → select_payment_method("online")
+- "cash" / "pay cash" → select_payment_method("cash")
+- "card at counter" → select_payment_method("card_at_counter")
+If customer says "cancel checkout" or "cancel order" → call cancel_payment or cancel_order.
+NEVER guess or assume the payment method - always ask the customer.
 
 **Language:**
 If the customer message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words: "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely. Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"

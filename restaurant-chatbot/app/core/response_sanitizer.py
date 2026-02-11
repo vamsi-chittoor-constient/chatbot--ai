@@ -108,7 +108,8 @@ class ResponseSanitizer:
             response = re.sub(
                 r'\[(?:SEARCH RESULTS DISPLAYED|MENU CARD DISPLAYED|MENU DISPLAYED'
                 r'|CART CARD DISPLAYED|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED'
-                r'|INVALID QUANTITY|INVALID INSTRUCTIONS)[^\]]*\]\s*',
+                r'|INVALID QUANTITY|INVALID INSTRUCTIONS'
+                r'|CHECKOUT COMPLETE|PAYMENT CONFIRMED|PAYMENT LINK SENT)[^\]]*\]\s*',
                 '', response
             )
 
