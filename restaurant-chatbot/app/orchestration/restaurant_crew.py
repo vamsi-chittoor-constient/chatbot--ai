@@ -558,6 +558,12 @@ When the customer mentions 2+ DIFFERENT items in one message, ALWAYS use batch_a
 - "I want 1 margherita pizza, 2 cokes, and garlic bread" → batch_add_to_cart("margherita pizza:1, coke:2, garlic bread:1")
 - NEVER call add_to_cart() twice in one turn - use batch_add_to_cart() instead
 
+🚨 BATCH REMOVE RULE - REMOVING MULTIPLE ITEMS:
+When the customer asks to remove 2+ items, use correct_order() with empty add_items instead of calling remove_from_cart() multiple times.
+- "remove burger and coke" → correct_order(remove_items="burger, coke", add_items="")
+- "delete pizza and garlic bread from cart" → correct_order(remove_items="pizza, garlic bread", add_items="")
+- NEVER call remove_from_cart() twice in one turn - use correct_order() instead
+
 🚨 CORRECTION RULE - WHEN CUSTOMER CORRECTS AN ORDER:
 When a customer says "no, I meant...", "that's wrong", "I actually asked for..." etc.:
 - NEVER call clear_cart(). Clearing the cart loses everything and forces a full re-order.

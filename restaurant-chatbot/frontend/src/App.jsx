@@ -141,6 +141,16 @@ function ChatInterface() {
     addUserMessage(`Adding to cart: ${itemList}`)
   }, [sendFormResponse, addUserMessage])
 
+  // Handle cart quantity update from CartCard +/- buttons
+  const handleCartUpdateQuantity = useCallback((itemName, newQuantity) => {
+    sendFormResponse('direct_update_cart', { item_name: itemName, quantity: newQuantity })
+  }, [sendFormResponse])
+
+  // Handle cart item removal from CartCard delete button
+  const handleCartRemoveItem = useCallback((itemName) => {
+    sendFormResponse('direct_remove_from_cart', { item_name: itemName })
+  }, [sendFormResponse])
+
   // Handle payment method selection
   const handlePaymentMethodSelect = useCallback((methodAction) => {
     // Send the payment method action as a message
@@ -152,7 +162,7 @@ function ChatInterface() {
     console.log('renderMessage called for:', message.type, 'id:', message.id)
     switch (message.type) {
       case 'cart':
-        return <CartCard key={message.id} data={message.data} onCheckout={handleCheckout} />
+        return <CartCard key={message.id} data={message.data} onCheckout={handleCheckout} onUpdateQuantity={handleCartUpdateQuantity} onRemoveItem={handleCartRemoveItem} />
       case 'menu':
         return <MenuCard key={message.id} data={message.data} onAddToCart={handleAddToCart} />
       case 'search_results':

@@ -2125,95 +2125,98 @@ def create_remove_from_cart_tool(session_id: str):
     """Factory to create remove_from_cart tool with session context."""
 
     @tool("remove_from_cart")
-    def remove_from_cart(item_name: str, quantity: int = 1) -> str:
+    def remove_from_cart(items: str) -> str:
         """
-        Remove specific item(s) from the customer's cart.
-
-        Removes specified quantity of an item from cart. If quantity equals or exceeds
-        current quantity, removes the item completely. Cart total is recalculated.
+        Remove one or more items from the customer's cart in a SINGLE call.
 
         Args:
-            item_name: Name of item to remove (e.g., "burger", "Butter Chicken")
-            quantity: Number of items to remove (default: 1, use 0 to remove all)
+            items: JSON array of items to remove. Each object has "item" (name) and optionally "quantity" (number, default: remove all).
+                Single:   [{"item": "burger"}]                    — removes all burgers
+                Multiple: [{"item": "burger"}, {"item": "coke"}]  — removes both
+                Partial:  [{"item": "burger", "quantity": 1}]     — removes 1 burger
 
         Returns:
             Confirmation of removed items and updated cart total.
 
         Examples:
-            - remove_from_cart("burger", 1) → Removes 1 burger
-            - remove_from_cart("Butter Chicken", 2) → Removes 2 Butter Chicken
-            - remove_from_cart("coke", 0) → Removes all Cokes
-            - remove_from_cart("pizza") → Removes 1 pizza (default quantity)
-
-        Common triggers:
-            - Customer: "remove the burger" → remove_from_cart("burger", 1)
-            - Customer: "delete 2 cokes" → remove_from_cart("coke", 2)
-            - Customer: "take out all pizzas" → remove_from_cart("pizza", 0)
+            - "remove the burger" → remove_from_cart('[{"item": "burger"}]')
+            - "delete 2 cokes and the pizza" → remove_from_cart('[{"item": "coke", "quantity": 2}, {"item": "pizza"}]')
         """
-        # Emit activity for frontend (sync)
+        import json as _json
+
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "remove_from_cart")
 
         from app.core.redis import get_cart_sync, set_cart_sync
 
         try:
-            item_name_clean = item_name.strip().lower()
+            # Parse items JSON
+            try:
+                items_list = _json.loads(items)
+                if isinstance(items_list, dict):
+                    items_list = [items_list]
+            except (_json.JSONDecodeError, TypeError):
+                return f"Invalid items format. Use JSON array: [{'{'}\"item\": \"name\"{'}'}]"
 
-            # Get cart (sync Redis)
             cart_data = get_cart_sync(session_id) or {"items": []}
-            items = cart_data.get("items", [])
+            cart_items = cart_data.get("items", [])
 
-            if not items:
+            if not cart_items:
                 return "Cart is already empty."
 
-            # Find and update item
-            updated_items = []
-            removed_info = None
-            for item in items:
-                if item_name_clean in item.get("name", "").lower() and not removed_info:
-                    current_qty = item.get("quantity", 1)
+            removed = []
+            not_found = []
 
-                    # quantity=0 means remove all
-                    qty_to_remove = current_qty if quantity == 0 else min(quantity, current_qty)
-                    new_qty = current_qty - qty_to_remove
+            for entry in items_list:
+                item_name = str(entry.get("item", "")).strip().lower()
+                qty_to_remove = entry.get("quantity", 0)  # 0 = remove all
 
-                    removed_info = {
-                        "name": item.get("name"),
-                        "removed_qty": qty_to_remove,
-                        "remaining_qty": new_qty
-                    }
+                if not item_name:
+                    continue
 
-                    # Keep item if still has quantity
-                    if new_qty > 0:
-                        updated_items.append({**item, "quantity": new_qty})
-                else:
-                    updated_items.append(item)
+                found = False
+                new_cart = []
+                for ci in cart_items:
+                    if item_name in ci.get("name", "").lower() and not found:
+                        found = True
+                        current_qty = ci.get("quantity", 1)
+                        actual_remove = current_qty if qty_to_remove == 0 else min(qty_to_remove, current_qty)
+                        new_qty = current_qty - actual_remove
+                        removed.append(f"{actual_remove}x {ci.get('name')}")
+                        if new_qty > 0:
+                            new_cart.append({**ci, "quantity": new_qty})
+                    else:
+                        new_cart.append(ci)
+                cart_items = new_cart
 
-            if not removed_info:
-                return f"Item '{item_name}' not found in cart."
+                if not found:
+                    not_found.append(item_name)
 
-            # Save updated cart (sync Redis)
-            cart_data['items'] = updated_items
+            # Save updated cart
+            cart_data['items'] = cart_items
             cart_data['updated_at'] = str(datetime.now())
             set_cart_sync(session_id, cart_data, ttl=3600)
 
-            # Calculate new total
-            new_total = sum(i['price'] * i['quantity'] for i in updated_items)
+            new_total = sum(i['price'] * i['quantity'] for i in cart_items)
 
-            # NOTE: Cart card not emitted here - shown only on explicit view_cart
+            # Emit updated cart card
+            emit_cart_data(session_id, cart_items, new_total)
 
             logger.info(
-                "item_removed_from_cart",
+                "items_removed_from_cart",
                 session_id=session_id,
-                item=removed_info['name'],
-                removed_qty=removed_info['removed_qty'],
-                remaining_qty=removed_info['remaining_qty']
+                removed=removed,
+                not_found=not_found
             )
 
-            if removed_info['remaining_qty'] > 0:
-                return f"Removed {removed_info['removed_qty']}x {removed_info['name']} from cart. {removed_info['remaining_qty']} remaining. Cart total: Rs.{new_total:.0f}"
+            result = f"Removed: {', '.join(removed)}." if removed else ""
+            if not_found:
+                result += f" Not found: {', '.join(not_found)}."
+            if cart_items:
+                result += f" Cart total: Rs.{new_total:.0f}"
             else:
-                return f"Removed {removed_info['name']} from cart. Cart total: Rs.{new_total:.0f}"
+                result += " Cart is now empty."
+            return result.strip()
 
         except Exception as e:
             logger.error("remove_from_cart_error", error=str(e), session_id=session_id)

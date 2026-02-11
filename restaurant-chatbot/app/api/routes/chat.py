@@ -1264,7 +1264,6 @@ async def chat_endpoint(
                         items = form_data.get("items", [])
                         if items:
                             from app.features.food_ordering.tools_event_sourced import create_event_sourced_tools
-                            from app.core.agui_events import AGUIEventEmitter
 
                             # Get user_id from connection metadata
                             customer_id = None
@@ -1273,35 +1272,85 @@ async def chat_endpoint(
 
                             # Create tools for this session
                             tools = create_event_sourced_tools(session_id, customer_id)
-                            add_to_cart_tool = tools[0]  # First tool is add_to_cart
+                            batch_add_tool = tools[1]  # batch_add_to_cart
 
-                            # Add each item
-                            results = []
+                            # Format items as "item:qty, item:qty" for batch tool
+                            pairs = []
                             for item in items:
                                 item_name = item.get("name", "")
                                 quantity = item.get("quantity", 1)
                                 if item_name and quantity > 0:
-                                    try:
-                                        result = add_to_cart_tool.run(item=item_name, quantity=quantity)
-                                        results.append(result)
-                                    except Exception as e:
-                                        logger.error("direct_add_to_cart_failed", error=str(e), item=item_name)
-                                        results.append(f"Failed to add {item_name}")
+                                    pairs.append(f"{item_name}:{quantity}")
+
+                            if pairs:
+                                try:
+                                    result = batch_add_tool.run(items_with_quantities=", ".join(pairs))
+                                except Exception as e:
+                                    logger.error("direct_add_to_cart_failed", error=str(e))
+                                    result = "Failed to add items to cart"
+                            else:
+                                result = "No items added"
 
                             # Stream any AGUI events (cart updates, etc.)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
                             # Send the final response (with translation if needed)
-                            final_response = results[-1] if results else "No items added"
                             if language != "English":
-                                final_response = await translate_response(final_response, language)
+                                result = await translate_response(result, language)
                             await websocket_manager.send_message_with_metadata(
                                 session_id=session_id,
-                                message=final_response,
+                                message=result,
                                 message_type="ai_response",
                                 metadata={"direct_action": "add_to_cart"}
                             )
                             continue  # Skip normal message processing
+
+                    if form_type == "direct_update_cart":
+                        # Direct quantity update from CartCard +/- buttons
+                        item_name = form_data.get("item_name", "")
+                        new_quantity = int(form_data.get("quantity", 1))
+                        if item_name and new_quantity > 0:
+                            from app.core.redis import get_cart_sync, set_cart_sync
+                            from app.core.agui_events import emit_cart_data
+                            from datetime import datetime as _dt
+
+                            cart_data = get_cart_sync(session_id) or {"items": []}
+                            items_list = cart_data.get("items", [])
+                            item_lower = item_name.lower()
+                            updated = False
+                            for ci in items_list:
+                                if ci.get("name", "").lower() == item_lower:
+                                    ci["quantity"] = new_quantity
+                                    updated = True
+                                    break
+                            if updated:
+                                cart_data["items"] = items_list
+                                cart_data["updated_at"] = str(_dt.now())
+                                set_cart_sync(session_id, cart_data, ttl=3600)
+                                new_total = sum(i["price"] * i["quantity"] for i in items_list)
+                                emit_cart_data(session_id, items_list, new_total)
+                                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+                            continue
+
+                    if form_type == "direct_remove_from_cart":
+                        # Direct item removal from CartCard delete button
+                        item_name = form_data.get("item_name", "")
+                        if item_name:
+                            from app.core.redis import get_cart_sync, set_cart_sync
+                            from app.core.agui_events import emit_cart_data
+                            from datetime import datetime as _dt
+
+                            cart_data = get_cart_sync(session_id) or {"items": []}
+                            items_list = cart_data.get("items", [])
+                            item_lower = item_name.lower()
+                            items_list = [ci for ci in items_list if ci.get("name", "").lower() != item_lower]
+                            cart_data["items"] = items_list
+                            cart_data["updated_at"] = str(_dt.now())
+                            set_cart_sync(session_id, cart_data, ttl=3600)
+                            new_total = sum(i["price"] * i["quantity"] for i in items_list)
+                            emit_cart_data(session_id, items_list, new_total)
+                            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+                            continue
                 # ========================================================================
 
                 # Check rate limit before processing
