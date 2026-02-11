@@ -1307,47 +1307,63 @@ async def chat_endpoint(
 
                     if form_type == "direct_update_cart":
                         # Direct quantity update from CartCard +/- buttons
+                        # Uses SQL session_cart (same store as AI agent tools)
                         item_name = form_data.get("item_name", "")
                         new_quantity = int(form_data.get("quantity", 1))
                         if item_name and new_quantity > 0:
-                            from app.core.redis import get_cart_sync, set_cart_sync
+                            from app.core.db_pool import SyncDBConnection
                             from app.core.agui_events import emit_cart_data
-                            from datetime import datetime as _dt
 
-                            cart_data = get_cart_sync(session_id) or {"items": []}
-                            items_list = cart_data.get("items", [])
-                            item_lower = item_name.lower()
-                            updated = False
-                            for ci in items_list:
-                                if ci.get("name", "").lower() == item_lower:
-                                    ci["quantity"] = new_quantity
-                                    updated = True
-                                    break
-                            if updated:
-                                cart_data["items"] = items_list
-                                cart_data["updated_at"] = str(_dt.now())
-                                set_cart_sync(session_id, cart_data, ttl=3600)
-                                new_total = sum(i["price"] * i["quantity"] for i in items_list)
-                                emit_cart_data(session_id, items_list, new_total)
-                                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+                            with SyncDBConnection() as conn:
+                                with conn.cursor() as cur:
+                                    cur.execute(
+                                        """UPDATE session_cart
+                                           SET quantity = %s, updated_at = NOW()
+                                           WHERE session_id = %s AND LOWER(item_name) = LOWER(%s) AND is_active = TRUE""",
+                                        (new_quantity, session_id, item_name)
+                                    )
+                                    conn.commit()
+
+                                    # Get updated cart
+                                    cur.execute("SELECT * FROM get_session_cart(%s)", (session_id,))
+                                    columns = [desc[0] for desc in cur.description] if cur.description else []
+                                    items_list = [dict(zip(columns, row)) for row in cur.fetchall()]
+
+                                    cur.execute("SELECT get_cart_total(%s)", (session_id,))
+                                    total_row = cur.fetchone()
+                                    new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
+
+                            emit_cart_data(session_id, items_list, new_total)
+                            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
 
                     if form_type == "direct_remove_from_cart":
                         # Direct item removal from CartCard delete button
+                        # Uses SQL session_cart (same store as AI agent tools)
                         item_name = form_data.get("item_name", "")
                         if item_name:
-                            from app.core.redis import get_cart_sync, set_cart_sync
+                            from app.core.db_pool import SyncDBConnection
                             from app.core.agui_events import emit_cart_data
-                            from datetime import datetime as _dt
 
-                            cart_data = get_cart_sync(session_id) or {"items": []}
-                            items_list = cart_data.get("items", [])
-                            item_lower = item_name.lower()
-                            items_list = [ci for ci in items_list if ci.get("name", "").lower() != item_lower]
-                            cart_data["items"] = items_list
-                            cart_data["updated_at"] = str(_dt.now())
-                            set_cart_sync(session_id, cart_data, ttl=3600)
-                            new_total = sum(i["price"] * i["quantity"] for i in items_list)
+                            with SyncDBConnection() as conn:
+                                with conn.cursor() as cur:
+                                    cur.execute(
+                                        """UPDATE session_cart
+                                           SET is_active = FALSE, updated_at = NOW()
+                                           WHERE session_id = %s AND LOWER(item_name) = LOWER(%s) AND is_active = TRUE""",
+                                        (session_id, item_name)
+                                    )
+                                    conn.commit()
+
+                                    # Get updated cart
+                                    cur.execute("SELECT * FROM get_session_cart(%s)", (session_id,))
+                                    columns = [desc[0] for desc in cur.description] if cur.description else []
+                                    items_list = [dict(zip(columns, row)) for row in cur.fetchall()]
+
+                                    cur.execute("SELECT get_cart_total(%s)", (session_id,))
+                                    total_row = cur.fetchone()
+                                    new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
+
                             emit_cart_data(session_id, items_list, new_total)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue

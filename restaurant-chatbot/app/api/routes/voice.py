@@ -574,7 +574,8 @@ async def process_speech_segment(
         import re as _re
         response_text = _re.sub(
             r'\[(?:SEARCH RESULTS DISPLAYED|MENU CARD DISPLAYED|MENU DISPLAYED|CART CARD DISPLAYED'
-            r'|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED|INVALID QUANTITY|INVALID INSTRUCTIONS)'
+            r'|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED|INVALID QUANTITY|INVALID INSTRUCTIONS'
+            r'|CHECKOUT COMPLETE|PAYMENT CONFIRMED|PAYMENT LINK SENT)'
             r'[^\]]*\]\s*',
             '', response_text
         ).strip()
