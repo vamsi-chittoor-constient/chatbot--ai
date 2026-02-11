@@ -110,10 +110,10 @@ async def voice_chat_websocket(
     # VAD Sensitivity Settings (configurable via env vars)
     # SPEECH_THRESHOLD: Probability above which speech is detected (default 0.6)
     # SILENCE_THRESHOLD: Probability below which silence is detected (default 0.3)
-    # SILENCE_FRAMES_REQUIRED: Consecutive silent frames needed to end speech (~500ms default)
+    # SILENCE_FRAMES_REQUIRED: 60 frames × 32ms = ~2 seconds of silence before processing
     SPEECH_THRESHOLD = float(os.getenv("VAD_SPEECH_THRESHOLD", "0.6"))
     SILENCE_THRESHOLD = float(os.getenv("VAD_SILENCE_THRESHOLD", "0.3"))
-    SILENCE_FRAMES_REQUIRED = int(os.getenv("VAD_SILENCE_FRAMES", "15"))
+    SILENCE_FRAMES_REQUIRED = int(os.getenv("VAD_SILENCE_FRAMES", "60"))
 
     try:
         # Send connection confirmation
