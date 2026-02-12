@@ -1752,41 +1752,70 @@ async def process_message_with_ai(
             conversation_history = []
 
         # =====================================================================
-        # ALL MESSAGES GO TO AI AGENT
-        # Checkout and payment are handled by the AI via tools:
-        # checkout, select_payment_method, initiate_payment, cancel_payment, etc.
+        # PAYMENT HANDLER INTERCEPTOR
+        # Deterministic payment flow - intercepts payment-related messages
+        # BEFORE the AI agent to ensure reliable payment processing.
         # =====================================================================
         try:
-            # Process message with AG-UI streaming
-            # Pass user_id from authenticated session (available after OTP verification at session start)
-            authenticated_user_id = session_data.user_id if session_data and session_data.is_authenticated else None
-            ai_response, cycle_metadata = await process_with_agui_streaming(
-                user_message=message,
-                session_id=session_id,
-                conversation_history=conversation_history,
-                emitter=emitter,
-                user_id=authenticated_user_id,
-                welcome_msg=welcome_msg,
-                language=language
-            )
-        finally:
-            # Wait for event stream to finish naturally (flush queue)
-            # This ensures "View Cart" events are sent before closing connection
+            from app.services.payment_handler import handle_payment_message
+            payment_response = await handle_payment_message(session_id, message)
+        except Exception as e:
+            logger.warning("payment_handler_error", error=str(e))
+            payment_response = None
+
+        if payment_response is not None:
+            logger.info("payment_handler_intercepted", session_id=session_id, message=message[:50])
+            # Flush any events staged by the payment handler (e.g. payment success card)
+            from app.core.agui_events import flush_pending_events
+            flush_pending_events(session_id)
+            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+            # Cancel the long-running AGUI task since we're not using the AI agent
             if not agui_task.done():
+                agui_task.cancel()
                 try:
-                    # Give it time to flush remaining events (e.g. 2.0 seconds)
-                    # The stream task should finish when RUN_FINISHED is seen
-                    await asyncio.wait_for(agui_task, timeout=2.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    # If it's still running after timeout, force close
-                    if not agui_task.done():
-                        agui_task.cancel()
-                        try:
-                            await agui_task
-                        except asyncio.CancelledError:
-                            pass
-                except Exception as e:
-                    logger.warning(f"Error waiting for event stream: {str(e)}")
+                    await agui_task
+                except asyncio.CancelledError:
+                    pass
+
+            ai_response = payment_response
+            cycle_metadata = {"type": "payment_handler", "session_id": session_id}
+            # Skip the AI agent - go straight to response sending
+        else:
+            # =====================================================================
+            # AI AGENT PROCESSING
+            # =====================================================================
+            try:
+                # Process message with AG-UI streaming
+                # Pass user_id from authenticated session (available after OTP verification at session start)
+                authenticated_user_id = session_data.user_id if session_data and session_data.is_authenticated else None
+                ai_response, cycle_metadata = await process_with_agui_streaming(
+                    user_message=message,
+                    session_id=session_id,
+                    conversation_history=conversation_history,
+                    emitter=emitter,
+                    user_id=authenticated_user_id,
+                    welcome_msg=welcome_msg,
+                    language=language
+                )
+            finally:
+                # Wait for event stream to finish naturally (flush queue)
+                # This ensures "View Cart" events are sent before closing connection
+                if not agui_task.done():
+                    try:
+                        # Give it time to flush remaining events (e.g. 2.0 seconds)
+                        # The stream task should finish when RUN_FINISHED is seen
+                        await asyncio.wait_for(agui_task, timeout=2.0)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        # If it's still running after timeout, force close
+                        if not agui_task.done():
+                            agui_task.cancel()
+                            try:
+                                await agui_task
+                            except asyncio.CancelledError:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"Error waiting for event stream: {str(e)}")
 
         # SECURITY: Sanitize crew response before sending to frontend
         from app.core.response_sanitizer import sanitize_response
