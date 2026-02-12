@@ -103,16 +103,15 @@ async def handle_payment_message(
     # STEP 1: Payment Method Selection
     # =========================================================================
     if current_step == PaymentStep.SELECT_METHOD.value:
-        # Detect payment method from message
-        method = None
-
-        # Check "card at counter" BEFORE "card" to avoid false match on ONLINE
-        if any(word in message_lower for word in ["pay_card_counter", "card at counter", "card later"]):
-            method = PaymentMethod.CARD_AT_COUNTER.value
-        elif any(word in message_lower for word in ["online", "pay_online", "upi", "razorpay"]):
-            method = PaymentMethod.ONLINE.value
-        elif any(word in message_lower for word in ["cash", "pay_cash", "cod", "cash on delivery"]):
-            method = PaymentMethod.CASH.value
+        # ONLY intercept exact button actions from the payment card UI.
+        # Natural language like "I want to pay online" should go to the LLM,
+        # which calls select_payment_method tool → triggers run_payment_workflow.
+        BUTTON_ACTION_MAP = {
+            "pay_online": PaymentMethod.ONLINE.value,
+            "pay_cash": PaymentMethod.CASH.value,
+            "pay_card_counter": PaymentMethod.CARD_AT_COUNTER.value,
+        }
+        method = BUTTON_ACTION_MAP.get(message_lower)
 
         if method:
             logger.info(

@@ -492,6 +492,10 @@ def get_relevant_tools_for_agent(
         if any(kw in msg_lower for kw in ["view cart", "show cart", "my cart", "what's in my cart"]):
             _must_include.append("view_cart")
 
+        # Payment intent (natural language like "I want to pay online")
+        if any(kw in msg_lower for kw in ["pay online", "pay cash", "pay by card", "payment", "pay now", "i want to pay"]):
+            _must_include.append("select_payment_method")
+
         for must_tool in _must_include:
             if must_tool not in included_names and must_tool in all_tools:
                 relevant_tools.append(all_tools[must_tool])
