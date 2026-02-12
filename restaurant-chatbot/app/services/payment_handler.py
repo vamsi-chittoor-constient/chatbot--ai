@@ -38,7 +38,18 @@ async def handle_payment_message(
     # POST-PAYMENT QUICK REPLY ACTIONS
     # =========================================================================
     # Handle quick replies from payment success card (view_receipt, order_more)
-    if message_lower == "view_receipt":
+    # Also match natural language variations so typed requests work too.
+    # Natural language only matches when a payment was actually completed
+    # to avoid false triggers in normal conversation.
+    _is_view_receipt = message_lower == "view_receipt"  # Button action: always match
+    if not _is_view_receipt:
+        _ps = get_payment_state(session_id)
+        if _ps.get("order_id") and _ps.get("step") in ("payment_success", "cash_selected"):
+            _is_view_receipt = (
+                message_lower in ("view receipt", "show receipt", "show my receipt", "my receipt", "receipt", "download receipt")
+                or ("receipt" in message_lower and any(kw in message_lower for kw in ["view", "show", "see", "get", "download"]))
+            )
+    if _is_view_receipt:
         payment_state = get_payment_state(session_id)
         display_id = payment_state.get("order_id", "")  # Display ID like "ORD-830A98E5"
         order_number = payment_state.get("order_number") or display_id or "N/A"
@@ -71,7 +82,12 @@ async def handle_payment_message(
 
         return "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?"
 
-    if message_lower == "order_more":
+    _is_order_more = message_lower == "order_more"  # Button action: always match
+    if not _is_order_more:
+        _ps2 = get_payment_state(session_id)
+        if _ps2.get("order_id") and _ps2.get("step") in ("payment_success", "cash_selected"):
+            _is_order_more = message_lower in ("order more", "order again", "order something else")
+    if _is_order_more:
         from app.services.payment_state_service import clear_payment_state
 
         # Clear only payment state, keep cart and session intact for continuation
