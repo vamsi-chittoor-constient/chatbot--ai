@@ -1765,18 +1765,26 @@ async def process_message_with_ai(
 
         if payment_response is not None:
             logger.info("payment_handler_intercepted", session_id=session_id, message=message[:50])
-            # Flush any events staged by the payment handler (e.g. payment success card)
-            from app.core.agui_events import flush_pending_events
-            flush_pending_events(session_id)
-            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
-            # Cancel the long-running AGUI task since we're not using the AI agent
+            # Cancel the background AGUI task FIRST to avoid two consumers
+            # racing on the same event queue.
             if not agui_task.done():
                 agui_task.cancel()
                 try:
                     await agui_task
                 except asyncio.CancelledError:
                     pass
+
+            # Emit the text response as AGUI events so the frontend receives it.
+            # The main response path (line ~1481) does NOT send ai_response via WebSocket
+            # because it assumes the crew already streamed it via AGUI TEXT_MESSAGE events.
+            # Payment handler responses bypass the crew, so we must emit them here.
+            emitter.emit_full_text(payment_response, chunk_size=1)
+
+            # Flush any events staged by the payment handler (e.g. payment success card)
+            from app.core.agui_events import flush_pending_events
+            flush_pending_events(session_id)
+            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
             ai_response = payment_response
             cycle_metadata = {"type": "payment_handler", "session_id": session_id}

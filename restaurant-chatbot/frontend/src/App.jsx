@@ -116,8 +116,20 @@ function ChatInterface() {
 
   // Handle quick reply selection
   const handleQuickReply = useCallback((value) => {
-    handleSendMessage(value)
-  }, [handleSendMessage])
+    // Map raw quick-reply actions to friendly display text
+    const QUICK_REPLY_LABELS = {
+      view_receipt: 'View Receipt',
+      order_more: 'Order More',
+    }
+    const displayText = QUICK_REPLY_LABELS[value]
+    if (displayText) {
+      addUserMessage(displayText)
+      clearQuickReplies()
+      sendMessage(value, selectedLanguage)
+    } else {
+      handleSendMessage(value)
+    }
+  }, [handleSendMessage, addUserMessage, clearQuickReplies, sendMessage, selectedLanguage])
 
   // Handle checkout button click
   const handleCheckout = useCallback(() => {
