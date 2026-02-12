@@ -484,12 +484,20 @@ def get_relevant_tools_for_agent(
         msg_lower = user_message.lower()
         _must_include: List[str] = []
 
+        # Menu / search intent
+        if any(kw in msg_lower for kw in [
+            "show menu", "menu", "what do you have", "what's available",
+            "do you have", "is there", "browse", "search",
+            "dosa", "idli", "biryani", "pizza", "burger", "naan",
+        ]):
+            _must_include.append("search_menu")
+
         # Checkout intent
         if any(kw in msg_lower for kw in ["checkout", "place order", "place my order", "ready to pay", "done ordering", "that's all i want", "finalize"]):
             _must_include.append("checkout")
 
         # View cart intent
-        if any(kw in msg_lower for kw in ["view cart", "show cart", "my cart", "what's in my cart"]):
+        if any(kw in msg_lower for kw in ["view cart", "show cart", "my cart", "what's in my cart", "show my cart"]):
             _must_include.append("view_cart")
 
         # Payment intent (natural language like "I want to pay online")
