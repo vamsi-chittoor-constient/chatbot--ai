@@ -566,18 +566,35 @@ async def run_payment_workflow(
         "error": None
     }
 
-    # Run the workflow
+    # Run the workflow DIRECTLY (no LangGraph).
+    # LangGraph's ainvoke() creates internal tasks that cause
+    # "Future attached to a different loop" errors with asyncpg
+    # when called from CrewAI tool threads via run_async().
     try:
-        final_state = await payment_workflow_graph.ainvoke(initial_state)
+        state = initial_state
+
+        # Step 1: Select method (shows UI card if no method pre-selected)
+        state = await select_payment_method_node(state)
+
+        # Step 2: Route based on selected method
+        route = route_payment_method(state)
+
+        if route == "generate_link":
+            state = await generate_payment_link_node(state)
+        elif route == "cash_payment":
+            state = await handle_cash_payment_node(state)
+        elif route == "card_counter_payment":
+            state = await handle_card_counter_payment_node(state)
+        # else "end" — no method selected, workflow pauses for user input
 
         logger.info(
             "payment_workflow_completed",
             session_id=session_id,
-            final_step=final_state.get("step"),
-            method=final_state.get("method")
+            final_step=state.get("step"),
+            method=state.get("method")
         )
 
-        return final_state
+        return state
 
     except Exception as e:
         logger.error(
