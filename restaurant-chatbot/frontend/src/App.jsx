@@ -153,9 +153,17 @@ function ChatInterface() {
 
   // Handle payment method selection
   const handlePaymentMethodSelect = useCallback((methodAction) => {
-    // Send the payment method action as a message
-    handleSendMessage(methodAction)
-  }, [handleSendMessage])
+    // Map raw action strings to friendly display text
+    const PAYMENT_LABELS = {
+      pay_online: 'Pay Online',
+      pay_cash: 'Cash',
+      pay_card_counter: 'Card at Counter',
+    }
+    const displayText = PAYMENT_LABELS[methodAction] || methodAction
+    addUserMessage(displayText)       // Show friendly text in UI
+    clearQuickReplies()
+    sendMessage(methodAction, selectedLanguage)  // Send raw action to backend
+  }, [addUserMessage, clearQuickReplies, sendMessage, selectedLanguage])
 
   // Render message based on type
   const renderMessage = (message) => {
