@@ -22,6 +22,55 @@ import asyncio
 logger = structlog.get_logger("services.payment_handler")
 
 
+def _classify_payment_method(message: str) -> Optional[str]:
+    """
+    Classify natural language into a payment method.
+
+    Checks keyword patterns in priority order (most specific first)
+    to map user intent to PaymentMethod values.
+
+    Returns:
+        PaymentMethod value string, or None if no match.
+    """
+    msg = message.lower().strip()
+
+    # --- Card at counter (check first — most specific) ---
+    CARD_COUNTER_PHRASES = [
+        "card at counter", "pay at counter", "pay at the counter",
+        "card at the counter", "pay when i arrive", "pay at restaurant",
+        "pay at the restaurant", "pay there", "pay later", "at counter",
+        "at the counter", "when i arrive", "when i come",
+    ]
+    if any(phrase in msg for phrase in CARD_COUNTER_PHRASES):
+        return PaymentMethod.CARD_AT_COUNTER.value
+
+    # --- Cash ---
+    CASH_PHRASES = [
+        "cash on delivery", "pay cash", "pay by cash", "pay in cash",
+        "cash payment",
+    ]
+    CASH_KEYWORDS = ["cash", "cod"]
+    if any(phrase in msg for phrase in CASH_PHRASES):
+        return PaymentMethod.CASH.value
+    if any(word in msg.split() for word in CASH_KEYWORDS):
+        return PaymentMethod.CASH.value
+
+    # --- Online (broadest — check last) ---
+    ONLINE_PHRASES = [
+        "pay online", "online payment", "net banking", "netbanking",
+    ]
+    ONLINE_KEYWORDS = [
+        "online", "upi", "razorpay", "gpay", "phonepe", "paytm",
+        "digital", "card", "netbanking",
+    ]
+    if any(phrase in msg for phrase in ONLINE_PHRASES):
+        return PaymentMethod.ONLINE.value
+    if any(word in msg.split() for word in ONLINE_KEYWORDS):
+        return PaymentMethod.ONLINE.value
+
+    return None
+
+
 async def handle_payment_message(
     session_id: str,
     message: str
@@ -119,15 +168,16 @@ async def handle_payment_message(
     # STEP 1: Payment Method Selection
     # =========================================================================
     if current_step == PaymentStep.SELECT_METHOD.value:
-        # ONLY intercept exact button actions from the payment card UI.
-        # Natural language like "I want to pay online" should go to the LLM,
-        # which calls select_payment_method tool → triggers run_payment_workflow.
+        # Match exact button actions first, then fall back to NL classification.
         BUTTON_ACTION_MAP = {
             "pay_online": PaymentMethod.ONLINE.value,
             "pay_cash": PaymentMethod.CASH.value,
             "pay_card_counter": PaymentMethod.CARD_AT_COUNTER.value,
         }
         method = BUTTON_ACTION_MAP.get(message_lower)
+
+        if not method:
+            method = _classify_payment_method(message_lower)
 
         if method:
             logger.info(
