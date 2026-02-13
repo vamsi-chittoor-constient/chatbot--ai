@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
-import { CreditCard, Wallet, Smartphone, Loader2, AlertCircle, CheckCircle, ArrowLeft, ShoppingBag } from 'lucide-react'
+import { CreditCard, Smartphone, Loader2, AlertCircle, CheckCircle, ArrowLeft, ShoppingBag } from 'lucide-react'
 
 function PaymentPage() {
   const { orderId } = useParams()
@@ -153,12 +153,10 @@ function PaymentPage() {
     )
   }
 
-  // Main payment page — order summary + 3 buttons
+  // Main payment page — order summary + Pay Online button
   const items = orderData.items || []
   const methods = [
     { id: 'online', label: 'Pay Online', description: 'UPI, Card, Net Banking via Razorpay', icon: Smartphone, color: 'bg-blue-600' },
-    { id: 'cash', label: 'Cash on Delivery', description: 'Pay when you pick up', icon: Wallet, color: 'bg-green-600' },
-    { id: 'card_at_counter', label: 'Card at Counter', description: 'Pay by card when you arrive', icon: CreditCard, color: 'bg-purple-600' },
   ]
 
   return (
