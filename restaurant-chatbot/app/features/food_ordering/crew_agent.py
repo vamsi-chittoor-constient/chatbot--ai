@@ -70,17 +70,32 @@ def run_async(coro):
     so tools must be sync `def`. This helper bridges the gap by running
     async code from within sync tools.
 
-    IMPORTANT: Always schedule on _MAIN_LOOP via run_coroutine_threadsafe.
-    Never use asyncio.run() as it creates a NEW event loop, and asyncpg/DB
-    connections are bound to _MAIN_LOOP — mixing loops causes
-    "Future attached to a different loop" errors.
+    Routes through _MAIN_LOOP to share DB/HTTP connections. Detects whether
+    we're on the main event loop thread to avoid deadlocking it.
     """
-    if _MAIN_LOOP is not None and _MAIN_LOOP.is_running():
-        future = asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
-        return future.result(timeout=30)
+    if _MAIN_LOOP is None or not _MAIN_LOOP.is_running():
+        # No main loop available — create a throwaway loop (DB ops may fail)
+        return asyncio.run(coro)
 
-    # Last resort fallback: no main loop reference
-    return asyncio.run(coro)
+    # Check if we're being called FROM the main event loop thread.
+    # If so, blocking with future.result() would deadlock the loop.
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if current_loop is _MAIN_LOOP:
+        # ON the main loop — can't block. Spin up a temporary loop in a
+        # new thread. DB operations that need _MAIN_LOOP's asyncpg pool
+        # won't work here, but non-DB coroutines (HTTP, Redis) are fine.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=30)
+
+    # Worker thread (with or without its own loop) — schedule on _MAIN_LOOP.
+    # This is the CORRECT path for CrewAI tools running in thread-pool workers.
+    future = asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
+    return future.result(timeout=30)
 
 
 def clean_crew_response(raw_response: str) -> str:
