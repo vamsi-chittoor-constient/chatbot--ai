@@ -169,28 +169,6 @@ function aguiReducer(state, action) {
         }],
       }
 
-    case 'PAYMENT_METHOD_SELECTION':
-      console.log('REDUCER: PAYMENT_METHOD_SELECTION', action.payload)
-      const newMessage = {
-        id: Date.now(),
-        role: 'system',
-        type: 'payment_method_selection',
-        data: {
-          methods: action.payload.methods,
-          amount: action.payload.amount,
-          order_id: action.payload.order_id,
-        },
-        timestamp: new Date(),
-      }
-      console.log('REDUCER: Created message:', newMessage)
-      const newState = {
-        ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'payment_method_selection'), newMessage],
-      }
-      console.log('REDUCER: New messages array length:', newState.messages.length)
-      console.log('REDUCER: Last message type:', newState.messages[newState.messages.length - 1]?.type)
-      return newState
-
     case 'PAYMENT_LINK':
       console.log('REDUCER: PAYMENT_LINK', action.payload)
       return {

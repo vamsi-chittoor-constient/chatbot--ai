@@ -14,7 +14,6 @@ import {
   ActivityIndicator,
   ChatInput,
   SessionModal,
-  PaymentMethodCard,
   PaymentSuccessCard,
   PaymentLinkCard,
   VoiceModeBanner,
@@ -22,7 +21,6 @@ import {
 import { SearchResultsCard } from './components/SearchResultsCard'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
-import PaymentPage from './components/PaymentPage'
 
 function ChatInterface() {
   const chatContainerRef = useRef(null)
@@ -58,7 +56,7 @@ function ChatInterface() {
     const isAuthFormDismiss = event.type === 'FORM_DISMISS'
 
     // Always process payment-related events
-    const isPaymentEvent = event.type === 'PAYMENT_METHOD_SELECTION' || event.type === 'PAYMENT_LINK' || event.type === 'PAYMENT_SUCCESS'
+    const isPaymentEvent = event.type === 'PAYMENT_LINK' || event.type === 'PAYMENT_SUCCESS'
 
     console.log('🔶 Event flags:', { isAuthForm, isAuthFormDismiss, isPaymentEvent, sessionReady: sessionReadyRef.current })
 
@@ -176,15 +174,6 @@ function ChatInterface() {
         return <SearchResultsCard key={message.id} data={message.data} onAddToCart={handleAddToCart} />
       case 'order':
         return <OrderCard key={message.id} data={message.data} />
-      case 'payment_method_selection':
-        console.log('Rendering PaymentMethodCard with data:', message.data)
-        return (
-          <PaymentMethodCard
-            key={message.id}
-            data={message.data}
-            sessionId={sessionId}
-          />
-        )
       case 'payment_link':
         return <PaymentLinkCard key={message.id} data={message.data} />
       case 'payment_success':
@@ -373,7 +362,6 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/payment/:orderId" element={<PaymentPage />} />
         <Route path="/payment/success" element={<PaymentSuccess />} />
         <Route path="/payment/failure" element={<PaymentFailure />} />
         <Route path="/" element={<ChatInterface />} />

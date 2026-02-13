@@ -1419,17 +1419,16 @@ async def chat_endpoint(
                 # ========================================================================
                 # When there's a pending payment:
                 # - Cancel text ("cancel payment") → clear payment state, show cart, continue
-                # - Payment method text ("pay online", "cash") → re-show payment page link
-                # - Any other message → ask "You have a pending payment, cancel it?"
-                #   with quick reply buttons [Yes, cancel / No, complete payment]
+                # - Payment text ("pay now", "complete payment") → re-show Razorpay link
+                # - Any other message → remind about pending payment with link + cancel quick replies
                 try:
                     from app.services.payment_state_service import get_payment_state as _gps, PaymentStep as _PStep
                     _pstate = _gps(session_id)
-                    if (_pstate.get("step") == _PStep.SELECT_METHOD.value
+                    if (_pstate.get("step") == _PStep.AWAITING_PAYMENT.value
                             and _pstate.get("order_id")):
                         _pay_order_id = _pstate["order_id"]
                         _pay_amount = _pstate.get("amount", 0)
-                        _pay_url = f"/payment/{_pay_order_id}?sid={session_id}"
+                        _pay_link = _pstate.get("payment_link", "")
                         _msg_lower = user_message.lower().strip()
 
                         # Check for cancel intent
@@ -1471,17 +1470,16 @@ async def chat_endpoint(
                             logger.info("payment_cancelled_by_user", session_id=session_id, order_id=_pay_order_id)
                             continue
 
-                        # Check for payment method text or "complete payment" → re-show payment link
-                        from app.services.payment_handler import _classify_payment_method
-                        _complete_phrases = ["complete payment", "no, complete", "no complete", "finish payment", "pay now"]
+                        # Check for "complete payment" / "pay now" → re-show Razorpay link
+                        _complete_phrases = ["complete payment", "no, complete", "no complete", "finish payment", "pay now", "pay online"]
                         _is_complete = any(p in _msg_lower for p in _complete_phrases)
-                        if _is_complete or _classify_payment_method(user_message):
+                        if _is_complete:
                             await websocket_manager.send_message_with_metadata(
                                 session_id=session_id,
                                 message=(
-                                    f"Your order **{_pay_order_id}** (₹{_pay_amount:.0f}) is pending payment.\n\n"
-                                    f"👉 [Complete Payment]({_pay_url})\n\n"
-                                    f"Please use the link above to select your payment method and complete the payment."
+                                    f"Your payment link for order **{_pay_order_id}** (₹{_pay_amount:.0f}):\n\n"
+                                    f"👉 [Pay Now with Razorpay]({_pay_link})\n\n"
+                                    f"Click the link above to complete your payment."
                                 ),
                                 message_type="ai_response",
                                 metadata={"direct_action": "payment_pending_redirect"}
@@ -1489,12 +1487,13 @@ async def chat_endpoint(
                             logger.info("payment_pending_redirect", session_id=session_id, order_id=_pay_order_id)
                             continue
 
-                        # Any other message → ask if they want to cancel the pending payment
+                        # Any other message → remind about pending payment with Razorpay link
                         await websocket_manager.send_message_with_metadata(
                             session_id=session_id,
                             message=(
                                 f"You have a pending payment for order **{_pay_order_id}** (₹{_pay_amount:.0f}).\n\n"
-                                f"Would you like to cancel it and continue?"
+                                f"👉 [Pay Now with Razorpay]({_pay_link})\n\n"
+                                f"Would you like to cancel it instead?"
                             ),
                             message_type="ai_response",
                             metadata={"direct_action": "payment_pending_confirm_cancel"}

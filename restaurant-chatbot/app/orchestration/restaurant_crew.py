@@ -1247,6 +1247,7 @@ async def process_with_agui_streaming(
                 from app.workflows.payment_workflow import run_payment_workflow
                 await run_payment_workflow(
                     session_id, _pinfo["order_display_id"], _pinfo["total"],
+                    initial_method="online",
                     items=_items, order_type=_order_type,
                     subtotal=_subtotal, packaging_charges=_packaging
                 )
