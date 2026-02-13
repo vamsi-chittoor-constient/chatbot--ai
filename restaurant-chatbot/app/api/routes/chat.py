@@ -1752,47 +1752,12 @@ async def process_message_with_ai(
             conversation_history = []
 
         # =====================================================================
-        # PAYMENT HANDLER INTERCEPTOR
-        # Deterministic payment flow - intercepts payment-related messages
-        # BEFORE the AI agent to ensure reliable payment processing.
+        # AI AGENT PROCESSING
+        # Agent handles all messages including payment method selection.
+        # No interceptor — agent calls tools (select_payment_method,
+        # initiate_payment, etc.) which trigger deterministic workflows.
         # =====================================================================
-        try:
-            from app.services.payment_handler import handle_payment_message
-            payment_response = await handle_payment_message(session_id, message)
-        except Exception as e:
-            logger.warning("payment_handler_error", error=str(e))
-            payment_response = None
-
-        if payment_response is not None:
-            logger.info("payment_handler_intercepted", session_id=session_id, message=message[:50])
-
-            # Cancel the background AGUI task FIRST to avoid two consumers
-            # racing on the same event queue.
-            if not agui_task.done():
-                agui_task.cancel()
-                try:
-                    await agui_task
-                except asyncio.CancelledError:
-                    pass
-
-            # Emit the text response as AGUI events so the frontend receives it.
-            # The main response path (line ~1481) does NOT send ai_response via WebSocket
-            # because it assumes the crew already streamed it via AGUI TEXT_MESSAGE events.
-            # Payment handler responses bypass the crew, so we must emit them here.
-            emitter.emit_full_text(payment_response, chunk_size=1)
-
-            # Flush any events staged by the payment handler (e.g. payment success card)
-            from app.core.agui_events import flush_pending_events
-            flush_pending_events(session_id)
-            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
-
-            ai_response = payment_response
-            cycle_metadata = {"type": "payment_handler", "session_id": session_id}
-            # Skip the AI agent - go straight to response sending
-        else:
-            # =====================================================================
-            # AI AGENT PROCESSING
-            # =====================================================================
+        if True:
             try:
                 # Process message with AG-UI streaming
                 # Pass user_id from authenticated session (available after OTP verification at session start)

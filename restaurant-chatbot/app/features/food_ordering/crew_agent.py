@@ -455,45 +455,32 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             logger.warning("cart_clear_after_checkout_failed", error=str(clear_err))
 
         # =====================================================================
-        # PAYMENT WORKFLOW - Emit payment method card directly
+        # PAYMENT WORKFLOW — Store info for after-crew trigger
         # =====================================================================
-        # Initialize payment state and show payment method selection card
-        # so the AI agent can handle payment via select_payment_method tool.
-        from app.services.payment_state_service import init_payment_workflow
-        from app.core.agui_events import emit_payment_method_selection
-
-        init_payment_workflow(
-            session_id, order_display_id, total,
-            items=items, order_type=order_type_clean,
-            subtotal=subtotal, packaging_charges=packaging_charges
+        # Don't call init_payment_workflow() here (worker thread).
+        # Store payment info in Redis so the after-crew block in
+        # restaurant_crew.py can call run_payment_workflow() on the
+        # main async loop where DB/HTTP connections work correctly.
+        payment_info = {
+            "order_display_id": order_display_id,
+            "total": total,
+            "session_id": session_id,
+        }
+        redis_client.setex(
+            f"checkout_payment_info:{session_id}",
+            3600,
+            json.dumps(payment_info)
         )
 
-        emit_payment_method_selection(session_id, [
-            {
-                "label": "💳 Pay Online",
-                "action": "pay_online",
-                "description": "Secure payment via Razorpay (Card/UPI/NetBanking)"
-            },
-            {
-                "label": "💵 Cash",
-                "action": "pay_cash",
-                "description": "Pay cash on delivery or at counter"
-            },
-            {
-                "label": "💳 Card at Counter",
-                "action": "pay_card_counter",
-                "description": "Pay by card when you arrive"
-            }
-        ], amount=total, order_id=order_display_id)
-
         logger.info(
-            "checkout_payment_card_emitted",
+            "checkout_payment_info_stored",
             session_id=session_id,
             order_id=order_display_id,
             amount=total
         )
 
-        # Return confirmation - AI agent will handle payment method selection
+        # Return confirmation — run_payment_workflow() will show the
+        # payment card after the crew finishes (on the main thread).
         items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
         if len(items) > 3:
             items_summary += f" and {len(items) - 3} more"

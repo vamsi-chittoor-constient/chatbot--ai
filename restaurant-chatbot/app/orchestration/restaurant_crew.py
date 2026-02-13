@@ -1215,6 +1215,48 @@ async def process_with_agui_streaming(
         if flushed > 0:
             logger.debug("tool_events_flushed_before_run_finished", session_id=session_id, count=flushed)
 
+        # =====================================================================
+        # PAYMENT WORKFLOW TRIGGER — runs AFTER crew finishes on main thread
+        # =====================================================================
+        # The checkout tool stores payment info in Redis. After the crew
+        # completes, we trigger run_payment_workflow() here (on the main
+        # async loop) so that DB/HTTP connections work correctly and
+        # payment events are staged before RUN_FINISHED.
+        try:
+            from app.core.redis import get_sync_redis_client
+            import json as _json
+            _redis = get_sync_redis_client()
+            _pinfo_key = f"checkout_payment_info:{session_id}"
+            _pinfo_data = _redis.get(_pinfo_key)
+            if _pinfo_data:
+                _pinfo = _json.loads(_pinfo_data)
+                _redis.delete(_pinfo_key)
+                # Read pending order items for receipt generation
+                _items = None
+                _order_type = None
+                _subtotal = None
+                _packaging = None
+                _pending_key = f"pending_order:{session_id}"
+                _pending_data = _redis.get(_pending_key)
+                if _pending_data:
+                    _pending = _json.loads(_pending_data)
+                    _items = _pending.get("items")
+                    _order_type = _pending.get("order_type")
+                    _subtotal = _pending.get("subtotal")
+                    _packaging = _pending.get("packaging_charges")
+                from app.workflows.payment_workflow import run_payment_workflow
+                await run_payment_workflow(
+                    session_id, _pinfo["order_display_id"], _pinfo["total"],
+                    items=_items, order_type=_order_type,
+                    subtotal=_subtotal, packaging_charges=_packaging
+                )
+                # Flush payment events so they're queued before RUN_FINISHED
+                flushed_payment = flush_pending_events(session_id)
+                if flushed_payment > 0:
+                    logger.debug("payment_events_flushed", session_id=session_id, count=flushed_payment)
+        except Exception as _pe:
+            logger.warning("payment_workflow_trigger_failed", error=str(_pe), session_id=session_id)
+
         # Emit run finished
         emitter.emit_run_finished(response)
 
