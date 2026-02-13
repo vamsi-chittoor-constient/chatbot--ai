@@ -1,29 +1,12 @@
-import React, { useState } from 'react'
-import { CreditCard, Wallet, Smartphone, CheckCircle, ChevronRight, QrCode } from 'lucide-react'
+import React from 'react'
+import { CreditCard, ExternalLink } from 'lucide-react'
 
-// Generic Payment Method Card
-// Supports: card, upi, wallet, netbanking
-export function PaymentMethodCard({ data, onSelectMethod }) {
-    const [selectedId, setSelectedId] = useState(null)
-    const { title, amount, currency, order_id, methods } = data
+// Payment Method Card — shows a "Complete Payment" button linking to the payment page.
+// The actual method selection (Online/Cash/Card) happens on the standalone payment page.
+export function PaymentMethodCard({ data, sessionId }) {
+    const { amount, currency, order_id } = data
 
-    const handleSelect = (method) => {
-        setSelectedId(method.action || method.id)
-        if (onSelectMethod) {
-            onSelectMethod(method.action || method.label)
-        }
-    }
-
-    // Icon mapping
-    const getIcon = (type) => {
-        switch (type) {
-            case 'card': return CreditCard
-            case 'upi': return Smartphone
-            case 'wallet': return Wallet
-            case 'qr': return QrCode
-            default: return CreditCard
-        }
-    }
+    const paymentUrl = `/payment/${encodeURIComponent(order_id)}?sid=${encodeURIComponent(sessionId || '')}`
 
     return (
         <div className="w-full max-w-sm bg-chat-secondary rounded-2xl overflow-hidden shadow-lg border border-chat-border my-2 animate-fade-in-up">
@@ -31,8 +14,8 @@ export function PaymentMethodCard({ data, onSelectMethod }) {
             <div className="bg-chat-tertiary px-5 py-4 border-b border-chat-border">
                 <div className="flex justify-between items-start">
                     <div>
-                        <h3 className="font-semibold text-white/90 text-lg">{title || 'Select Payment Method'}</h3>
-                        <p className="text-sm text-gray-400 mt-1">Total to pay</p>
+                        <h3 className="font-semibold text-white/90 text-lg">Payment</h3>
+                        <p className="text-sm text-gray-400 mt-1">Order {order_id}</p>
                     </div>
                     <div className="text-right">
                         <span className="text-2xl font-bold text-white tracking-tight">
@@ -42,54 +25,20 @@ export function PaymentMethodCard({ data, onSelectMethod }) {
                 </div>
             </div>
 
-            {/* Methods List */}
-            <div className="divide-y divide-chat-border/50">
-                {methods.map((method, index) => {
-                    const Icon = getIcon(method.type)
-                    const isSelected = selectedId === (method.action || method.id)
-
-                    return (
-                        <button
-                            key={method.action || method.id || index}
-                            onClick={() => handleSelect(method)}
-                            className={`w-full px-5 py-4 flex items-center justify-between group transition-all duration-200 
-                ${isSelected ? 'bg-accent/10' : 'hover:bg-chat-tertiary/50'}
-              `}
-                        >
-                            <div className="flex items-center gap-4 flex-1">
-                                {/* Icon Box */}
-                                <div className={`
-                  w-10 h-10 rounded-xl flex items-center justify-center transition-colors
-                  ${isSelected ? 'bg-accent text-white' : 'bg-chat-tertiary text-gray-400 group-hover:text-white group-hover:bg-chat-tertiary/80'}
-                `}>
-                                    <Icon size={20} />
-                                </div>
-
-                                {/* Content */}
-                                <div className="flex-1">
-                                    <div className="flex items-center justify-between mb-1">
-                                        <h4 className="font-semibold text-base text-white">
-                                            {method.label}
-                                        </h4>
-                                        {isSelected && (
-                                            <CheckCircle className="text-accent" size={20} />
-                                        )}
-                                    </div>
-                                    <p className="text-sm text-gray-400">
-                                        {method.description}
-                                    </p>
-                                </div>
-                            </div>
-                        </button>
-                    )
-                })}
-            </div>
-
-            {/* Footer Info */}
-            <div className="border-t border-chat-border px-4 py-3 bg-chat-tertiary">
-                <p className="text-xs text-gray-500 text-center">
-                    {order_id && `Order: ${order_id} • `}
-                    Secure payment powered by Razorpay
+            {/* CTA */}
+            <div className="px-5 py-5">
+                <a
+                    href={paymentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 shadow-md hover:shadow-lg"
+                >
+                    <CreditCard size={18} />
+                    Complete Payment
+                    <ExternalLink size={14} className="ml-1 opacity-70" />
+                </a>
+                <p className="text-xs text-gray-500 text-center mt-3">
+                    Choose your payment method on the next page
                 </p>
             </div>
         </div>

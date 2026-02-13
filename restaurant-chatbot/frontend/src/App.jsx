@@ -22,6 +22,7 @@ import {
 import { SearchResultsCard } from './components/SearchResultsCard'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
+import PaymentPage from './components/PaymentPage'
 
 function ChatInterface() {
   const chatContainerRef = useRef(null)
@@ -163,20 +164,6 @@ function ChatInterface() {
     sendFormResponse('direct_remove_from_cart', { item_name: itemName })
   }, [sendFormResponse])
 
-  // Handle payment method selection
-  const handlePaymentMethodSelect = useCallback((methodAction) => {
-    // Map raw action strings to friendly display text
-    const PAYMENT_LABELS = {
-      pay_online: 'Pay Online',
-      pay_cash: 'Cash',
-      pay_card_counter: 'Card at Counter',
-    }
-    const displayText = PAYMENT_LABELS[methodAction] || methodAction
-    addUserMessage(displayText)       // Show friendly text in UI
-    clearQuickReplies()
-    sendMessage(methodAction, selectedLanguage)  // Send raw action to backend
-  }, [addUserMessage, clearQuickReplies, sendMessage, selectedLanguage])
-
   // Render message based on type
   const renderMessage = (message) => {
     console.log('renderMessage called for:', message.type, 'id:', message.id)
@@ -195,7 +182,7 @@ function ChatInterface() {
           <PaymentMethodCard
             key={message.id}
             data={message.data}
-            onSelectMethod={handlePaymentMethodSelect}
+            sessionId={sessionId}
           />
         )
       case 'payment_link':
@@ -386,6 +373,7 @@ function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/payment/:orderId" element={<PaymentPage />} />
         <Route path="/payment/success" element={<PaymentSuccess />} />
         <Route path="/payment/failure" element={<PaymentFailure />} />
         <Route path="/" element={<ChatInterface />} />

@@ -774,25 +774,6 @@ async def process_with_restaurant_crew(
         query=user_message[:50]
     )
 
-    # Payment state context — enrich agent context when payment is pending
-    try:
-        from app.services.payment_state_service import get_payment_state, PaymentStep
-        _pay_state = get_payment_state(session_id)
-        if (_pay_state.get("step") == PaymentStep.SELECT_METHOD.value
-                and _pay_state.get("order_id")):
-            _pay_ctx = (
-                f"\n\n⚠️ ACTIVE PAYMENT: Order {_pay_state['order_id']} "
-                f"(₹{_pay_state.get('amount', 0):.0f}) is awaiting payment method selection. "
-                f"You MUST call select_payment_method tool with the customer's choice: "
-                f"'online' for UPI/card/online, 'cash' for cash, or 'card_at_counter' for card at counter. "
-                f"DO NOT respond with text — CALL THE TOOL."
-            )
-            semantic_context = (semantic_context or "") + _pay_ctx
-            logger.info("payment_context_injected", session_id=session_id,
-                        order_id=_pay_state["order_id"])
-    except Exception as _pce:
-        logger.warning("payment_context_injection_failed", error=str(_pce))
-
     # =========================================================================
     # AGENT PROCESSING
     # =========================================================================
@@ -904,45 +885,6 @@ async def process_with_restaurant_crew(
         if response is None:
             logger.warning("all_response_cleaning_failed")
             response = "I apologize, I had trouble processing that request. Could you please try again?"
-
-        # Payment method fallback — same pattern as process_with_agui_streaming
-        try:
-            from app.services.payment_state_service import get_payment_state as _get_ps2, PaymentStep as _PS2
-            _ps_after2 = _get_ps2(session_id)
-            if (_ps_after2.get("step") == _PS2.SELECT_METHOD.value
-                    and _ps_after2.get("order_id")):
-                from app.services.payment_handler import _classify_payment_method
-                _user_method2 = _classify_payment_method(user_message)
-                if _user_method2:
-                    logger.info("post_crew_payment_fallback", session_id=session_id,
-                                method=_user_method2, path="restaurant_crew")
-                    from app.workflows.payment_workflow import run_payment_workflow as _run_pw2
-                    _pw2 = await _run_pw2(
-                        session_id=session_id,
-                        order_id=_ps_after2["order_id"],
-                        amount=_ps_after2.get("amount", 0),
-                        initial_method=_user_method2,
-                        items=_ps_after2.get("items"),
-                        order_type=_ps_after2.get("order_type"),
-                        subtotal=_ps_after2.get("subtotal"),
-                        packaging_charges=_ps_after2.get("packaging_charges")
-                    )
-                    _pw2_step = _pw2.get("step", "")
-                    if _pw2_step == _PS2.CASH_SELECTED.value:
-                        response = (
-                            f"✅ Cash payment confirmed! Your order "
-                            f"{_ps_after2['order_id']} for ₹{_ps_after2.get('amount', 0):.0f} "
-                            f"is confirmed."
-                        )
-                    elif _pw2_step == _PS2.AWAITING_PAYMENT.value:
-                        response = (
-                            f"✅ Payment link generated for order {_ps_after2['order_id']}. "
-                            f"Please complete the payment using the link."
-                        )
-                    elif _pw2_step == _PS2.PAYMENT_FAILED.value:
-                        response = f"❌ Payment setup failed: {_pw2.get('error', 'Unknown')}."
-        except Exception as _pfb2:
-            logger.warning("payment_method_fallback_failed", error=str(_pfb2))
 
         logger.info(
             "restaurant_crew_complete",
@@ -1089,29 +1031,6 @@ async def process_with_agui_streaming(
             emitter.emit_activity("checking", "Checking your preferences...")
             logger.debug("entity_graph_context", session_id=session_id, context=semantic_context[:100])
 
-        # =====================================================================
-        # PAYMENT STATE CONTEXT — enrich agent context when payment is pending
-        # =====================================================================
-        # Between turns, the agent loses the checkout tool's "call select_payment_method"
-        # instruction. Inject payment state so the agent knows to call the tool.
-        try:
-            from app.services.payment_state_service import get_payment_state, PaymentStep
-            _pay_state = get_payment_state(session_id)
-            if (_pay_state.get("step") == PaymentStep.SELECT_METHOD.value
-                    and _pay_state.get("order_id")):
-                _pay_ctx = (
-                    f"\n\n⚠️ ACTIVE PAYMENT: Order {_pay_state['order_id']} "
-                    f"(₹{_pay_state.get('amount', 0):.0f}) is awaiting payment method selection. "
-                    f"You MUST call select_payment_method tool with the customer's choice: "
-                    f"'online' for UPI/card/online, 'cash' for cash, or 'card_at_counter' for card at counter. "
-                    f"DO NOT respond with text — CALL THE TOOL."
-                )
-                semantic_context = (semantic_context or "") + _pay_ctx
-                logger.info("payment_context_injected", session_id=session_id,
-                            order_id=_pay_state["order_id"])
-        except Exception as _pce:
-            logger.warning("payment_context_injection_failed", error=str(_pce))
-
         # Get or create crew
         global _CREW_CACHE, _CREW_VERSION
         cache_key = f"{session_id}:v{_CREW_VERSION}"
@@ -1255,62 +1174,6 @@ async def process_with_agui_streaming(
         # Sanitize response to catch any remaining prompt leaks, JSON, errors
         from app.core.response_sanitizer import sanitize_response as _sanitize
         response = _sanitize(response)
-
-        # =====================================================================
-        # PAYMENT METHOD FALLBACK — if agent didn't call select_payment_method
-        # =====================================================================
-        # Must run BEFORE streaming so the overridden response is what the user sees.
-        # Same pattern as the checkout trigger. If payment state is still
-        # SELECT_METHOD after the crew finished, the agent gave a text response
-        # instead of calling the tool. Classify the user's intent and run the
-        # payment workflow directly so the payment flow doesn't get stuck.
-        try:
-            from app.services.payment_state_service import get_payment_state as _get_ps, PaymentStep as _PS
-            _ps_after = _get_ps(session_id)
-            if (_ps_after.get("step") == _PS.SELECT_METHOD.value
-                    and _ps_after.get("order_id")):
-                from app.services.payment_handler import _classify_payment_method
-                _user_method = _classify_payment_method(user_message)
-                if _user_method:
-                    logger.info(
-                        "post_crew_payment_fallback",
-                        session_id=session_id,
-                        method=_user_method,
-                        reason="agent_did_not_call_select_payment_method"
-                    )
-                    from app.workflows.payment_workflow import run_payment_workflow as _run_pw
-                    _pw_state = await _run_pw(
-                        session_id=session_id,
-                        order_id=_ps_after["order_id"],
-                        amount=_ps_after.get("amount", 0),
-                        initial_method=_user_method,
-                        items=_ps_after.get("items"),
-                        order_type=_ps_after.get("order_type"),
-                        subtotal=_ps_after.get("subtotal"),
-                        packaging_charges=_ps_after.get("packaging_charges")
-                    )
-                    # Flush payment events so payment card/link appears
-                    from app.core.agui_events import flush_pending_events as _flush_pe
-                    _fb_flushed = _flush_pe(session_id)
-                    if _fb_flushed > 0:
-                        logger.debug("payment_fallback_events_flushed", count=_fb_flushed)
-                    # Override agent's text response with payment confirmation
-                    _pw_step = _pw_state.get("step", "")
-                    if _pw_step == _PS.CASH_SELECTED.value:
-                        response = (
-                            f"✅ **Cash payment confirmed!** Your order "
-                            f"{_ps_after['order_id']} for ₹{_ps_after.get('amount', 0):.0f} "
-                            f"is confirmed. Pay when you pick up your order."
-                        )
-                    elif _pw_step == _PS.AWAITING_PAYMENT.value:
-                        response = (
-                            f"✅ **Payment link generated!** Please complete the payment "
-                            f"for your order {_ps_after['order_id']} using the link above."
-                        )
-                    elif _pw_step == _PS.PAYMENT_FAILED.value:
-                        response = f"❌ Payment setup failed: {_pw_state.get('error', 'Unknown error')}. Please try again."
-        except Exception as _pfb_e:
-            logger.warning("payment_method_fallback_failed", error=str(_pfb_e), session_id=session_id)
 
         # Stream the response word by word
         emitter.emit_full_text(response, chunk_size=1)

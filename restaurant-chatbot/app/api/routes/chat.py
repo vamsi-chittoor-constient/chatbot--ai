@@ -1414,6 +1414,41 @@ async def chat_endpoint(
                 except Exception as e:
                     logger.warning(f"Failed to send typing indicator: {str(e)}")
 
+                # ========================================================================
+                # PENDING PAYMENT REDIRECT — re-show payment page link
+                # ========================================================================
+                # If there's a pending payment awaiting method selection, any user
+                # message should remind them and re-show the payment page link.
+                # Payment happens on the dedicated page, not in chat.
+                try:
+                    from app.services.payment_state_service import get_payment_state as _gps, PaymentStep as _PStep
+                    _pstate = _gps(session_id)
+                    if (_pstate.get("step") == _PStep.SELECT_METHOD.value
+                            and _pstate.get("order_id")):
+                        _pay_order_id = _pstate["order_id"]
+                        _pay_amount = _pstate.get("amount", 0)
+                        _pay_url = f"/payment/{_pay_order_id}?sid={session_id}"
+
+                        await websocket_manager.send_message_with_metadata(
+                            session_id=session_id,
+                            message=(
+                                f"⏳ You have a pending payment for order **{_pay_order_id}** (₹{_pay_amount:.0f}).\n\n"
+                                f"👉 [Complete Payment]({_pay_url})\n\n"
+                                f"Please complete your payment first, then I can help you with anything else!"
+                            ),
+                            message_type="ai_response",
+                            metadata={"direct_action": "payment_pending_redirect"}
+                        )
+                        logger.info(
+                            "payment_pending_redirect",
+                            session_id=session_id,
+                            order_id=_pay_order_id
+                        )
+                        continue  # Skip LLM processing
+                except Exception as _ptf_err:
+                    logger.warning("payment_pending_redirect_error", error=str(_ptf_err))
+                # ========================================================================
+
                 # ============ TESTING MODULE - Metadata Streaming ============
                 # WARNING: This section can be removed when manual testing is complete
                 # Check if this is a testing session and use enhanced processing
