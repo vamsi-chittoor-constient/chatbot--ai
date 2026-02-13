@@ -1415,11 +1415,13 @@ async def chat_endpoint(
                     logger.warning(f"Failed to send typing indicator: {str(e)}")
 
                 # ========================================================================
-                # PENDING PAYMENT REDIRECT — re-show payment page link
+                # PENDING PAYMENT HANDLER — intercept ALL messages during pending payment
                 # ========================================================================
-                # If there's a pending payment awaiting method selection, any user
-                # message should remind them and re-show the payment page link.
-                # Payment happens on the dedicated page, not in chat.
+                # When there's a pending payment:
+                # - Cancel text ("cancel payment") → clear payment state, show cart, continue
+                # - Payment method text ("pay online", "cash") → re-show payment page link
+                # - Any other message → ask "You have a pending payment, cancel it?"
+                #   with quick reply buttons [Yes, cancel / No, complete payment]
                 try:
                     from app.services.payment_state_service import get_payment_state as _gps, PaymentStep as _PStep
                     _pstate = _gps(session_id)
@@ -1428,25 +1430,92 @@ async def chat_endpoint(
                         _pay_order_id = _pstate["order_id"]
                         _pay_amount = _pstate.get("amount", 0)
                         _pay_url = f"/payment/{_pay_order_id}?sid={session_id}"
+                        _msg_lower = user_message.lower().strip()
 
+                        # Check for cancel intent
+                        _cancel_phrases = [
+                            "cancel", "cancel payment", "cancel order",
+                            "cancel my order", "don't want", "dont want",
+                            "never mind", "nevermind", "yes cancel",
+                            "yes, cancel",
+                        ]
+                        _is_cancel = any(p in _msg_lower for p in _cancel_phrases)
+
+                        if _is_cancel:
+                            # Clear payment state and let user continue
+                            from app.services.payment_state_service import clear_payment_state
+                            clear_payment_state(session_id)
+                            await websocket_manager.send_message_with_metadata(
+                                session_id=session_id,
+                                message=(
+                                    f"Payment for order **{_pay_order_id}** has been cancelled.\n\n"
+                                    f"Your cart items are still saved. What would you like to do?"
+                                ),
+                                message_type="ai_response",
+                                metadata={"direct_action": "payment_cancelled"}
+                            )
+                            # Show helpful quick replies after cancellation
+                            import json as _json
+                            from app.core.agui_events import QuickRepliesEvent
+                            _cancel_qr = QuickRepliesEvent(replies=[
+                                {"label": "🛒 View Cart", "action": "view cart"},
+                                {"label": "🍔 Show Menu", "action": "show menu"},
+                                {"label": "✅ Checkout", "action": "checkout"},
+                            ])
+                            await websocket_manager.send_message_with_metadata(
+                                session_id=session_id,
+                                message="",
+                                message_type="agui_event",
+                                metadata={"agui": _json.loads(_cancel_qr.to_json())}
+                            )
+                            logger.info("payment_cancelled_by_user", session_id=session_id, order_id=_pay_order_id)
+                            continue
+
+                        # Check for payment method text or "complete payment" → re-show payment link
+                        from app.services.payment_handler import _classify_payment_method
+                        _complete_phrases = ["complete payment", "no, complete", "no complete", "finish payment", "pay now"]
+                        _is_complete = any(p in _msg_lower for p in _complete_phrases)
+                        if _is_complete or _classify_payment_method(user_message):
+                            await websocket_manager.send_message_with_metadata(
+                                session_id=session_id,
+                                message=(
+                                    f"Your order **{_pay_order_id}** (₹{_pay_amount:.0f}) is pending payment.\n\n"
+                                    f"👉 [Complete Payment]({_pay_url})\n\n"
+                                    f"Please use the link above to select your payment method and complete the payment."
+                                ),
+                                message_type="ai_response",
+                                metadata={"direct_action": "payment_pending_redirect"}
+                            )
+                            logger.info("payment_pending_redirect", session_id=session_id, order_id=_pay_order_id)
+                            continue
+
+                        # Any other message → ask if they want to cancel the pending payment
                         await websocket_manager.send_message_with_metadata(
                             session_id=session_id,
                             message=(
-                                f"⏳ You have a pending payment for order **{_pay_order_id}** (₹{_pay_amount:.0f}).\n\n"
-                                f"👉 [Complete Payment]({_pay_url})\n\n"
-                                f"Please complete your payment first, then I can help you with anything else!"
+                                f"You have a pending payment for order **{_pay_order_id}** (₹{_pay_amount:.0f}).\n\n"
+                                f"Would you like to cancel it and continue?"
                             ),
                             message_type="ai_response",
-                            metadata={"direct_action": "payment_pending_redirect"}
+                            metadata={"direct_action": "payment_pending_confirm_cancel"}
                         )
-                        logger.info(
-                            "payment_pending_redirect",
+                        # Show quick reply buttons for cancel / complete payment
+                        import json as _json
+                        from app.core.agui_events import QuickRepliesEvent
+                        _confirm_qr = QuickRepliesEvent(replies=[
+                            {"label": "Yes, cancel payment", "action": "yes cancel"},
+                            {"label": "No, complete payment", "action": "complete payment"},
+                        ])
+                        await websocket_manager.send_message_with_metadata(
                             session_id=session_id,
-                            order_id=_pay_order_id
+                            message="",
+                            message_type="agui_event",
+                            metadata={"agui": _json.loads(_confirm_qr.to_json())}
                         )
-                        continue  # Skip LLM processing
+                        logger.info("payment_pending_cancel_prompt", session_id=session_id, order_id=_pay_order_id)
+                        continue
                 except Exception as _ptf_err:
-                    logger.warning("payment_pending_redirect_error", error=str(_ptf_err))
+                    logger.warning("payment_pending_handler_error", error=str(_ptf_err))
                 # ========================================================================
 
                 # ============ TESTING MODULE - Metadata Streaming ============
