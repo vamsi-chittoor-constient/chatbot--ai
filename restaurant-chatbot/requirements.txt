@@ -9,6 +9,7 @@ uvicorn[standard]
 # Database
 sqlalchemy
 asyncpg
+nest_asyncio
 psycopg2-binary
 pgvector
 
