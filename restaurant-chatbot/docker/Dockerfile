@@ -17,14 +17,15 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
-COPY requirements.txt .
+COPY requirements.txt requirements_vector.txt ./
 # Install CPU-only torch first (avoids downloading 5GB+ of CUDA/NVIDIA packages)
 RUN pip install --upgrade pip && \
     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    pip install -r requirements_vector.txt
 
-# Pre-download ChromaDB embedding model to avoid first-request delays
-RUN python -c "import chromadb; from chromadb.utils import embedding_functions; ef = embedding_functions.DefaultEmbeddingFunction(); ef(['test'])" || true
+# Pre-download sentence-transformers model to avoid first-request delays
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || true
 
 # -----------------------------------------------------------------------------
 # Production Stage
@@ -60,7 +61,7 @@ COPY static/ ./static/
 COPY db/ ./db/
 COPY requirements.txt .
 
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app
+RUN mkdir -p /app/logs /app/data/chromadb && chown -R appuser:appuser /app
 
 USER appuser
 

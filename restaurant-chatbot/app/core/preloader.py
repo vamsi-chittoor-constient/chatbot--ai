@@ -108,19 +108,26 @@ class MenuPreloader:
                     ORDER BY mi.menu_item_is_recommended DESC, mi.menu_item_name
                 """)
 
-                self._menu_cache = [
-                    {
+                _ALL_MEAL_PERIODS = {"Breakfast", "Lunch", "Dinner", "All Day"}
+
+                self._menu_cache = []
+                for row in rows:
+                    meal_types = list(row['meal_types']) if row['meal_types'] else []
+                    # Normalize: items with "All Day" or no tags get all meal periods
+                    # so they pass any meal period filter without special-casing
+                    if not meal_types or "All Day" in meal_types:
+                        meal_types = list(_ALL_MEAL_PERIODS)
+
+                    self._menu_cache.append({
                         "id": str(row['id']),
                         "name": row['name'],
                         "price": float(row['price']),
                         "description": row['description'] or "",
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
-                        "meal_types": list(row['meal_types']) if row['meal_types'] else ["All Day"],
+                        "meal_types": meal_types,
                         "category": row['categories'][0] if row['categories'] and len(row['categories']) > 0 else "Other"
-                    }
-                    for row in rows
-                ]
+                    })
                 self._last_refresh = datetime.now()
 
                 logger.info(
@@ -129,11 +136,44 @@ class MenuPreloader:
                     refresh_interval=self.refresh_interval
                 )
 
+                # Auto-index into ChromaDB for semantic search
+                await self._sync_vector_db()
+
         except Exception as e:
             logger.error("menu_preload_failed", error=str(e))
             # Keep old cache if refresh fails
             if self._menu_cache is None:
                 self._menu_cache = []
+
+    async def _sync_vector_db(self):
+        """Index menu items into ChromaDB if out of sync."""
+        try:
+            from app.ai_services.vector_db_service import get_vector_db_service
+            vdb = get_vector_db_service()
+
+            # Skip if counts match (menu hasn't changed)
+            if vdb.menu_collection.count() == len(self._menu_cache):
+                return
+
+            # Clear and re-index
+            vdb.clear_collection()
+            items_for_index = [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "description": item.get("description", ""),
+                    "category": item.get("category", "Other"),
+                    "price": item.get("price", 0),
+                }
+                for item in self._menu_cache
+                if item.get("price", 0) > 0
+            ]
+            if items_for_index:
+                await vdb.bulk_index_menu_items(items_for_index)
+                logger.info("vector_db_synced", item_count=len(items_for_index))
+        except Exception as e:
+            # Non-critical — semantic search degrades to category fallback
+            logger.debug("vector_db_sync_skipped", error=str(e))
 
     async def start_background_refresh(self):
         """Start background refresh task."""
@@ -213,11 +253,10 @@ class MenuPreloader:
         # Apply meal period filtering/prioritization
         if meal_period:
             if strict_meal_filter:
-                # Strict filter - ONLY show items explicitly for current meal period
-                # Do NOT include "All Day" items when browsing (too permissive)
+                # Strict filter - show items for current meal period + "All Day" items
                 def is_for_meal_strict(item):
                     meal_types = item.get("meal_types", [])
-                    return meal_period in meal_types
+                    return meal_period in meal_types or "All Day" in meal_types
 
                 available_items = [item for item in available_items if is_for_meal_strict(item)]
             elif prioritize_meal:
@@ -330,6 +369,82 @@ class MenuPreloader:
             return best_match
 
         return None
+
+    def get_similar_items(self, query: str, limit: int = 10, exclude_ids: Optional[set] = None) -> tuple[List[Dict], str]:
+        """
+        Find items similar to query by category using semantic similarity.
+
+        Strategy:
+        1. Semantic search via ChromaDB (sentence-transformers embeddings)
+        2. Fallback: match query against category names
+
+        Args:
+            query: The search term that had no direct matches
+            limit: Max items to return
+            exclude_ids: Item IDs to exclude (e.g. items already in cart)
+
+        Returns:
+            (items, category_name) — list of similar items and the category used
+        """
+        if not self._menu_cache:
+            return [], ""
+
+        exclude_ids = exclude_ids or set()
+
+        # Build category index from cache
+        categories = {}
+        for item in self._menu_cache:
+            if item.get("price", 0) <= 0 or not item.get("is_available", True):
+                continue
+            cat = item.get("category", "Other")
+            categories.setdefault(cat, []).append(item)
+
+        # Step 1: Semantic search via VectorDB (ChromaDB + sentence-transformers)
+        try:
+            from app.ai_services.vector_db_service import get_vector_db_service
+            vdb = get_vector_db_service()
+
+            if vdb.menu_collection.count() > 0:
+                # Both generate_embedding and collection.query are synchronous
+                query_embedding = vdb.embedding_service.generate_embedding(query)
+                results = vdb.menu_collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=5,
+                    include=["metadatas", "distances"]
+                )
+
+                if results and results['ids'] and results['ids'][0]:
+                    # Use category from top semantic match
+                    top_category = results['metadatas'][0][0].get('category', '')
+                    if top_category and top_category in categories:
+                        filtered = [i for i in categories[top_category] if i["id"] not in exclude_ids]
+                        if filtered:
+                            logger.info("similar_items_semantic", query=query, category=top_category, count=len(filtered))
+                            return filtered[:limit], top_category
+        except Exception as e:
+            logger.debug("semantic_similar_items_fallback", error=str(e))
+
+        # Step 2: Fallback — match query against category names
+        query_lower = query.lower().strip()
+        for cat_name, cat_items in categories.items():
+            if query_lower in cat_name.lower() or cat_name.lower() in query_lower:
+                filtered = [i for i in cat_items if i["id"] not in exclude_ids]
+                return filtered[:limit], cat_name
+
+        return [], ""
+
+    def get_category_items(self, category: str, limit: int = 10, exclude_ids: Optional[set] = None) -> List[Dict]:
+        """Get available items from a specific category."""
+        if not self._menu_cache:
+            return []
+        exclude_ids = exclude_ids or set()
+        return [
+            i for i in self._menu_cache
+            if i.get("category") == category
+            and i.get("price", 0) > 0
+            and i.get("is_available", True)
+            and i["id"] not in exclude_ids
+        ][:limit]
 
 
 # ============================================================================

@@ -371,10 +371,10 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             is_browsing = not query or query.lower() in ["", "all", "show all", "everything", "menu", "show menu"]
 
             if is_browsing:
-                # Browsing: strict filter to current meal period, use MenuCard
-                items = preloader.search(query, meal_period=meal_period, strict_meal_filter=True)
+                # Browsing: show all items — frontend tabs handle meal period filtering
+                items = preloader.search(query, meal_period=None)
                 if not items:
-                    return f"No items available for {meal_period} right now. Try a different search?"
+                    return "The menu is currently empty. Please try again later."
 
                 # Log event with items for ordinal resolution ("option 1", "first one")
                 tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
@@ -405,7 +405,27 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 all_matching_items = preloader.search(query, meal_period=None)
 
                 if not all_matching_items:
-                    return f"No items found for '{query}'. Try a different search?"
+                    # No match — upsell similar items from the same category
+                    similar_items, category = preloader.get_similar_items(query)
+                    if similar_items:
+                        emit_search_results(
+                            session_id=session_id,
+                            query=query,
+                            items=[{**i, "is_available_now": True} for i in similar_items[:10]],
+                            current_meal_period=meal_period,
+                            available_count=len(similar_items[:10]),
+                            unavailable_count=0
+                        )
+                        emit_quick_replies(session_id, [
+                            {"label": "🔍 Search Again", "action": "search for an item"},
+                            {"label": "📋 Full Menu", "action": "show menu"},
+                            {"label": "🛒 View Cart", "action": "view cart"},
+                        ])
+                        return (
+                            f"No exact match for '{query}', but here are similar items "
+                            f"from our {category} category. Would you like any of these?"
+                        )
+                    return f"No items found for '{query}'. Try searching for something else or say 'show menu' to browse!"
 
                 # Check availability for each item
                 def check_available(item):
@@ -476,14 +496,21 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                         return f"I found {items_with_availability[0]['name']}! Would you like to add it to your cart?"
                     return f"I found {available_count} '{query}' options available now. Which one would you like?"
                 else:
-                    # No items available now - ALSO show menu card with available items (upselling)
-                    available_items = preloader.search("", meal_period=meal_period, strict_meal_filter=True)
+                    # No items available now — upsell similar items from same category
+                    matched_ids = {i["id"] for i in items_with_availability}
+                    similar_items, category = preloader.get_similar_items(query, exclude_ids=matched_ids)
 
-                    if available_items:
-                        # Emit SECOND card: MenuCard with currently available items
-                        emit_menu_data(session_id, available_items[:30], meal_period)
+                    if similar_items:
+                        emit_search_results(
+                            session_id=session_id,
+                            query=f"More from {category}",
+                            items=[{**i, "is_available_now": True} for i in similar_items[:10]],
+                            current_meal_period=meal_period,
+                            available_count=len(similar_items[:10]),
+                            unavailable_count=0
+                        )
 
-                    # Collect ALL unique meal periods from unavailable items
+                    # Collect available times for the unavailable items
                     all_meal_types = set()
                     for item in items_with_availability:
                         mt = item.get("meal_types", [])
@@ -500,20 +527,13 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                         f"{m} ({meal_time_info.get(m, '')})" for m in sorted(all_meal_types)
                     ) or "other meal times"
 
-                    # Build explicit response - LLM must convey this to the user
-                    if available_items:
-                        return (
-                            f"[SEARCH RESULTS DISPLAYED - {unavailable_count} '{query}' items, NONE available now] "
-                            f"'{query.title()}' is only available during {available_times}. "
-                            f"It's currently {meal_period} time, so these can't be ordered right now. "
-                            f"I've shown our {meal_period.lower()} menu with {len(available_items)} items you can order instead!"
-                        )
-                    else:
-                        return (
-                            f"[SEARCH RESULTS DISPLAYED - {unavailable_count} '{query}' items, NONE available now] "
-                            f"'{query.title()}' is only available during {available_times}. "
-                            f"It's currently {meal_period} time, so these can't be ordered right now."
-                        )
+                    msg = (
+                        f"'{query.title()}' is only available during {available_times}. "
+                        f"It's currently {meal_period} time."
+                    )
+                    if similar_items:
+                        msg += f" Here are {len(similar_items[:10])} similar items from {category} you can order now!"
+                    return msg
 
         except Exception as e:
             logger.error("search_menu_failed", error=str(e), session_id=session_id)
@@ -536,7 +556,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message confirming all items added.
         """
-        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies, emit_search_results
         from app.core.preloader import get_menu_preloader
         from app.core.session_events import get_sync_session_tracker
 
@@ -551,6 +571,8 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Parse "item:qty, item:qty, ..." format
             pairs = [p.strip() for p in items_with_quantities.split(",") if p.strip()]
             added_items = []
+            added_categories = set()
+            added_ids = set()
             failed_items = []
             cart = None
 
@@ -604,6 +626,8 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                     price=price
                 )
                 added_items.append(f"{quantity}x {name}")
+                added_categories.add(found_item.get("category", "Other"))
+                added_ids.add(found_item["id"])
 
             if not added_items:
                 return f"I couldn't find these items on our menu: {', '.join(failed_items)}. Try searching first?"
@@ -611,6 +635,29 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Emit ONE cart update after all items added
             if cart:
                 emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Upsell: show similar items from the same category
+            upsell_items = []
+            upsell_category = ""
+            # Also exclude items already in cart
+            cart_ids = {str(ci.get("item_id", "")) for ci in (cart.get("items", []) if cart else [])}
+            exclude = added_ids | cart_ids
+            for cat in added_categories:
+                upsell_items = preloader.get_category_items(cat, limit=5, exclude_ids=exclude)
+                if upsell_items:
+                    upsell_category = cat
+                    break
+
+            if upsell_items:
+                from app.core.preloader import get_current_meal_period
+                emit_search_results(
+                    session_id=session_id,
+                    query=f"You might also like ({upsell_category})",
+                    items=[{**i, "is_available_now": True} for i in upsell_items],
+                    current_meal_period=get_current_meal_period(),
+                    available_count=len(upsell_items),
+                    unavailable_count=0
+                )
 
             # Emit quick replies for cart actions
             emit_quick_replies(session_id, [
@@ -626,7 +673,10 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 msg += f" Cart total: ₹{cart['total']:.0f} ({cart['item_count']} items)."
             if failed_items:
                 msg += f"\nCouldn't find: {', '.join(failed_items)}."
-            msg += " Anything else?"
+            if upsell_items:
+                msg += f" Want to add anything else from {upsell_category}?"
+            else:
+                msg += " Anything else?"
             return msg
 
         except Exception as e:
