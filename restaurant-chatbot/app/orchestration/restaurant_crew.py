@@ -432,7 +432,7 @@ def _summarize_old_conversation(messages: List[str]) -> str:
         return "general conversation about restaurant services"
 
 
-def create_restaurant_crew_fixed(session_id: str, customer_id: Optional[str] = None) -> Crew:
+def create_restaurant_crew_fixed(session_id: str, customer_id: Optional[str] = None, source: str = "web") -> Crew:
     """
     Create unified restaurant crew with multiple agents.
 
@@ -669,8 +669,8 @@ When customer asks about food, menu, or ordering, delegate to Kavya the Food Ord
     # ========================================================================
     # TASK - Single task assigned to food ordering agent (can delegate to booking)
     # ========================================================================
-    customer_request_task = Task(
-        description="""User: {user_input}
+    # --- Task description: web (unchanged from original) ---
+    _WEB_TASK = """User: {user_input}
 Context: {semantic_context}
 History: {context}
 
@@ -678,7 +678,25 @@ RULES:
 - Always use tools. Return tool output as-is.
 - LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words like "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely: "cart mein add ho gaya", "menu check karo". Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"
 - LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script). Example: "Unga cart la 2 Masala Dosa add aaiduchu, total ₹250. Vera enna venum?"
-- Keep food names, prices, order IDs in English always.""",
+- Keep food names, prices, order IDs in English always."""
+
+    # --- Task description: WhatsApp ---
+    _WHATSAPP_TASK = """User: {user_input}
+Context: {semantic_context}
+History: {context}
+
+RULES:
+- Always use tools. Return tool output as-is.
+- Keep responses concise (under 300 words). Use *bold* for emphasis.
+- Use emojis for structure (🍽️ 🛒 ✅ 💳). Format lists with emojis or numbers, not bullets.
+- Don't reference UI cards, buttons, or visual elements — the user is on WhatsApp.
+- For large menus, guide the user to pick a category first (e.g. "Starters, Curries, Biryani...") instead of listing everything.
+- LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Mix English freely.
+- LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script).
+- Keep food names, prices, order IDs in English always."""
+
+    customer_request_task = Task(
+        description=_WHATSAPP_TASK if source == "whatsapp" else _WEB_TASK,
         expected_output="Tool output (human-friendly message from tool)",
         agent=food_ordering_agent,
     )
@@ -777,13 +795,13 @@ async def process_with_restaurant_crew(
     # =========================================================================
     # AGENT PROCESSING
     # =========================================================================
-    # Get or create crew (cached per session)
+    # Get or create crew (cached per session — non-streaming path is web-only)
     global _CREW_CACHE, _CREW_VERSION
     cache_key = f"{session_id}:v{_CREW_VERSION}"
 
     if cache_key not in _CREW_CACHE:
         logger.info("creating_restaurant_crew", session_id=session_id, version=_CREW_VERSION)
-        _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id, customer_id=user_id)
+        _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id, customer_id=user_id, source="web")
     else:
         logger.debug("reusing_cached_crew", session_id=session_id)
 
@@ -959,7 +977,8 @@ async def process_with_agui_streaming(
     welcome_msg: Optional[str] = None,
     device_id: Optional[str] = None,
     language: str = "English",
-    voice_mode: bool = False
+    voice_mode: bool = False,
+    source: str = "web"
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Process user message with AG-UI event streaming.
@@ -1031,14 +1050,14 @@ async def process_with_agui_streaming(
             emitter.emit_activity("checking", "Checking your preferences...")
             logger.debug("entity_graph_context", session_id=session_id, context=semantic_context[:100])
 
-        # Get or create crew
+        # Get or create crew (cached per session+source — web and whatsapp use different prompts)
         global _CREW_CACHE, _CREW_VERSION
         cache_key = f"{session_id}:v{_CREW_VERSION}"
 
         if cache_key not in _CREW_CACHE:
             emitter.emit_activity("thinking", "Setting things up...")
-            logger.info("creating_restaurant_crew", session_id=session_id, version=_CREW_VERSION)
-            _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id, customer_id=user_id)
+            logger.info("creating_restaurant_crew", session_id=session_id, version=_CREW_VERSION, source=source)
+            _CREW_CACHE[cache_key] = create_restaurant_crew_fixed(session_id, customer_id=user_id, source=source)
 
         crew = _CREW_CACHE[cache_key]
 

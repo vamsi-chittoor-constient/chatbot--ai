@@ -218,6 +218,8 @@ services:
         condition: service_healthy
       petpooja-app:
         condition: service_healthy
+      whatsapp-bridge:
+        condition: service_healthy
     networks:
       - a24-network
     volumes:
@@ -228,6 +230,41 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # ===========================================================================
+  # MICROSERVICE 3: WhatsApp Bridge (Meta Business API <-> Chatbot)
+  # ===========================================================================
+
+  whatsapp-bridge:
+    build:
+      context: ./whatsapp
+      dockerfile: Dockerfile
+    container_name: a24-whatsapp-bridge
+    restart: unless-stopped
+    expose:
+      - "8002"
+    ports:
+      - "8002:8002"  # Expose for direct testing
+    env_file:
+      - ./whatsapp/.env
+    environment:
+      # Override WebSocket URL to use Docker service name
+      - CHATBOT_WS_BASE_URL=ws://chatbot-app:8000/api/v1/chat
+      # Logging
+      - LOG_LEVEL=INFO
+    depends_on:
+      chatbot-app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - a24-network
+    volumes:
+      - app-logs:/app/logs
 
 # =============================================================================
 # Usage Commands:

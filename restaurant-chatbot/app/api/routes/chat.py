@@ -667,6 +667,91 @@ async def chat_endpoint(
             except Exception as e:
                 logger.warning(f"Session token validation failed: {str(e)}")
 
+        # ========================================================================
+        # WHATSAPP SESSION AUTO-AUTH (bypass phone/OTP form flow)
+        # ========================================================================
+        # WhatsApp sessions use session_id prefix "wa-" followed by phone number.
+        # These users are already phone-verified by Meta — skip form auth entirely.
+        elif session_id.startswith("wa-"):
+            wa_phone_raw = session_id[3:]  # Strip "wa-" prefix to get phone number
+            # Normalize: WhatsApp sends "919876543210", we store "+919876543210"
+            if not wa_phone_raw.startswith("+"):
+                wa_phone_raw = "+" + wa_phone_raw
+
+            logger.info(
+                "WhatsApp session detected, auto-authenticating",
+                session_id=session_id,
+                phone=wa_phone_raw[:6] + "****"
+            )
+
+            try:
+                from app.features.user_management.tools.otp_tools import check_user_exists, create_user
+
+                user_check = await check_user_exists(phone_number=wa_phone_raw)
+
+                if user_check.get("success") and user_check.get("data", {}).get("exists"):
+                    # Existing user
+                    user_data = user_check["data"]["user"]
+                    is_authenticated = True
+                    authenticated_user_name = user_data.get("full_name") or user_data.get("name") or "WhatsApp User"
+                    authenticated_user_id = str(user_data.get("user_id") or user_data.get("id"))
+                    authenticated_phone = wa_phone_raw
+                else:
+                    # New user — auto-register (phone already verified by Meta)
+                    create_result = await create_user(
+                        phone_number=wa_phone_raw,
+                        full_name="WhatsApp User"
+                    )
+                    if create_result.get("success"):
+                        user_data = create_result["data"]["user"]
+                        is_authenticated = True
+                        authenticated_user_name = user_data.get("full_name") or "WhatsApp User"
+                        authenticated_user_id = str(user_data.get("user_id") or user_data.get("id"))
+                        authenticated_phone = wa_phone_raw
+                    else:
+                        # Fallback: let them through as guest
+                        is_authenticated = True
+                        authenticated_user_name = "WhatsApp User"
+                        authenticated_user_id = None
+                        authenticated_phone = wa_phone_raw
+
+                # Update connection metadata
+                if session_id in websocket_manager.connection_metadata:
+                    websocket_manager.connection_metadata[session_id]["user_id"] = authenticated_user_id
+                    websocket_manager.connection_metadata[session_id]["user_name"] = authenticated_user_name
+                    websocket_manager.connection_metadata[session_id]["phone_number"] = authenticated_phone
+                    websocket_manager.connection_metadata[session_id]["auth_state"] = "authenticated"
+                    websocket_manager.connection_metadata[session_id]["source"] = "whatsapp"
+
+                # Manage cart ownership
+                if authenticated_user_id:
+                    await manage_cart_ownership(session_id, authenticated_user_id)
+
+                # Update session in Redis
+                await session_manager.update_session(
+                    session_id,
+                    is_authenticated=True,
+                    user_id=authenticated_user_id,
+                    phone_number=authenticated_phone,
+                    metadata={"user_name": authenticated_user_name, "source": "whatsapp"}
+                )
+
+                logger.info(
+                    "WhatsApp user auto-authenticated",
+                    session_id=session_id,
+                    user_id=authenticated_user_id,
+                    user_name=authenticated_user_name
+                )
+
+            except Exception as e:
+                logger.error(f"WhatsApp auto-auth failed: {str(e)}", exc_info=True)
+                # Still let them through as guest
+                is_authenticated = True
+                authenticated_user_name = "WhatsApp User"
+                authenticated_user_id = None
+                authenticated_phone = session_id[3:]
+        # ========================================================================
+
         # If not authenticated and AUTH_REQUIRED, start phone auth flow
         if not is_authenticated and config.AUTH_REQUIRED:
             # Check if auth is already in progress or completed for this session
@@ -1865,6 +1950,10 @@ async def process_message_with_ai(
                 # Process message with AG-UI streaming
                 # Pass user_id from authenticated session (available after OTP verification at session start)
                 authenticated_user_id = session_data.user_id if session_data and session_data.is_authenticated else None
+                # Read source from connection metadata (set once at connection time)
+                _conn_meta = websocket_manager.connection_metadata.get(session_id, {})
+                _source = _conn_meta.get("source", "web")
+
                 ai_response, cycle_metadata = await process_with_agui_streaming(
                     user_message=message,
                     session_id=session_id,
@@ -1872,7 +1961,8 @@ async def process_message_with_ai(
                     emitter=emitter,
                     user_id=authenticated_user_id,
                     welcome_msg=welcome_msg,
-                    language=language
+                    language=language,
+                    source=_source
                 )
             finally:
                 # Wait for event stream to finish naturally (flush queue)
