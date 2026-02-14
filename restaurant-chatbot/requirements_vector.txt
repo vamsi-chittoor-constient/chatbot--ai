@@ -1,3 +1,4 @@
 # Vector Database Dependencies for Semantic Search
+numpy<2.0  # chromadb 0.4.x uses np.float_ removed in numpy 2.0
 chromadb==0.4.22
 sentence-transformers==2.3.1  # For faster embeddings (optional, fallback to OpenAI)
