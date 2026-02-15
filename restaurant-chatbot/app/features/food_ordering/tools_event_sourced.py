@@ -171,8 +171,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             if isinstance(meal_types, str):
                 meal_types = [mt.strip() for mt in meal_types.split(",")]
 
-            # "All Day" period (late night) = no restrictions, all items available
-            if meal_period != "All Day" and meal_types and meal_period not in meal_types and "All Day" not in meal_types:
+            if meal_types and meal_period not in meal_types and "All Day" not in meal_types:
                 meal_time_info = {
                     "Breakfast": "6 AM - 11 AM",
                     "Lunch": "11 AM - 4 PM",
@@ -734,13 +733,12 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                     continue
 
                 # Check meal period availability
-                # "All Day" period (late night) = no restrictions, all items available
                 from app.core.preloader import get_current_meal_period
                 meal_period = get_current_meal_period()
                 item_meal_types = found_item.get("meal_types", [])
                 if isinstance(item_meal_types, str):
                     item_meal_types = [mt.strip() for mt in item_meal_types.split(",")]
-                if meal_period != "All Day" and item_meal_types and meal_period not in item_meal_types and "All Day" not in item_meal_types:
+                if item_meal_types and meal_period not in item_meal_types and "All Day" not in item_meal_types:
                     avail_times = ", ".join(m for m in item_meal_types if m != "All Day") or "other meal times"
                     failed_items.append(f"{found_item['name']} (only {avail_times})")
                     continue
@@ -900,13 +898,12 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                     continue
 
                 # Check meal period availability
-                # "All Day" period (late night) = no restrictions, all items available
                 from app.core.preloader import get_current_meal_period
                 meal_period = get_current_meal_period()
                 item_meal_types = found_item.get("meal_types", [])
                 if isinstance(item_meal_types, str):
                     item_meal_types = [mt.strip() for mt in item_meal_types.split(",")]
-                if meal_period != "All Day" and item_meal_types and meal_period not in item_meal_types and "All Day" not in item_meal_types:
+                if item_meal_types and meal_period not in item_meal_types and "All Day" not in item_meal_types:
                     avail_times = ", ".join(m for m in item_meal_types if m != "All Day") or "other meal times"
                     failed_adds.append(f"{found_item['name']} (only {avail_times})")
                     continue

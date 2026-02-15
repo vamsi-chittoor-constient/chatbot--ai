@@ -48,7 +48,22 @@ export const MenuCard = ({ data, onAddToCart }) => {
   // Filter items by meal period
   const filteredItems = useMemo(() => {
     if (activeMealTab === 'all') {
-      return items
+      // "All" tab shows only items available RIGHT NOW based on time of day.
+      // This prevents users from seeing (and trying to order) items the backend
+      // will reject because they're outside their meal-time window.
+      const currentPeriod = getMealPeriodByTime()
+      if (currentPeriod === 'all') {
+        // Late night (22:00–06:00): only "All Day" tagged items are orderable
+        return items.filter(item => {
+          const mealTypes = item.meal_types || ['All Day']
+          return mealTypes.includes('All Day')
+        })
+      }
+      // During a specific meal period: show items for that period + All Day
+      return items.filter(item => {
+        const mealTypes = item.meal_types || ['All Day']
+        return mealTypes.includes(currentPeriod) || mealTypes.includes('All Day')
+      })
     }
     return items.filter(item => {
       const mealTypes = item.meal_types || ['All Day']

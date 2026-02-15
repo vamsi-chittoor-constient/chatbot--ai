@@ -247,8 +247,7 @@ class MenuPreloader:
             available_items = matched_items
 
         # Apply meal period filtering/prioritization
-        # "All Day" period (late night) = no restrictions, skip filtering entirely
-        if meal_period and meal_period != "All Day":
+        if meal_period:
             if strict_meal_filter:
                 # Strict filter - show items for current meal period + "All Day" items
                 def is_for_meal_strict(item):
