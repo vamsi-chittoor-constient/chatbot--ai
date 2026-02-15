@@ -103,7 +103,8 @@ async def voice_chat_websocket(
     silence_frames = 0  # Counter for consecutive silent frames (hangover mechanism)
     # Mutable state container for sharing between main loop and background tasks
     # stop_requested: set by client control message to cancel TTS mid-stream
-    state = {"is_processing": False, "stop_requested": False}
+    # consecutive_hallucinations: prevents TTS echo feedback loops
+    state = {"is_processing": False, "stop_requested": False, "consecutive_hallucinations": 0}
     SAMPLE_RATE = 16000  # All VAD engines work at 16kHz
     VAD_CHUNK_SIZE = 512  # Chunk size (32ms at 16kHz)
 
@@ -506,34 +507,53 @@ async def process_speech_segment(
                     _hallucination_reason = f"garbage_pattern: {pattern}"
                     break
 
-        # Handle hallucination: ask user to repeat instead of silently dropping
+        # Handle hallucination: ask user to repeat (with feedback-loop prevention)
         if _is_hallucination:
+            if state is not None:
+                state["consecutive_hallucinations"] = state.get("consecutive_hallucinations", 0) + 1
+            _consec = state.get("consecutive_hallucinations", 1) if state else 1
+
             logger.warning(
                 "voice_hallucination_detected",
                 session_id=session_id,
                 reason=_hallucination_reason,
-                transcript=transcript_text[:100]
+                transcript=transcript_text[:100],
+                consecutive=_consec
             )
-            # Ask user to repeat (send as response so they get audio feedback)
+
+            # After 3+ consecutive hallucinations, silently drop to break the loop.
+            # The VAD is likely picking up echo/ambient noise, not real speech.
+            if _consec >= 3:
+                logger.info("voice_hallucination_suppressed", session_id=session_id, consecutive=_consec)
+                await _safe_send(websocket, {"type": "processing_end"})
+                if state is not None:
+                    state["is_processing"] = False
+                return
+
+            # First hallucination: send text + TTS so user knows to repeat.
+            # Second+: send text only (NO TTS) to avoid echo feedback loop.
             _repeat_msg = "I'm sorry, I didn't catch that clearly. Could you please repeat?"
             await _safe_send(websocket, {"type": "response_text", "text": _repeat_msg})
-            # Also generate TTS so user hears it
-            try:
-                client = await get_openai_client()
-                await _safe_send(websocket, {"type": "audio_start"})
-                async with client.audio.speech.with_streaming_response.create(
-                    model="tts-1", voice="nova", input=_repeat_msg,
-                    response_format="pcm", speed=1.0
-                ) as tts_response:
-                    async for chunk in tts_response.iter_bytes(chunk_size=4096):
-                        if chunk:
-                            await _safe_send(websocket, {
-                                "type": "audio_chunk",
-                                "audio": base64.b64encode(chunk).decode('utf-8')
-                            })
-                await _safe_send(websocket, {"type": "audio_end"})
-            except Exception as _tts_err:
-                logger.debug("hallucination_tts_failed", error=str(_tts_err))
+
+            if _consec <= 1:
+                # Only TTS on the FIRST hallucination; subsequent ones are text-only
+                try:
+                    client = await get_openai_client()
+                    await _safe_send(websocket, {"type": "audio_start"})
+                    async with client.audio.speech.with_streaming_response.create(
+                        model="tts-1", voice="nova", input=_repeat_msg,
+                        response_format="pcm", speed=1.0
+                    ) as tts_response:
+                        async for chunk in tts_response.iter_bytes(chunk_size=4096):
+                            if chunk:
+                                await _safe_send(websocket, {
+                                    "type": "audio_chunk",
+                                    "audio": base64.b64encode(chunk).decode('utf-8')
+                                })
+                    await _safe_send(websocket, {"type": "audio_end"})
+                except Exception as _tts_err:
+                    logger.debug("hallucination_tts_failed", error=str(_tts_err))
+
             await _safe_send(websocket, {"type": "processing_end"})
             if state is not None:
                 state["is_processing"] = False
@@ -544,6 +564,10 @@ async def process_speech_segment(
             if state is not None:
                 state["is_processing"] = False
             return
+
+        # Valid transcript — reset consecutive hallucination counter
+        if state is not None:
+            state["consecutive_hallucinations"] = 0
 
         logger.info(
             "voice_transcript",
