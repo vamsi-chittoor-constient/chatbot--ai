@@ -18,9 +18,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 COPY requirements.txt ./
-# Install CPU-only torch first (needed by VAD; avoids downloading 5GB+ CUDA packages)
+# Install CPU-only torch+torchaudio first (needed by silero-vad; avoids 5GB+ CUDA packages)
+# IMPORTANT: torchaudio MUST be here — silero-vad depends on it, and pip would pull
+# the CUDA version from default PyPI during requirements.txt install, which crashes
 RUN pip install --upgrade pip && \
-    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     pip install -r requirements.txt
 
 # Pre-download chromadb's default ONNX embedding model (79MB)

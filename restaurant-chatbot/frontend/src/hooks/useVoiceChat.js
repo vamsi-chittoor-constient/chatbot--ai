@@ -20,9 +20,24 @@ export function useVoiceChat(sessionId, onEvent) {
     const voiceModeEnabledRef = useRef(false);
     const isAISpeakingRef = useRef(false); // Ref for instant access in audio processor
     const currentSourceRef = useRef(null); // Track current playing AudioBufferSource for stop
+    const languageRef = useRef('English'); // Track language for reconnect
+    const reconnectTimeoutRef = useRef(null); // Track reconnect timeout for cleanup
 
     const connect = useCallback((language = 'English') => {
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
+        languageRef.current = language; // Store for reconnect
+
+        // Clear any pending reconnect
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
+
+        if (socketRef.current) {
+            // Remove onclose BEFORE closing to prevent auto-reconnect from
+            // firing when we intentionally close for a language switch / reconnect.
+            // Without this, onclose schedules a 3s reconnect that creates an
+            // infinite connect-disconnect loop (~4s cycle).
+            socketRef.current.onclose = null;
             socketRef.current.close();
         }
 
@@ -45,8 +60,19 @@ export function useVoiceChat(sessionId, onEvent) {
             socket.onclose = (event) => {
                 console.log('Voice WebSocket disconnected:', event.code, event.reason);
                 setIsConnected(false);
-                setIsRecording(false);
-                stopMicrophoneStream();
+
+                // Only stop mic if voice mode is NOT active
+                // (keeps mic running during brief reconnects so audio flows immediately)
+                if (!voiceModeEnabledRef.current) {
+                    setIsRecording(false);
+                    stopMicrophoneStream();
+                }
+
+                // Auto-reconnect after 3 seconds (like chat WebSocket)
+                reconnectTimeoutRef.current = setTimeout(() => {
+                    console.log('Voice WebSocket auto-reconnecting...');
+                    connect(languageRef.current);
+                }, 3000);
             };
 
             socket.onerror = (err) => {
@@ -337,6 +363,12 @@ export function useVoiceChat(sessionId, onEvent) {
             setVoiceModeEnabled(true);
             voiceModeEnabledRef.current = true;
 
+            // Ensure voice WebSocket is connected before starting mic
+            if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+                console.log('Voice WebSocket not open, reconnecting...');
+                connect(languageRef.current);
+            }
+
             // Start microphone streaming
             await startMicrophoneStream();
         } else {
@@ -352,14 +384,22 @@ export function useVoiceChat(sessionId, onEvent) {
             // Stop microphone
             stopMicrophoneStream();
         }
-    }, [voiceModeEnabled, stopAgentSpeech]);
+    }, [voiceModeEnabled, stopAgentSpeech, connect]);
 
     // Cleanup on unmount
     useEffect(() => {
         return () => {
+            // Cancel any pending reconnect
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
+            }
             stopMicrophoneStream();
             if (socketRef.current) {
+                // Remove onclose to prevent reconnect during cleanup
+                socketRef.current.onclose = null;
                 socketRef.current.close();
+                socketRef.current = null;
             }
         };
     }, []);

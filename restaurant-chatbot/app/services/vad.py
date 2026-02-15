@@ -273,15 +273,19 @@ def get_vad() -> BaseVAD:
         engine = VAD_ENGINE
         logger.info(f"Initializing VAD engine: {engine}")
 
-        if engine == "silero":
-            _vad_instance = SileroVAD()
-        elif engine == "ten":
-            _vad_instance = TenVAD()
-        elif engine == "webrtc":
+        try:
+            if engine == "silero":
+                _vad_instance = SileroVAD()
+            elif engine == "ten":
+                _vad_instance = TenVAD()
+            elif engine == "webrtc":
+                _vad_instance = WebRTCVAD()
+            else:
+                logger.warning(f"Unknown VAD engine '{engine}', falling back to WebRTC")
+                _vad_instance = WebRTCVAD()
+        except Exception as e:
+            logger.warning(f"Failed to load VAD engine '{engine}': {e}. Falling back to WebRTC.")
             _vad_instance = WebRTCVAD()
-        else:
-            logger.warning(f"Unknown VAD engine '{engine}', falling back to Silero")
-            _vad_instance = SileroVAD()
 
     return _vad_instance
 
