@@ -551,13 +551,34 @@ async def process_speech_segment(
             transcript=transcript_text
         )
 
-        # Send transcript to client (already in English letters from Whisper)
+        # Normalize transcript to clean English for non-English voice.
+        # Whisper with language="en" is inconsistent on Hindi/Tamil speech —
+        # sometimes outputs English translation, sometimes Romanized Hinglish.
+        # One GPT-4o-mini call makes it consistently English for both UI and crew.
+        if language != "English" and language in ["Hindi", "Tamil"]:
+            try:
+                _norm_resp = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Translate to English. Keep food names, numbers, prices unchanged. Output ONLY the translation."},
+                        {"role": "user", "content": transcript_text}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                normalized = _norm_resp.choices[0].message.content.strip()
+                logger.info("voice_transcript_normalized", original=transcript_text, english=normalized)
+                transcript_text = normalized
+            except Exception as e:
+                logger.warning("voice_transcript_normalize_failed", error=str(e))
+
+        # Send transcript to client (clean English for display)
         await websocket.send_json({
             "type": "transcript",
             "text": transcript_text
         })
 
-        # Process with chat agent — crew translates to proper English internally for tools
+        # Process with chat agent (same clean English text)
         response_text, deferred_quick_replies = await process_with_chat_agent(
             transcript_text,
             session_id,
