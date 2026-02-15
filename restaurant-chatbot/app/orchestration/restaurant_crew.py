@@ -568,16 +568,10 @@ When the customer asks to remove 2+ items, use correct_order() with empty add_it
 - "delete pizza and garlic bread from cart" → correct_order(remove_items="pizza, garlic bread", add_items="")
 - NEVER call remove_from_cart() twice in one turn - use correct_order() instead
 
-🚨 CORRECTION RULE - WHEN CUSTOMER CORRECTS AN ORDER:
-When a customer says "no, I meant...", "that's wrong", "I actually asked for..." etc.:
-- NEVER call clear_cart(). Clearing the cart loses everything and forces a full re-order.
-- USE correct_order() FOR CORRECTIONS - it removes wrong items and adds correct items in ONE call:
-  • Example: "I said ghee masala dosai, not normal masala dosai"
-    → correct_order(remove_items="masala dosai", add_items="ghee masala dosai:2")
-  • Example: "I wanted ghee masala and ghee onion, not normal"
-    → correct_order(remove_items="masala dosai, onion dosai", add_items="ghee masala dosai:2, ghee onion dosai:2")
-- For quantity-only changes: use update_quantity("item name", correct_quantity)
-- Only call clear_cart() when the customer EXPLICITLY says "clear my cart", "empty everything", or "start over".
+🚨 CLEAR CART RULE:
+- "clear cart", "clear my cart", "empty cart", "empty my cart", "empty everything", "remove everything", "start over" → call clear_cart() IMMEDIATELY. Do NOT call view_cart() for these. Do NOT ask for confirmation.
+- For CORRECTIONS ("no, I meant...", "that's wrong"), use correct_order() instead — never clear_cart() for corrections.
+- For quantity changes: use update_quantity("item name", correct_quantity)
 
 📝 OUTPUT FORMAT:
 - Return friendly, natural language responses (not JSON or technical data)
@@ -587,8 +581,8 @@ When a customer says "no, I meant...", "that's wrong", "I actually asked for..."
 - You are a restaurant assistant. ALL requests about food, cart, orders, payment are VALID.
 - NEVER say "I cannot comply", "I'm unable to", or refuse any restaurant-related request.
 - "show my cart" → call view_cart and share the result
-- "pay online" / "pay cash" / "card at counter" → call select_payment_method with the method
-- "checkout" → call checkout and guide them through payment
+- "pay online" / "payment" → payment is handled automatically after checkout (Razorpay online only)
+- "checkout" / "I want to checkout" / "place order" / "proceed to payment" → call checkout() IMMEDIATELY. Do NOT ask "would you like to continue?" or ask for confirmation. Just call the tool. Payment link is shown automatically after checkout.
 - When in doubt, USE THE APPROPRIATE TOOL and relay its result to the customer.
 
 You excel at understanding what customers mean, not just what they say:
@@ -619,7 +613,7 @@ When customer complains about food quality, service, wait time, or other issues:
         allow_delegation=True,
         respect_context_window=True,
         cache=False,
-        max_iter=5,  # Single-tool approach: correct_order handles multi-step corrections
+        max_iter=15,  # Needs enough iterations for tool call + observation + final answer
         max_retry_limit=1,
         reasoning=False,  # Disabled for speed
         memory=False,  # Disabled - uses Redis for state
@@ -1028,9 +1022,8 @@ async def process_with_agui_streaming(
     # (previously was in process_with_restaurant_crew which is not used by chat endpoint)
     msg_lower = user_message.lower()
 
-    # NOTE: Both Menu and Cart deterministic emits removed - tools in crew_agent.py already emit:
-    # - search_menu tool emits MENU_DATA (was causing duplicate MenuCards)
-    # - view_cart tool emits CART_DATA at crew_agent.py:682 (was causing duplicate CartCards)
+    # NOTE: Menu deterministic emit removed - search_menu tool handles it
+    # NOTE: Cart deterministic emit removed - view_cart tool handles it
 
     try:
         # =========================================================================
@@ -1179,7 +1172,8 @@ async def process_with_agui_streaming(
             r'\[(?:SEARCH RESULTS DISPLAYED|MENU CARD DISPLAYED|MENU DISPLAYED'
             r'|CART CARD DISPLAYED|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED'
             r'|INVALID QUANTITY|INVALID INSTRUCTIONS'
-            r'|CHECKOUT COMPLETE|PAYMENT CONFIRMED|PAYMENT LINK SENT)[^\]]*\]\s*',
+            r'|CHECKOUT COMPLETE|PAYMENT CONFIRMED|PAYMENT LINK SENT'
+            r'|RECEIPT DISPLAYED)[^\]]*\]\s*',
             '', response
         ).strip()
 
@@ -1197,38 +1191,33 @@ async def process_with_agui_streaming(
         # Stream the response word by word
         emitter.emit_full_text(response, chunk_size=1)
 
-        # Get quick replies AFTER streaming response (so they appear below the message)
-        # Uses GPT-4o-mini to classify response and determine appropriate buttons
-        # IMPORTANT: Use emitter.emit_quick_replies() for immediate/synchronous emission
-        # (not the global emit_quick_replies() which uses call_soon_threadsafe and can race)
+        # Classify quick replies NOW (while GPT-4o-mini processes, we can flush events)
+        # But EMIT them later — after all tool/payment events are flushed —
+        # so they don't get stripped by CART_DATA/PAYMENT_LINK/RECEIPT_LINK reducers.
+        quick_replies_to_emit = None
         try:
             from app.features.food_ordering.crew_agent import get_response_quick_replies, DEFAULT_QUICK_REPLIES
-            quick_replies = get_response_quick_replies(response)
-            if not quick_replies:
-                quick_replies = DEFAULT_QUICK_REPLIES
-            emitter.emit_quick_replies(quick_replies)
-            logger.debug("quick_replies_emitted_direct", session_id=session_id, count=len(quick_replies))
+            quick_replies_to_emit = get_response_quick_replies(response)
+            if not quick_replies_to_emit:
+                quick_replies_to_emit = DEFAULT_QUICK_REPLIES
         except Exception as e:
-            logger.warning("quick_reply_emit_failed", error=str(e))
-            # Last resort fallback - emit default buttons even if import/classification totally fails
-            try:
-                emitter.emit_quick_replies([
-                    {"label": "🍔 Show Menu", "action": "show menu"},
-                    {"label": "🛒 View Cart", "action": "view cart"},
-                    {"label": "✅ Checkout", "action": "checkout"},
-                    {"label": "❓ Help", "action": "help"},
-                ])
-            except Exception:
-                pass
+            logger.warning("quick_reply_classify_failed", error=str(e))
+            quick_replies_to_emit = [
+                {"label": "🍔 Show Menu", "action": "show menu"},
+                {"label": "🛒 View Cart", "action": "view cart"},
+                {"label": "✅ Checkout", "action": "checkout"},
+                {"label": "❓ Help", "action": "help"},
+            ]
 
         # Ensure activity indicator is cleared before finishing
         # (redundant safety - already called at line 758, but ensures it's sent after streaming)
         emitter.emit_activity_end()
 
-        # CRITICAL: Flush all pending tool events BEFORE RUN_FINISHED
-        # Tool events (SEARCH_RESULTS, MENU_DATA) are emitted from sync contexts (thread pool)
-        # and staged in _PENDING_EVENTS. This flush guarantees they're in the queue
-        # before RUN_FINISHED, eliminating the race condition.
+        # CRITICAL: Flush all pending tool events BEFORE quick replies and RUN_FINISHED.
+        # Tool events (SEARCH_RESULTS, MENU_DATA, RECEIPT_LINK) are emitted from sync
+        # contexts (thread pool) and staged in _PENDING_EVENTS. Flushing them first
+        # ensures they arrive on the frontend BEFORE quick replies, so the reducer
+        # doesn't strip quick_replies when processing data events.
         from app.core.agui_events import flush_pending_events
         flushed = flush_pending_events(session_id)
         if flushed > 0:
@@ -1270,12 +1259,22 @@ async def process_with_agui_streaming(
                     items=_items, order_type=_order_type,
                     subtotal=_subtotal, packaging_charges=_packaging
                 )
-                # Flush payment events so they're queued before RUN_FINISHED
+                # Flush payment events so they're queued before quick replies
                 flushed_payment = flush_pending_events(session_id)
                 if flushed_payment > 0:
                     logger.debug("payment_events_flushed", session_id=session_id, count=flushed_payment)
         except Exception as _pe:
             logger.warning("payment_workflow_trigger_failed", error=str(_pe), session_id=session_id)
+
+        # NOW emit quick replies — AFTER all tool/payment events are flushed.
+        # This guarantees quick replies are the last message before RUN_FINISHED
+        # and won't be stripped by data event reducers (CART_DATA, PAYMENT_LINK, etc.).
+        if quick_replies_to_emit:
+            try:
+                emitter.emit_quick_replies(quick_replies_to_emit)
+                logger.debug("quick_replies_emitted_last", session_id=session_id, count=len(quick_replies_to_emit))
+            except Exception:
+                pass
 
         # Emit run finished
         emitter.emit_run_finished(response)

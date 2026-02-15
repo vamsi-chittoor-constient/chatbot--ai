@@ -75,7 +75,7 @@ class SemanticMenuSearchTool(ToolBase):
 
         # Optional parameters with defaults
         limit = kwargs.get('limit', 10)
-        min_similarity = kwargs.get('min_similarity', 0.7)
+        min_similarity = kwargs.get('min_similarity', 0.85)
 
         if not isinstance(limit, int) or limit < 1 or limit > 50:
             raise ToolError("limit must be between 1 and 50", tool_name=self.name)

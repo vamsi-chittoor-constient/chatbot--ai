@@ -17,15 +17,21 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
-COPY requirements.txt requirements_vector.txt ./
-# Install CPU-only torch first (avoids downloading 5GB+ of CUDA/NVIDIA packages)
+COPY requirements.txt ./
+# Install CPU-only torch first (needed by VAD; avoids downloading 5GB+ CUDA packages)
 RUN pip install --upgrade pip && \
-    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    pip install -r requirements.txt && \
-    pip install -r requirements_vector.txt
+    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
 
-# Pre-download sentence-transformers model to avoid first-request delays
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || true
+# Pre-download chromadb's default ONNX embedding model (79MB)
+# so it doesn't download on first query at runtime
+RUN python -c "\
+import chromadb; \
+c = chromadb.EphemeralClient(); \
+col = c.create_collection('warmup'); \
+col.add(ids=['1'], documents=['warmup']); \
+c.delete_collection('warmup'); \
+print('ChromaDB ONNX model pre-downloaded')" || true
 
 # -----------------------------------------------------------------------------
 # Production Stage
@@ -60,6 +66,11 @@ COPY frontend/ ./frontend/
 COPY static/ ./static/
 COPY db/ ./db/
 COPY requirements.txt .
+
+# Pre-create CrewAI settings with tracing disabled (avoids 20s interactive prompt)
+RUN mkdir -p /home/appuser/.config/crewai && \
+    echo '{"tracing_disabled": true}' > /home/appuser/.config/crewai/settings.json && \
+    chown -R appuser:appuser /home/appuser/.config
 
 RUN mkdir -p /app/logs /app/data/chromadb && chown -R appuser:appuser /app
 

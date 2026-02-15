@@ -91,17 +91,10 @@ function aguiReducer(state, action) {
         total: action.payload.total,
         packaging_charge_per_item: action.payload.packaging_charge_per_item || 30,
       }
-      const existingCartIndex = state.messages.findIndex(msg => msg.type === 'cart')
-      if (existingCartIndex !== -1) {
-        // Update in place - keep position, just update data
-        const updated = [...state.messages]
-        updated[existingCartIndex] = { ...updated[existingCartIndex], data: newCartData, timestamp: new Date() }
-        return { ...state, messages: updated.filter(msg => msg.type !== 'quick_replies') }
-      }
-      // No existing cart - append new one
+      // Always place cart at the bottom — remove old cart and append fresh
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'cart' && msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'cart',
@@ -201,6 +194,24 @@ function aguiReducer(state, action) {
             payment_id: action.payload.payment_id,
             order_type: action.payload.order_type,
             quick_replies: action.payload.quick_replies || [],
+          },
+          timestamp: new Date(),
+        }],
+      }
+
+    case 'RECEIPT_LINK':
+      console.log('REDUCER: RECEIPT_LINK', action.payload)
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+          id: Date.now(),
+          role: 'system',
+          type: 'receipt_link',
+          data: {
+            order_number: action.payload.order_number,
+            amount: action.payload.amount,
+            download_url: action.payload.download_url,
+            items: action.payload.items || [],
           },
           timestamp: new Date(),
         }],

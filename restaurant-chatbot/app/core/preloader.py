@@ -84,8 +84,7 @@ class MenuPreloader:
                         mi.menu_item_is_recommended as is_recommended,
                         ARRAY_AGG(DISTINCT mt.meal_type_name)
                             FILTER (WHERE mt.meal_type_name IS NOT NULL) as meal_types,
-                        ARRAY_AGG(DISTINCT mc.menu_category_name)
-                            FILTER (WHERE mc.menu_category_name IS NOT NULL) as categories
+                        msc.sub_category_name as category
                     FROM menu_item mi
                     LEFT JOIN menu_item_availability_schedule mas
                         ON mi.menu_item_id = mas.menu_item_id
@@ -94,17 +93,14 @@ class MenuPreloader:
                     LEFT JOIN meal_type mt
                         ON mas.meal_type_id = mt.meal_type_id
                         AND mt.is_deleted = FALSE
-                    LEFT JOIN menu_item_category_mapping mcm
-                        ON mi.menu_item_id = mcm.menu_item_id
-                        AND mcm.is_deleted = FALSE
-                    LEFT JOIN menu_categories mc
-                        ON mcm.menu_category_id = mc.menu_category_id
-                        AND mc.is_deleted = FALSE
+                    LEFT JOIN menu_sub_categories msc
+                        ON mi.menu_sub_category_id = msc.menu_sub_category_id
+                        AND msc.is_deleted = FALSE
                     WHERE mi.is_deleted = FALSE
                     AND mi.menu_item_status = 'active'
                     GROUP BY mi.menu_item_id, mi.menu_item_name, mi.menu_item_price,
                              mi.menu_item_description, mi.menu_item_in_stock,
-                             mi.menu_item_is_recommended
+                             mi.menu_item_is_recommended, msc.sub_category_name
                     ORDER BY mi.menu_item_is_recommended DESC, mi.menu_item_name
                 """)
 
@@ -126,7 +122,7 @@ class MenuPreloader:
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
                         "meal_types": meal_types,
-                        "category": row['categories'][0] if row['categories'] and len(row['categories']) > 0 else "Other"
+                        "category": row['category'] or "Other"
                     })
                 self._last_refresh = datetime.now()
 
@@ -372,11 +368,10 @@ class MenuPreloader:
 
     def get_similar_items(self, query: str, limit: int = 10, exclude_ids: Optional[set] = None) -> tuple[List[Dict], str]:
         """
-        Find items similar to query by category using semantic similarity.
+        Find individually similar menu items using semantic search.
 
-        Strategy:
-        1. Semantic search via ChromaDB (sentence-transformers embeddings)
-        2. Fallback: match query against category names
+        Returns actual items that are semantically close to the query,
+        not an entire category dump.
 
         Args:
             query: The search term that had no direct matches
@@ -384,52 +379,115 @@ class MenuPreloader:
             exclude_ids: Item IDs to exclude (e.g. items already in cart)
 
         Returns:
-            (items, category_name) — list of similar items and the category used
+            (items, label) — list of similar items and a display label
         """
         if not self._menu_cache:
             return [], ""
 
         exclude_ids = exclude_ids or set()
 
-        # Build category index from cache
-        categories = {}
-        for item in self._menu_cache:
-            if item.get("price", 0) <= 0 or not item.get("is_available", True):
-                continue
-            cat = item.get("category", "Other")
-            categories.setdefault(cat, []).append(item)
+        # Build ID→item lookup from cache for fast matching
+        item_by_id = {
+            item["id"]: item
+            for item in self._menu_cache
+            if item.get("price", 0) > 0 and item.get("is_available", True)
+        }
 
-        # Step 1: Semantic search via VectorDB (ChromaDB + sentence-transformers)
+        # Step 1: Semantic search via VectorDB (item-level results)
         try:
             from app.ai_services.vector_db_service import get_vector_db_service
             vdb = get_vector_db_service()
 
             if vdb.menu_collection.count() > 0:
-                # Both generate_embedding and collection.query are synchronous
-                query_embedding = vdb.embedding_service.generate_embedding(query)
                 results = vdb.menu_collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=5,
+                    query_texts=[query],
+                    n_results=min(limit + len(exclude_ids), 20),
                     include=["metadatas", "distances"]
                 )
 
                 if results and results['ids'] and results['ids'][0]:
-                    # Use category from top semantic match
-                    top_category = results['metadatas'][0][0].get('category', '')
-                    if top_category and top_category in categories:
-                        filtered = [i for i in categories[top_category] if i["id"] not in exclude_ids]
-                        if filtered:
-                            logger.info("similar_items_semantic", query=query, category=top_category, count=len(filtered))
-                            return filtered[:limit], top_category
+                    # Log top 3 scores for debugging
+                    top_scores = [
+                        (results['metadatas'][0][i].get('name', ''), round(1 - float(results['distances'][0][i]) / 2, 3))
+                        for i in range(min(3, len(results['ids'][0])))
+                    ]
+                    logger.info("semantic_search_scores", query=query, top_scores=top_scores)
+
+                    similar = []
+                    for idx, item_id in enumerate(results['ids'][0]):
+                        if item_id in exclude_ids:
+                            continue
+
+                        distance = float(results['distances'][0][idx])
+                        similarity = 1 - (distance / 2)
+
+                        # Only include genuinely similar items (>0.85)
+                        # 0.85 in rescaled space = cosine_similarity > 0.7
+                        if similarity < 0.85:
+                            break  # distances are sorted, rest will be worse
+
+                        # Look up full item data from preloader cache
+                        cached_item = item_by_id.get(item_id)
+                        if cached_item:
+                            similar.append(cached_item)
+
+                        if len(similar) >= limit:
+                            break
+
+                    if similar:
+                        label = "similar items"
+                        logger.info(
+                            "similar_items_semantic",
+                            query=query,
+                            count=len(similar),
+                            items=[i["name"] for i in similar[:5]],
+                        )
+                        return similar, label
+                    else:
+                        top_sim = 1 - (float(results['distances'][0][0]) / 2)
+                        logger.info("similar_items_too_weak", query=query, top_similarity=round(top_sim, 3), top_item=results['metadatas'][0][0].get('name', ''))
         except Exception as e:
             logger.debug("semantic_similar_items_fallback", error=str(e))
 
         # Step 2: Fallback — match query against category names
         query_lower = query.lower().strip()
-        for cat_name, cat_items in categories.items():
-            if query_lower in cat_name.lower() or cat_name.lower() in query_lower:
-                filtered = [i for i in cat_items if i["id"] not in exclude_ids]
-                return filtered[:limit], cat_name
+        for item in self._menu_cache:
+            if item.get("price", 0) <= 0 or not item.get("is_available", True):
+                continue
+            cat = item.get("category", "Other")
+            if query_lower in cat.lower() or cat.lower() in query_lower:
+                cat_items = [
+                    i for i in self._menu_cache
+                    if i.get("category") == cat
+                    and i.get("price", 0) > 0
+                    and i.get("is_available", True)
+                    and i["id"] not in exclude_ids
+                ]
+                return cat_items[:limit], cat
+
+        # Step 3: No similar items at all — suggest popular alternatives
+        alternatives = [
+            item for item in self._menu_cache
+            if item.get("price", 0) > 0
+            and item.get("is_available", True)
+            and item.get("is_recommended", False)
+            and item["id"] not in exclude_ids
+        ]
+        # If not enough recommended items, pad with other available items
+        if len(alternatives) < limit:
+            alt_ids = {a["id"] for a in alternatives}
+            for item in self._menu_cache:
+                if (item.get("price", 0) > 0
+                    and item.get("is_available", True)
+                    and item["id"] not in exclude_ids
+                    and item["id"] not in alt_ids):
+                    alternatives.append(item)
+                    if len(alternatives) >= limit:
+                        break
+
+        if alternatives:
+            logger.info("similar_items_alternatives", query=query, count=len(alternatives[:limit]))
+            return alternatives[:limit], "popular alternatives"
 
         return [], ""
 

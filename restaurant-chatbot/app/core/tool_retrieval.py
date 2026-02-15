@@ -18,7 +18,7 @@ logger = structlog.get_logger(__name__)
 AgentType = Literal["food_ordering", "booking"]
 
 # =============================================================================
-# FOOD ORDERING AGENT TOOLS (24 tools)
+# FOOD ORDERING AGENT TOOLS (25 tools)
 # =============================================================================
 # IMPORTANT: These names MUST match the @tool("name") decorators in the actual
 # tool factories. Mismatches cause phantom tools that waste RAG retrieval slots.
@@ -51,7 +51,7 @@ FOOD_ORDERING_TOOLS = {
     },
 
     # =========================================================================
-    # Cart Management (7 tools)
+    # Cart Management (8 tools)
     # =========================================================================
     "add_to_cart": {
         "name": "add_to_cart",
@@ -112,6 +112,18 @@ FOOD_ORDERING_TOOLS = {
         "examples": ["remove burger", "delete pizza", "take out fries", "remove this"],
         "category": "cart_management",
         "priority": 7
+    },
+    "clear_cart": {
+        "name": "clear_cart",
+        "description": "Clear ALL items from the cart. Empties the entire cart so customer can start fresh.",
+        "usage": "When customer wants to clear cart, empty cart, remove everything, or start over",
+        "examples": [
+            "clear cart", "clear my cart", "empty cart", "empty my cart",
+            "remove everything", "start over", "delete everything from cart",
+            "clear all items", "empty everything"
+        ],
+        "category": "cart_management",
+        "priority": 8
     },
     "set_special_instructions": {
         "name": "set_special_instructions",
@@ -499,6 +511,10 @@ def get_relevant_tools_for_agent(
         # View cart intent
         if any(kw in msg_lower for kw in ["view cart", "show cart", "my cart", "what's in my cart", "show my cart"]):
             _must_include.append("view_cart")
+
+        # Clear cart intent
+        if any(kw in msg_lower for kw in ["clear cart", "empty cart", "clear my cart", "empty my cart", "remove everything", "start over"]):
+            _must_include.append("clear_cart")
 
         # Payment intent (natural language like "I want to pay online")
         if any(kw in msg_lower for kw in ["pay online", "pay cash", "pay by card", "payment", "pay now", "i want to pay"]):

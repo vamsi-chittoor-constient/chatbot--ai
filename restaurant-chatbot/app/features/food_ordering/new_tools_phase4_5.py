@@ -4,7 +4,7 @@ Phase 4 & 5 Missing Tools Implementation
 Order enhancements and restaurant policies/info tools.
 
 Implementation Date: 2025-12-21
-Total Tools: 5 (Phase 4: 3 tools, Phase 5: 2 tools)
+Total Tools: 7 (Phase 4: 3 tools, Phase 5: 4 tools)
 """
 
 from crewai.tools import tool
@@ -245,7 +245,7 @@ def create_order_enhancement_tools(session_id: str, customer_id: Optional[str] =
 
 
 # ============================================================================
-# PHASE 5: POLICIES & INFO (2 tools)
+# PHASE 5: POLICIES & INFO (4 tools)
 # ============================================================================
 
 def create_policy_info_tools(session_id: str):
@@ -257,7 +257,7 @@ def create_policy_info_tools(session_id: str):
         Get restaurant policies.
 
         Use this when customer asks "what's your refund policy?", "what's your cancellation policy?",
-        "what are your terms and conditions?", "privacy policy".
+        "what are your terms and conditions?", "privacy policy", "show restaurant policies".
 
         Args:
             policy_type: Type of policy - "refund", "cancellation", "privacy", "terms", or "all"
@@ -272,52 +272,78 @@ def create_policy_info_tools(session_id: str):
             await emit_tool_activity_async(session_id, "get_restaurant_policies")
 
             async with AsyncDBConnection() as db:
-                if policy_type == "all":
-                    query = """
-                        SELECT
-                            policy_name,
-                            policy_content,
-                            policy_type
-                        FROM restaurant_policy
-                        WHERE is_deleted = FALSE
-                          AND is_active = TRUE
-                        ORDER BY policy_type, policy_name
-                    """
-                    results = await db.fetch_all(query)
-                else:
-                    query = """
-                        SELECT
-                            policy_name,
-                            policy_content,
-                            policy_type
-                        FROM restaurant_policy
-                        WHERE is_deleted = FALSE
-                          AND is_active = TRUE
-                          AND LOWER(policy_type) = LOWER(%s)
-                        ORDER BY policy_name
-                    """
-                    results = await db.fetch_all(query, (policy_type,))
-
-                if not results:
-                    # Return default policies if none in database
-                    default_policies = {
-                        "refund": "Full refund available within 24 hours for quality issues or incorrect orders. Contact our support team with your order details.",
-                        "cancellation": "Orders can be cancelled within 5 minutes of placement for full refund. After kitchen starts preparation, cancellation requires manager approval.",
-                        "privacy": "We protect your personal information and never share it with third parties. Data is used only for order processing and improving our service.",
-                        "terms": "By ordering, you agree to our terms of service. All prices include applicable taxes. Delivery times are estimates and may vary."
-                    }
-
-                    if policy_type in default_policies:
-                        return f"**{policy_type.title()} Policy:**\n\n{default_policies[policy_type]}"
+                # Try restaurant_policy table first (correct column names)
+                try:
+                    if policy_type == "all":
+                        query = """
+                            SELECT
+                                restaurant_policy_title,
+                                restaurant_policy_description,
+                                restaurant_policy_category
+                            FROM restaurant_policy
+                            WHERE is_deleted = FALSE
+                              AND restaurant_is_active = TRUE
+                            ORDER BY restaurant_policy_category, restaurant_policy_title
+                        """
+                        results = await db.fetch_all(query)
                     else:
-                        return "For detailed policies, please contact our support team or visit our website."
+                        query = """
+                            SELECT
+                                restaurant_policy_title,
+                                restaurant_policy_description,
+                                restaurant_policy_category
+                            FROM restaurant_policy
+                            WHERE is_deleted = FALSE
+                              AND restaurant_is_active = TRUE
+                              AND LOWER(restaurant_policy_category) = LOWER(%s)
+                            ORDER BY restaurant_policy_title
+                        """
+                        results = await db.fetch_all(query, (policy_type,))
 
-                # Format response
+                    if results:
+                        response = "**Restaurant Policies:**\n\n"
+                        for row in results:
+                            response += f"**{row['restaurant_policy_title']}**\n{row['restaurant_policy_description']}\n\n"
+                        response += "If you have more questions, feel free to ask!"
+                        return response
+                except Exception:
+                    pass  # Table may be empty, fall through
+
+                # Fallback: read policies from restaurant_config.settings
+                config_query = """
+                    SELECT settings
+                    FROM restaurant_config
+                    LIMIT 1
+                """
+                config_row = await db.fetch_one(config_query)
+
+                if config_row and config_row['settings']:
+                    policies = config_row['settings'].get('policies', {})
+                    if policies:
+                        if policy_type != "all" and policy_type in policies:
+                            return f"**{policy_type.title()} Policy:**\n\n{policies[policy_type]}"
+
+                        response = "**Restaurant Policies:**\n\n"
+                        for ptype, content in policies.items():
+                            response += f"**{ptype.title()} Policy:**\n{content}\n\n"
+                        response += "If you have more questions, feel free to ask!"
+                        return response
+
+                # Final fallback: hardcoded defaults
+                default_policies = {
+                    "refund": "Full refund available within 24 hours for quality issues or incorrect orders. Contact our support team with your order details.",
+                    "cancellation": "Orders can be cancelled within 5 minutes of placement for full refund. After kitchen starts preparation, cancellation requires manager approval.",
+                    "privacy": "We protect your personal information and never share it with third parties. Data is used only for order processing and improving our service.",
+                    "terms": "By ordering, you agree to our terms of service. All prices include applicable taxes. Delivery times are estimates and may vary."
+                }
+
+                if policy_type in default_policies:
+                    return f"**{policy_type.title()} Policy:**\n\n{default_policies[policy_type]}"
+
+                # Show all defaults
                 response = "**Restaurant Policies:**\n\n"
-                for row in results:
-                    response += f"**{row['policy_name']}**\n{row['policy_content']}\n\n"
-
-                response += "If you have more questions, feel free to ask!"
+                for ptype, content in default_policies.items():
+                    response += f"**{ptype.title()} Policy:**\n{content}\n\n"
                 return response
 
         except Exception as e:
@@ -330,7 +356,7 @@ def create_policy_info_tools(session_id: str):
         Get restaurant operating hours.
 
         Use this when customer asks "what time do you open?", "are you open now?",
-        "what are your hours?", "are you open on Sunday?".
+        "what are your hours?", "are you open on Sunday?", "operating hours".
 
         Args:
             date: Optional date to check (YYYY-MM-DD format). Leave empty for today.
@@ -346,18 +372,18 @@ def create_policy_info_tools(session_id: str):
             await emit_tool_activity_async(session_id, "get_operating_hours")
 
             async with AsyncDBConnection() as db:
-                # Get restaurant config
+                # Get restaurant config (no is_deleted column on this table)
                 config_query = """
-                    SELECT settings
+                    SELECT settings, opening_time, closing_time
                     FROM restaurant_config
-                    WHERE is_deleted = FALSE
                     LIMIT 1
                 """
                 config_row = await db.fetch_one(config_query)
 
-                if config_row and config_row['settings']:
-                    settings = config_row['settings']
-                    hours = settings.get('operating_hours', {})
+                if config_row:
+                    settings = config_row.get('settings') or {}
+                    # DB stores as 'business_hours' not 'operating_hours'
+                    hours = settings.get('business_hours', {})
 
                     if hours:
                         response = "**Restaurant Operating Hours:**\n\n"
@@ -367,60 +393,179 @@ def create_policy_info_tools(session_id: str):
                             try:
                                 check_date = datetime.strptime(date, "%Y-%m-%d")
                                 day_name = check_date.strftime("%A")
-                                day_hours = hours.get(day_name.lower(), hours.get('default'))
+                                day_data = hours.get(day_name.lower(), {})
 
-                                if day_hours:
-                                    if day_hours == 'closed':
+                                if day_data:
+                                    if day_data == 'closed':
                                         return f"We're closed on {day_name}s."
-                                    else:
-                                        return f"On {day_name} ({date}), we're open {day_hours}."
-                            except:
+                                    open_time = day_data.get('open', '09:00')
+                                    close_time = day_data.get('close', '23:00')
+                                    return f"On {day_name} ({date}), we're open {open_time} - {close_time}."
+                            except Exception:
                                 pass
 
                         # Show all hours
                         for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']:
-                            day_hours = hours.get(day.lower(), hours.get('default', '11:00 AM - 10:00 PM'))
-                            if day_hours == 'closed':
+                            day_data = hours.get(day.lower(), {})
+                            if day_data == 'closed':
                                 response += f"**{day}:** Closed\n"
+                            elif isinstance(day_data, dict):
+                                open_time = day_data.get('open', '09:00')
+                                close_time = day_data.get('close', '23:00')
+                                response += f"**{day}:** {open_time} - {close_time}\n"
+                            elif isinstance(day_data, str):
+                                response += f"**{day}:** {day_data}\n"
                             else:
-                                response += f"**{day}:** {day_hours}\n"
-
-                        # Add special notes
-                        if 'holidays' in settings:
-                            response += f"\n**Holiday Schedule:** {settings['holidays']}\n"
+                                # Use main table columns as fallback
+                                ot = config_row.get('opening_time', '09:00')
+                                ct = config_row.get('closing_time', '23:00')
+                                response += f"**{day}:** {ot} - {ct}\n"
 
                         # Check if open now
                         now = datetime.now()
                         current_day = now.strftime("%A").lower()
-                        current_time = now.strftime("%H:%M")
-
-                        day_hours = hours.get(current_day, hours.get('default'))
-                        if day_hours and day_hours != 'closed':
+                        day_data = hours.get(current_day, {})
+                        if isinstance(day_data, dict) and day_data:
+                            open_time = day_data.get('open', '09:00')
+                            close_time = day_data.get('close', '23:00')
+                            current_time = now.strftime("%H:%M")
+                            if open_time <= current_time <= close_time:
+                                response += f"\n**Status:** Currently open (closes at {close_time})"
+                            else:
+                                response += f"\n**Status:** Currently closed (opens at {open_time})"
+                        elif day_data != 'closed':
                             response += f"\n**Status:** Currently open"
                         else:
                             response += f"\n**Status:** Currently closed"
 
                         return response
 
-                # Default hours if nothing in database
-                default_response = """**Restaurant Operating Hours:**
+                    # Fallback: use opening_time/closing_time columns
+                    ot = config_row.get('opening_time', '09:00')
+                    ct = config_row.get('closing_time', '23:00')
+                    return f"**Restaurant Operating Hours:**\n\nOpen daily: {ot} - {ct}\n\n**Kitchen closes** 30 minutes before closing time."
 
-**Monday - Friday:** 11:00 AM - 10:00 PM
-**Saturday - Sunday:** 10:00 AM - 11:00 PM
-
-**Kitchen closes** 30 minutes before closing time.
-
-We're open every day including holidays! 🎉"""
-
-                return default_response
+                # Default hours if no config at all
+                return "**Restaurant Operating Hours:**\n\nOpen daily: 09:00 AM - 11:00 PM\n\n**Kitchen closes** 30 minutes before closing time."
 
         except Exception as e:
             logger.error("get_operating_hours_error", error=str(e), exc_info=True)
-            return "We're typically open 11 AM - 10 PM daily. For exact hours, please contact us directly."
+            return "We're typically open 9 AM - 11 PM daily. For exact hours, please contact us directly."
+
+    @tool("get_delivery_info")
+    async def get_delivery_info() -> str:
+        """
+        Get delivery information including delivery fee, radius, and minimum order.
+
+        Use this when customer asks "do you deliver?", "delivery fee", "delivery area",
+        "delivery information", "minimum order for delivery", "how far do you deliver?".
+
+        Returns:
+            Delivery information from restaurant config and FAQs.
+        """
+        try:
+            from app.core.db_pool import AsyncDBConnection
+            from app.core.agui_events import emit_tool_activity_async
+
+            await emit_tool_activity_async(session_id, "get_delivery_info")
+
+            async with AsyncDBConnection() as db:
+                # Read delivery settings from restaurant_config
+                config_query = """
+                    SELECT settings, name, phone
+                    FROM restaurant_config
+                    LIMIT 1
+                """
+                config_row = await db.fetch_one(config_query)
+
+                response = "**Delivery Information:**\n\n"
+
+                if config_row and config_row.get('settings'):
+                    settings = config_row['settings']
+                    delivery_fee = settings.get('delivery_fee')
+                    delivery_radius = settings.get('delivery_radius_km')
+                    min_order = settings.get('min_order_amount')
+
+                    if delivery_fee is not None:
+                        response += f"**Delivery Fee:** Rs.{delivery_fee}\n"
+                    if delivery_radius:
+                        response += f"**Delivery Radius:** {delivery_radius} km from our restaurant\n"
+                    if min_order:
+                        response += f"**Minimum Order:** Rs.{min_order}\n"
+
+                response += "\n"
+
+                # Also pull delivery FAQs for more details
+                faq_query = """
+                    SELECT question, answer
+                    FROM faq
+                    WHERE is_active = TRUE
+                      AND LOWER(category) = 'delivery'
+                    ORDER BY priority DESC
+                    LIMIT 5
+                """
+                faqs = await db.fetch_all(faq_query)
+
+                if faqs:
+                    response += "**Common Delivery Questions:**\n\n"
+                    for faq in faqs:
+                        response += f"**Q: {faq['question']}**\n{faq['answer']}\n\n"
+
+                return response
+
+        except Exception as e:
+            logger.error("get_delivery_info_error", error=str(e), exc_info=True)
+            return "Sorry, I couldn't retrieve delivery information right now. Please contact us for delivery details."
+
+    @tool("get_contact_info")
+    async def get_contact_info() -> str:
+        """
+        Get restaurant contact information.
+
+        Use this when customer asks "how to contact you", "phone number", "email",
+        "contact support", "customer service", "talk to someone", "support number".
+
+        Returns:
+            Restaurant contact details.
+        """
+        try:
+            from app.core.db_pool import AsyncDBConnection
+            from app.core.agui_events import emit_tool_activity_async
+
+            await emit_tool_activity_async(session_id, "get_contact_info")
+
+            async with AsyncDBConnection() as db:
+                config_query = """
+                    SELECT name, phone, email, website, address
+                    FROM restaurant_config
+                    LIMIT 1
+                """
+                config_row = await db.fetch_one(config_query)
+
+                if config_row:
+                    response = f"**Contact {config_row.get('name', 'Us')}:**\n\n"
+                    if config_row.get('phone'):
+                        response += f"**Phone:** {config_row['phone']}\n"
+                    if config_row.get('email'):
+                        response += f"**Email:** {config_row['email']}\n"
+                    if config_row.get('website'):
+                        response += f"**Website:** {config_row['website']}\n"
+                    if config_row.get('address'):
+                        response += f"**Address:** {config_row['address']}\n"
+                    response += "\nFeel free to reach out for any assistance!"
+                    return response
+
+                return "Please contact us at our restaurant for assistance. Our staff will be happy to help!"
+
+        except Exception as e:
+            logger.error("get_contact_info_error", error=str(e), exc_info=True)
+            return "Sorry, I couldn't retrieve contact information right now."
 
     return [
         get_restaurant_policies,
-        get_operating_hours
+        get_operating_hours,
+        get_delivery_info,
+        get_contact_info
     ]
 
 

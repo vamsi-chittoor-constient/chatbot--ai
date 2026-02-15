@@ -28,6 +28,7 @@ from crewai.tools import tool
 from typing import Dict, Any, List, Optional
 import structlog
 import asyncio
+import re
 from datetime import datetime
 
 # Phase 1 tools: Customer profile, FAQ, feedback
@@ -490,9 +491,9 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             f"Items: {items_summary}. "
             f"Subtotal: Rs.{subtotal:.0f}, Packaging: Rs.{packaging_charges:.0f}, "
             f"Total: Rs.{total:.0f} (Take-away). "
-            f"Payment method card is now displayed to the customer. "
-            f"IMPORTANT: Ask the customer how they would like to pay. "
-            f"When they choose, call select_payment_method with their choice."
+            f"Online payment via Razorpay has been automatically initiated. "
+            f"The payment link is now displayed to the customer. "
+            f"Let them know their order is placed and they can complete payment using the link shown."
         )
 
     except Exception as e:
@@ -556,101 +557,72 @@ def _set_special_instructions_impl(item_name: str, instructions: str, session_id
 
 
 def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
-    """Sync implementation of get_order_receipt for crew pool."""
-    from app.core.agui_events import emit_tool_activity
-    from app.core.redis import get_sync_redis_client
-    from app.core.db_pool import SyncDBConnection
+    """Sync implementation of get_order_receipt for crew pool.
+
+    Reads receipt data from Redis payment_state (which has full item details)
+    rather than PostgreSQL (which doesn't store item_name/quantity).
+    """
+    from app.core.agui_events import emit_tool_activity, emit_receipt_link
+    from datetime import datetime
 
     emit_tool_activity(session_id, "get_order_receipt")
 
     try:
-        redis_client = get_sync_redis_client()
-        order_display_id = order_id.strip().upper() if order_id else None
+        # Get payment state from Redis — has full order details including items
+        from app.services.payment_state_service import get_payment_state
+        payment_state = get_payment_state(session_id)
 
-        # If no order_id provided, get most recent
-        if not order_display_id:
-            history_key = f"order_history:{session_id}"
-            recent_orders = redis_client.lrange(history_key, 0, 0)
-            if not recent_orders:
-                return "No recent orders found."
-            order_display_id = recent_orders[0].decode() if isinstance(recent_orders[0], bytes) else recent_orders[0]
+        if not payment_state.get("order_id"):
+            return "No recent orders found. Please place an order first."
 
-        # Get order from PostgreSQL
-        with SyncDBConnection() as conn:
-            with conn.cursor() as cur:
-                # Get order details
-                cur.execute("""
-                    SELECT o.order_id, o.order_invoice_number, o.total_amount,
-                           o.created_at, ost.order_status_name as status,
-                           ott.order_type_name as order_type,
-                           rc.restaurant_name
-                    FROM orders o
-                    LEFT JOIN order_status_type ost ON o.order_status_type_id = ost.order_status_type_id
-                    LEFT JOIN order_type_table ott ON o.order_type_id = ott.order_type_id
-                    LEFT JOIN restaurant_config rc ON o.restaurant_id = rc.id
-                    WHERE o.order_invoice_number = %s
-                """, (order_display_id,))
-                order = cur.fetchone()
+        if payment_state.get("step") not in ["payment_success", "cash_selected"]:
+            return "Payment hasn't been completed yet. Please complete payment first."
 
-                if not order:
-                    return f"Order {order_display_id} not found."
+        # Extract receipt data from payment_state
+        order_number = payment_state.get("order_number") or payment_state.get("order_id", "N/A")
+        amount = float(payment_state.get("amount", 0))
+        payment_id = payment_state.get("payment_id", "")
+        items = payment_state.get("items", [])
+        order_type_raw = payment_state.get("order_type", "")
+        order_type = "Take Away" if "take" in order_type_raw.lower() else "Dine In" if order_type_raw else ""
+        subtotal = float(payment_state.get("subtotal", 0))
+        packaging = float(payment_state.get("packaging_charges", 0))
 
-                order_id_db, display_id, total, created_at, status, order_type, restaurant_name = order
+        completed_at = payment_state.get("completed_at", "")
+        if completed_at:
+            try:
+                dt = datetime.fromisoformat(completed_at)
+                date_str = dt.strftime('%B %d, %Y at %I:%M %p')
+            except (ValueError, TypeError):
+                date_str = completed_at
+        else:
+            date_str = datetime.now().strftime('%B %d, %Y at %I:%M %p')
 
-                # Get order items
-                cur.execute("""
-                    SELECT item_name, quantity, unit_price, line_total,
-                           cooking_instructions, spice_level
-                    FROM order_item WHERE order_id = %s
-                """, (order_id_db,))
-                items = cur.fetchall()
+        # Emit receipt card with PDF download link via AGUI
+        download_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
+        receipt_items = []
+        for item in items:
+            name = item.get("name") or item.get("item_name", "Item")
+            qty = int(item.get("quantity", 1))
+            price = float(item.get("price", 0))
+            receipt_items.append({"name": name, "quantity": qty, "price": price})
 
-                # Get order totals
-                cur.execute("""
-                    SELECT items_total, tax_total, discount_total, final_amount
-                    FROM order_total WHERE order_id = %s
-                """, (order_id_db,))
-                totals = cur.fetchone()
+        emit_receipt_link(
+            session_id=session_id,
+            order_number=order_number,
+            amount=amount,
+            download_url=download_url,
+            items=receipt_items
+        )
 
-        # Format receipt
-        date_str = created_at.strftime('%B %d, %Y at %I:%M %p') if hasattr(created_at, 'strftime') else str(created_at)
-        restaurant_name = restaurant_name or "Restaurant"
-
-        receipt_lines = [
-            "=" * 40,
-            f"{restaurant_name}".center(40),
-            "=" * 40,
-            f"Order: {display_id}",
-            f"Date: {date_str}",
-            f"Type: {order_type or 'Dine In'}",
-            f"Status: {status}",
-            "-" * 40,
-            "ITEMS:",
-        ]
-
-        for item_name, qty, price, line_total, instructions, spice_level in items:
-            receipt_lines.append(f"  {item_name} x{qty} @ Rs.{price} = Rs.{line_total}")
-            if instructions:
-                receipt_lines.append(f"    Instructions: {instructions}")
-            if spice_level:
-                receipt_lines.append(f"    Spice Level: {spice_level}")
-
-        if totals:
-            items_total, tax_total, discount_total, final_amount = totals
-            receipt_lines.extend([
-                "-" * 40,
-                f"Subtotal: Rs.{items_total or 0:.2f}",
-                f"Tax: Rs.{tax_total or 0:.2f}",
-                f"Discount: -Rs.{discount_total or 0:.2f}" if discount_total else "",
-                "=" * 40,
-                f"TOTAL: Rs.{final_amount or total:.2f}",
-                "=" * 40,
-            ])
-
-        return "\n".join(filter(None, receipt_lines))
+        # Return text for the LLM (tag stripped by post-processing, rest may be echoed)
+        return (
+            f"[RECEIPT DISPLAYED] Here's your receipt for order {order_number}! "
+            f"You can download the PDF using the button below."
+        )
 
     except Exception as e:
-        logger.error("get_order_receipt_failed", error=str(e))
+        logger.error("get_order_receipt_failed", error=str(e), exc_info=True)
         return f"Error retrieving receipt: {str(e)}"
 
 
@@ -867,8 +839,6 @@ QUICK_ACTION_SETS = {
 
     "payment_method": [
         {"label": "💳 Pay Online", "action": "pay_online"},
-        {"label": "💵 Cash on Delivery", "action": "pay_cash"},
-        {"label": "💳 Card at Counter", "action": "pay_card_counter"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -901,6 +871,13 @@ QUICK_ACTION_SETS = {
         {"label": "❌ Cancel Order", "action": "cancel this order"},
         {"label": "📞 Contact Support", "action": "contact support"},
         {"label": "🧾 View Receipt", "action": "show receipt"},
+    ],
+
+    "receipt_shown": [
+        {"label": "🍔 Order More", "action": "show menu"},
+        {"label": "📍 Track Order", "action": "track my order"},
+        {"label": "⭐ Rate Order", "action": "rate this order"},
+        {"label": "🏠 Home", "action": "back to home"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1098,13 +1075,14 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 
 ━━━ CHECKOUT & PAYMENT ━━━
 - order_type: Order type confirmed → Takeaway (Take Away)
-- payment_method: Asking payment method (response: "how would you like to pay") → Payment options (Pay Online, Cash on Delivery, Card at Counter)
+- payment_method: Asking payment method (response: "how would you like to pay") → Payment options (Pay Online)
 
 ━━━ POST-ORDER ━━━
 - order_confirmed: Order placed (response has "Order ID" but NO payment yet) → Post-order (Track Order, View Receipt, Order More)
 - payment_completed: Payment successful (response: "payment successful" or "paid") → Full post-order (Track, Receipt, Rate, Favorites, Reorder)
 - post_delivery: 30+ mins after delivery → Feedback prompt (Rate 5 Stars, Leave Feedback, Reorder Same, Save Favorites)
 - order_tracking: User tracking order → Tracking actions (Refresh Status, Cancel Order, Contact Support, View Receipt)
+- receipt_shown: Receipt displayed (response: "receipt" or "RECEIPT DISPLAYED" or "download") → Post-receipt (Order More, Track, Rate, Home)
 
 ━━━ TABLE BOOKING ━━━
 - booking_inquiry: User asks about booking or wants to book → Booking options (Book Table, Check Availability, My Bookings, Help)
@@ -1135,7 +1113,6 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - continue_ordering: General "anything else?" or continue prompt → General options (Show Menu, View Cart, Checkout, Get Help)
 - quantity: Asking "how many" → Number buttons (1, 2, 3, Other)
 - yes_no: Simple yes/no question → Binary choice (Yes, No)
-- which_item: Asking which specific item from 2+ options → Item buttons (dynamic)
 - none: ONLY for purely informational responses with NO next action (rare - default to helpful actions!)
 
 🎯 CRITICAL DECISION RULES:
@@ -1148,6 +1125,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 7. User asks capabilities → "explore_features"
 8. Payment successful → "payment_completed" (NOT order_confirmed)
 9. Order placed but NOT paid → "order_confirmed"
+10. Receipt shown/displayed → "receipt_shown" (NOT view_cart!)
 
 🚗 GUIDE PRINCIPLE:
 - Default to showing helpful actions rather than "none"
@@ -1155,13 +1133,14 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - Proactively expose features users don't know exist
 - Use context to show 5-6 relevant buttons per response
 
-If "which_item" is selected, also extract the item options mentioned in the response (max 4 items).
+11. Search results displayed (response lists menu items with prices) → "menu_displayed"
+12. AI asking "which one" / disambiguating between items → "menu_displayed"
 
 Response to analyze:
 "{response}"
 
 Return JSON only:
-{{"action_set": "<set_name>", "items": ["item1", "item2"] if which_item else null}}"""
+{{"action_set": "<set_name>"}}"""
 
 
 def get_response_quick_replies(response: str) -> List[Dict[str, str]]:
@@ -1216,9 +1195,17 @@ def get_response_quick_replies(response: str) -> List[Dict[str, str]]:
 
             # Get the replies for the selected action set
             if action_set == "which_item" and items:
+                # Reject placeholder/generic names (GPT-4o-mini sometimes copies template)
+                PLACEHOLDER_PATTERN = re.compile(r'^item\s*\d+$', re.IGNORECASE)
+                real_items = [i for i in items if not PLACEHOLDER_PATTERN.match(i.strip())]
+                if not real_items:
+                    logger.warning("which_item_placeholder_names", raw_items=items)
+                    # Fall back to menu_displayed instead of showing "item1, item2"
+                    return QUICK_ACTION_SETS.get("menu_displayed", DEFAULT_QUICK_REPLIES)
+
                 # Dynamic item selection buttons
                 replies = []
-                for item in items[:4]:  # Max 4 items
+                for item in real_items[:4]:  # Max 4 items
                     replies.append({
                         "label": item,
                         "action": item,
@@ -4079,22 +4066,17 @@ def create_select_payment_method_tool(session_id: str):
         """
         Select a payment method for the current order after checkout.
 
-        Call this when the customer chooses how to pay. The checkout tool
-        shows payment options to the customer; this tool processes their choice.
+        NOTE: Payment is automatically initiated as online (Razorpay) after checkout.
+        This tool is only needed if the automatic payment flow didn't trigger.
 
         Args:
-            method: Payment method chosen by customer. Must be one of:
-                - "online" or "pay_online" — Pay via Razorpay (Card/UPI/NetBanking)
-                - "cash" or "pay_cash" — Pay cash on delivery or at counter
-                - "card_at_counter" or "pay_card_counter" — Pay by card at counter
+            method: Payment method. Only "online" is supported (Razorpay — Card/UPI/NetBanking).
 
         Returns:
             Payment confirmation or payment link details.
 
         Common triggers:
-            - "pay online" / "online payment" / "UPI" / "card" → select_payment_method("online")
-            - "cash" / "pay cash" / "COD" → select_payment_method("cash")
-            - "card at counter" / "pay later" → select_payment_method("card_at_counter")
+            - "pay online" / "online payment" / "UPI" / "card" / "pay" → select_payment_method("online")
         """
         async def _async_select():
             from app.services.payment_state_service import get_payment_state, PaymentStep
@@ -4104,18 +4086,14 @@ def create_select_payment_method_tool(session_id: str):
             emit_tool_activity(session_id, "select_payment_method")
 
             # Normalize method name
+            # Only online payment (Razorpay) is supported
             method_map = {
                 "online": "online",
                 "pay_online": "online",
                 "upi": "online",
                 "razorpay": "online",
                 "card": "online",
-                "cash": "cash",
-                "pay_cash": "cash",
-                "cod": "cash",
-                "card_at_counter": "card_at_counter",
-                "pay_card_counter": "card_at_counter",
-                "card at counter": "card_at_counter",
+                "pay": "online",
             }
             normalized = method_map.get(method.lower().strip(), method.lower().strip())
 

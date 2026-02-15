@@ -621,6 +621,27 @@ class SyncSessionEventTracker:
             "item_count": len(items)
         }
 
+    def clear_cart(self) -> Dict[str, Any]:
+        """Clear all items from cart using sync connection."""
+        from app.core.db_pool import SyncDBConnection
+
+        # Log event
+        self.log_event(EventType.CART_CLEARED, {})
+
+        with SyncDBConnection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE session_cart
+                    SET is_active = FALSE, updated_at = NOW()
+                    WHERE session_id = %s AND is_active = TRUE
+                    """,
+                    (self.session_id,)
+                )
+                conn.commit()
+
+        return self.get_cart_summary()
+
     def get_last_search_results(self) -> Optional[List[Dict[str, Any]]]:
         """
         Get the items from the last MENU_VIEWED event.

@@ -157,6 +157,7 @@ class EventType(str, Enum):
     PAYMENT_LINK = "PAYMENT_LINK"
     PAYMENT_METHOD_SELECTION = "PAYMENT_METHOD_SELECTION"
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
+    RECEIPT_LINK = "RECEIPT_LINK"
 
 
 @dataclass
@@ -382,6 +383,24 @@ class PaymentSuccessEvent(AGUIEvent):
     payment_id: str = ""
     order_type: str = "takeaway"
     quick_replies: List[Dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class ReceiptLinkEvent(AGUIEvent):
+    """
+    Emitted with a downloadable PDF receipt link.
+
+    Contains:
+    - order_number: Order display ID
+    - amount: Total amount paid
+    - download_url: URL to download the PDF receipt
+    - items: List of order items with name, qty, price
+    """
+    type: EventType = EventType.RECEIPT_LINK
+    order_number: str = ""
+    amount: float = 0.0
+    download_url: str = ""
+    items: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -1999,6 +2018,21 @@ def emit_payment_success(
         )
     except Exception as e:
         logger.error("payment_success_emit_failed", error=str(e), session_id=session_id)
+
+
+def emit_receipt_link(session_id: str, order_number: str, amount: float, download_url: str, items: List[Dict[str, Any]] = None):
+    """Emit a receipt download card with PDF link and order summary."""
+    try:
+        event = ReceiptLinkEvent(
+            order_number=order_number,
+            amount=amount,
+            download_url=download_url,
+            items=items or []
+        )
+        _put_event_threadsafe(session_id, event)
+        logger.info("receipt_link_emitted", session_id=session_id, order_number=order_number)
+    except Exception as e:
+        logger.error("receipt_link_emit_failed", error=str(e), session_id=session_id)
 
 
 def _get_activity_type_for_tool(tool_name: str) -> str:

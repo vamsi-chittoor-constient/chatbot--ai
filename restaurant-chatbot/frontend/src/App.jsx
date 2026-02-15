@@ -16,6 +16,7 @@ import {
   SessionModal,
   PaymentSuccessCard,
   PaymentLinkCard,
+  ReceiptCard,
   VoiceModeBanner,
 } from './components'
 import { SearchResultsCard } from './components/SearchResultsCard'
@@ -176,6 +177,8 @@ function ChatInterface() {
         return <OrderCard key={message.id} data={message.data} />
       case 'payment_link':
         return <PaymentLinkCard key={message.id} data={message.data} />
+      case 'receipt_link':
+        return <ReceiptCard key={message.id} data={message.data} />
       case 'payment_success':
         console.log('Rendering PaymentSuccessCard with data:', message.data)
         return (

@@ -122,16 +122,19 @@ services:
       - ENVIRONMENT=production
       - DEBUG=false
       - LOG_LEVEL=INFO
+      # Disable CrewAI tracing prompt (blocks 20s on first query)
+      - CREWAI_TRACING_ENABLED=false
       # Enable authentication (phone + OTP flow)
       - AUTH_REQUIRED=true
       # Enable PetPooja kitchen sync (sandbox mode)
       - ENABLE_PETPOOJA_SYNC=true
-      # Frontend & Payment URLs (override localhost for server deployment)
-      - FRONTEND_URL=https://13.60.10.215
-      - PAYMENT_SUCCESS_URL=https://13.60.10.215/payment/success
-      - PAYMENT_FAILURE_URL=https://13.60.10.215/payment/failure
-      - PAYMENT_CALLBACK_URL=https://13.60.10.215/api/v1/payment/callback
-      - PAYMENT_WEBHOOK_URL=https://13.60.10.215/api/v1/webhook/razorpay
+      # Frontend & Payment URLs
+      # For local dev: use localhost; for production: use public IP/domain
+      - FRONTEND_URL=https://localhost
+      - PAYMENT_SUCCESS_URL=https://localhost/payment/success
+      - PAYMENT_FAILURE_URL=https://localhost/payment/failure
+      - PAYMENT_CALLBACK_URL=https://localhost/api/v1/payment/callback
+      - PAYMENT_WEBHOOK_URL=https://localhost/api/v1/webhook/razorpay
       # Razorpay credentials (override placeholders from .env)
       - RAZORPAY_KEY_ID=rzp_test_dXwWkc7Rw3f52T
       - RAZORPAY_KEY_SECRET=bs6Jk9HhctjKCBPN3IE4iPsF

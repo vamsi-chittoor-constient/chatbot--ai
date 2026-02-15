@@ -129,7 +129,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
         Returns:
             Final message: "Added 2x Margherita Pizza! Anything else?"
         """
-        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies, emit_search_results
         from app.core.preloader import get_menu_preloader
         from app.core.session_events import get_sync_session_tracker
 
@@ -200,6 +200,29 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 cart['total']
             )
 
+            # Upsell: show most relevant items
+            from app.core.preloader import get_current_meal_period
+            cart_ids = {str(ci.get("item_id", "")) for ci in cart.get("items", [])}
+            cart_ids.add(found_item["id"])
+            upsell_items, upsell_label = preloader.get_similar_items(item_name, limit=5, exclude_ids=cart_ids)
+            # If only random "popular alternatives", try same-category items first
+            if upsell_label == "popular alternatives":
+                category = found_item.get("category", "")
+                if category:
+                    cat_items = preloader.get_category_items(category, limit=5, exclude_ids=cart_ids)
+                    if cat_items:
+                        upsell_items = cat_items
+                        upsell_label = category
+            if upsell_items:
+                emit_search_results(
+                    session_id=session_id,
+                    query="You might also like",
+                    items=[{**i, "is_available_now": True} for i in upsell_items],
+                    current_meal_period=get_current_meal_period(),
+                    available_count=len(upsell_items),
+                    unavailable_count=0
+                )
+
             # Emit quick replies for cart actions
             emit_quick_replies(session_id, [
                 {"label": "🛒 View Cart", "action": "view cart"},
@@ -254,6 +277,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                     {"label": "✅ Checkout", "action": "checkout"},
                     {"label": "➕ Add More", "action": "add more items"},
                     {"label": "🗑️ Remove Item", "action": "remove item"},
+                    {"label": "🗑️ Clear Cart", "action": "clear cart"},
                 ])
             else:
                 emit_quick_replies(session_id, [
@@ -336,6 +360,39 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             logger.error("remove_from_cart_failed", error=str(e), session_id=session_id)
             return "Sorry, I couldn't remove that item. Please try again."
 
+    @tool("clear_cart")
+    def clear_cart(_nonce: str = "") -> str:
+        """
+        Clear ALL items from the cart. Call this when customer says "clear cart",
+        "empty cart", "clear my cart", "remove everything", or "start over".
+
+        Returns:
+            Confirmation that cart was cleared.
+        """
+        from app.core.agui_events import emit_tool_activity, emit_cart_data, emit_quick_replies
+        from app.core.session_events import get_sync_session_tracker
+
+        emit_tool_activity(session_id, "clear_cart")
+
+        try:
+            tracker = get_sync_session_tracker(session_id, UUID(customer_id) if customer_id else None)
+            cart = tracker.clear_cart()
+
+            # Emit empty cart to frontend
+            emit_cart_data(session_id, cart['items'], cart['total'])
+
+            # Suggest browsing menu
+            emit_quick_replies(session_id, [
+                {"label": "📋 View Menu", "action": "show menu"},
+                {"label": "🔍 Search", "action": "search menu"},
+            ])
+
+            return "Your cart has been cleared. What would you like to order?"
+
+        except Exception as e:
+            logger.error("clear_cart_failed", error=str(e), session_id=session_id)
+            return "Sorry, I couldn't clear your cart. Please try again."
+
     @tool("search_menu")
     def search_menu(query: str = "") -> str:
         """
@@ -365,12 +422,78 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             # Get current meal period for filtering
             meal_period = get_current_meal_period()
 
-            # Differentiate between browsing and searching:
+            # Differentiate between browsing, specials, and searching:
             # - Browsing (empty/generic query): use MenuCard with meal filters
+            # - Specials (specials/popular/recommended): show recommended items or suggest popular
             # - Searching (specific query): use SearchResultsCard with availability info
             is_browsing = not query or query.lower() in ["", "all", "show all", "everything", "menu", "show menu"]
 
-            if is_browsing:
+            is_specials_query = query and query.lower() in [
+                "specials", "today's specials", "today specials", "todays specials",
+                "popular", "recommended", "best sellers", "what's popular",
+                "chef's choice", "chef recommendation", "chef recommendations",
+                "what do you recommend", "suggestions", "top picks",
+            ]
+
+            if is_specials_query:
+                # Specials: check for recommended items in the menu
+                recommended_items = [
+                    item for item in preloader._menu_cache
+                    if item.get("is_recommended", False)
+                    and item.get("is_available", True)
+                    and item.get("price", 0) > 0
+                ]
+
+                if recommended_items:
+                    # Found recommended/special items — show them
+                    emit_search_results(
+                        session_id=session_id,
+                        query=query,
+                        items=[{**i, "is_available_now": True} for i in recommended_items[:10]],
+                        current_meal_period=meal_period,
+                        available_count=len(recommended_items[:10]),
+                        unavailable_count=0
+                    )
+                    emit_quick_replies(session_id, [
+                        {"label": "📋 Full Menu", "action": "show menu"},
+                        {"label": "🛒 View Cart", "action": "view cart"},
+                    ])
+                    return (
+                        f"Here are our recommended items! These are our chef's picks. "
+                        f"Would you like to add any of these to your cart?"
+                    )
+                else:
+                    # No specials tagged — suggest popular items instead
+                    popular_items = [
+                        item for item in preloader._menu_cache
+                        if item.get("is_available", True)
+                        and item.get("price", 0) > 0
+                    ][:6]  # Show top 6 popular items
+
+                    if popular_items:
+                        emit_search_results(
+                            session_id=session_id,
+                            query=query,
+                            items=[{**i, "is_available_now": True} for i in popular_items],
+                            current_meal_period=meal_period,
+                            available_count=len(popular_items),
+                            unavailable_count=0
+                        )
+                        emit_quick_replies(session_id, [
+                            {"label": "📋 Full Menu", "action": "show menu"},
+                            {"label": "🛒 View Cart", "action": "view cart"},
+                        ])
+                        return (
+                            "We don't have specific specials tagged for today, but here are "
+                            "some popular items you might enjoy! Would you like any of these?"
+                        )
+                    # Fallback: show full menu
+                    items = preloader.search(query, meal_period=None)
+                    if items:
+                        emit_menu_data(session_id, items[:50], meal_period)
+                    return "We don't have specific specials today. Here's our full menu to browse!"
+
+            elif is_browsing:
                 # Browsing: show all items — frontend tabs handle meal period filtering
                 items = preloader.search(query, meal_period=None)
                 if not items:
@@ -405,8 +528,8 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 all_matching_items = preloader.search(query, meal_period=None)
 
                 if not all_matching_items:
-                    # No match — upsell similar items from the same category
-                    similar_items, category = preloader.get_similar_items(query)
+                    # No match — show similar/popular items as suggestions
+                    similar_items, label = preloader.get_similar_items(query)
                     if similar_items:
                         emit_search_results(
                             session_id=session_id,
@@ -421,9 +544,14 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                             {"label": "📋 Full Menu", "action": "show menu"},
                             {"label": "🛒 View Cart", "action": "view cart"},
                         ])
+                        if label == "popular alternatives":
+                            return (
+                                f"We don't have '{query}' on our menu, but here are some "
+                                f"popular items you might enjoy! Would you like any of these?"
+                            )
                         return (
-                            f"No exact match for '{query}', but here are similar items "
-                            f"from our {category} category. Would you like any of these?"
+                            f"No exact match for '{query}', but here are some {label} "
+                            f"you might like. Would you like any of these?"
                         )
                     return f"No items found for '{query}'. Try searching for something else or say 'show menu' to browse!"
 
@@ -636,23 +764,30 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             if cart:
                 emit_cart_data(session_id, cart['items'], cart['total'])
 
-            # Upsell: show similar items from the same category
+            # Upsell: show semantically similar items to what was just added
             upsell_items = []
-            upsell_category = ""
+            upsell_label = ""
             # Also exclude items already in cart
             cart_ids = {str(ci.get("item_id", "")) for ci in (cart.get("items", []) if cart else [])}
             exclude = added_ids | cart_ids
-            for cat in added_categories:
-                upsell_items = preloader.get_category_items(cat, limit=5, exclude_ids=exclude)
-                if upsell_items:
-                    upsell_category = cat
-                    break
+            # Use added item names as query for semantic similarity
+            # added_items has "2x Name" strings — strip the quantity prefix
+            upsell_query = " ".join(a.split(" ", 1)[1] if " " in a else a for a in added_items[:3])
+            upsell_items, upsell_label = preloader.get_similar_items(upsell_query, limit=5, exclude_ids=exclude)
 
+            # If only random "popular alternatives", try same-category items first
+            if upsell_label == "popular alternatives" and added_categories:
+                for cat in added_categories:
+                    cat_items = preloader.get_category_items(cat, limit=5, exclude_ids=exclude)
+                    if cat_items:
+                        upsell_items = cat_items
+                        upsell_label = cat
+                        break
             if upsell_items:
                 from app.core.preloader import get_current_meal_period
                 emit_search_results(
                     session_id=session_id,
-                    query=f"You might also like ({upsell_category})",
+                    query="You might also like",
                     items=[{**i, "is_available_now": True} for i in upsell_items],
                     current_meal_period=get_current_meal_period(),
                     available_count=len(upsell_items),
@@ -674,7 +809,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
             if failed_items:
                 msg += f"\nCouldn't find: {', '.join(failed_items)}."
             if upsell_items:
-                msg += f" Want to add anything else from {upsell_category}?"
+                msg += " Here are some similar items you might like!"
             else:
                 msg += " Anything else?"
             return msg
