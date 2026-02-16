@@ -37,11 +37,19 @@ if [ -n "$BRANCH" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Step 1: Stop existing containers (except databases to preserve data)
+# Step 1: Force-kill ngrok and app containers (preserve databases)
 # -----------------------------------------------------------------------------
-echo -e "${YELLOW}[1/5] Stopping application containers...${NC}"
-docker compose -f "$COMPOSE_FILE" stop ngrok nginx chatbot-app petpooja-app whatsapp-bridge 2>/dev/null || true
-docker compose -f "$COMPOSE_FILE" rm -f ngrok 2>/dev/null || true
+echo -e "${YELLOW}[1/5] Stopping all application containers...${NC}"
+
+# Force remove ngrok first — must fully die before re-creating
+# so ngrok cloud releases the endpoint
+docker compose -f "$COMPOSE_FILE" down --remove-orphans --timeout 5 2>/dev/null || true
+
+# Also kill any ngrok running outside Docker (native install)
+pkill -f ngrok 2>/dev/null || true
+
+echo "    Waiting for ngrok cloud to release endpoint..."
+sleep 5
 echo ""
 
 # -----------------------------------------------------------------------------
@@ -54,8 +62,20 @@ echo "    Waiting for ngrok to establish tunnel..."
 NGROK_URL=""
 ELAPSED=0
 while [ -z "$NGROK_URL" ] && [ $ELAPSED -lt $TIMEOUT ]; do
-    sleep 2
-    ELAPSED=$((ELAPSED + 2))
+    sleep 3
+    ELAPSED=$((ELAPSED + 3))
+
+    # Check if ngrok container is still running (might have crashed)
+    if ! docker compose -f "$COMPOSE_FILE" ps ngrok --format "{{.State}}" 2>/dev/null | grep -q "running"; then
+        echo -e "    ${RED}ngrok container crashed. Checking logs...${NC}"
+        docker compose -f "$COMPOSE_FILE" logs ngrok --tail=5
+        echo ""
+        echo -e "    ${YELLOW}Retrying ngrok...${NC}"
+        docker compose -f "$COMPOSE_FILE" up -d ngrok
+        sleep 3
+        ELAPSED=$((ELAPSED + 3))
+    fi
+
     NGROK_URL=$(curl -s "$NGROK_API" 2>/dev/null | python3 -c "
 import sys, json
 try:
@@ -76,7 +96,12 @@ done
 
 if [ -z "$NGROK_URL" ]; then
     echo -e "${RED}ERROR: Failed to get ngrok URL after ${TIMEOUT}s${NC}"
-    echo "Check ngrok logs: docker compose -f $COMPOSE_FILE logs ngrok"
+    echo ""
+    echo "Common fixes:"
+    echo "  1. Another ngrok agent is using your authtoken somewhere else"
+    echo "     → Kill it or visit: https://dashboard.ngrok.com/tunnels/agents"
+    echo "  2. Check logs: docker compose -f $COMPOSE_FILE logs ngrok --tail=20"
+    echo ""
     exit 1
 fi
 
