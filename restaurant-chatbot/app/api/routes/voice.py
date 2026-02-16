@@ -362,61 +362,41 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — Force English Romanization for code-switching.
-        # Hindi/Tamil users speak Hinglish/Tanglish. Whisper transcribes phonetically
-        # in English alphabet so GPT-4 understands natively without translation.
-        # e.g. "दो apple juice चाहिए" → "do apple juice chahiye"
+        # Whisper vocabulary hints — native script for each language.
+        # DO NOT use English hints for Hindi/Tamil — it causes hallucinations.
+        # Let Whisper transcribe in native language, then translate for RAG/crew.
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "Users speak Hinglish - Hindi and English mixed together. "
-                "Transcribe all speech phonetically using the English alphabet (Romanization). "
-                "Common Hindi words: do (two), teen (three), char (four), panch (five), "
-                "ek (one), chhe (six), saat (seven), aath (eight), nau (nine), das (ten), "
-                "kitna (how much), kitne (how many), chahiye (want/need), dijiye (please give), "
-                "dijie (please give), deejiye (please give), dikhao (show), dikhaiye (show me), "
-                "karo (do it), kariye (please do), hataao (remove), menu (menu), cart (cart), "
-                "add (add), remove (remove), checkout (checkout), order (order), view (view), "
-                "show (show), search (search), dine in (dine in), take away (take away), "
-                "takeaway (takeaway), payment (payment), cash (cash), online (online). "
-                "Food items: dosa, idli, vada, sambar, chutney, masala dosa, rava dosa, "
-                "ghee dosa, plain dosa, onion dosa, podi dosa, masala, paneer, biryani, "
-                "butter chicken, naan, roti, paratha, chai, lassi, beeda, appalam, paan, "
-                "apple juice, orange juice, cold coffee, badam milk, filter coffee. "
-                "Phonetically transcribe: मेनू → menu, कार्ट → cart, ऑर्डर → order."
+                "दोसा, इडली, वड़ा, सांभर, चटनी, मसाला डोसा, पराठा, बिरयानी, "
+                "पनीर, बटर चिकन, नान, रोटी, दाल, तंदूरी, टिक्का, कोरमा, "
+                "लस्सी, चाय, मेनू, कार्ट, ऑर्डर, चेकआउट, टेबल, बुकिंग, "
+                "खाना, पीना, दो, तीन, चार, एक, कितना, दीजिए, चाहिए"
             ),
             "Tamil": (
-                "Users speak Tanglish - Tamil and English mixed together. "
-                "Transcribe all speech phonetically using the English alphabet (Romanization). "
-                "Common Tamil words: rendu (two), moonu (three), naalu (four), anju (five), "
-                "onnu (one), aaru (six), ezhu (seven), ettu (eight), ombadhu (nine), pathu (ten), "
-                "evvalavu (how much), venum (want/need), thaanga (please give), kaattunga (show), "
-                "pannunga (do it), menu (menu), cart (cart), add (add), remove (remove), "
-                "checkout (checkout), order (order), dine in (dine in), take away (take away), "
-                "saapadu (food), thanni (water), coffee (coffee), tea (tea). "
-                "Food items: dosa, dosai, idli, vada, vadai, sambar, chutney, masala dosa, "
-                "rava dosa, ghee dosa, pongal, biryani, parotta, appalam."
+                "தோசை, இட்லி, வடை, சாம்பார், சட்னி, மசாலா தோசை, பரோட்டா, பிரியாணி, "
+                "பன்னீர், நான், ரொட்டி, தால், தந்தூரி, டிக்கா, "
+                "லஸ்ஸி, டீ, மெனு, கார்ட், ஆர்டர், செக்அவுட், டேபிள், புக்கிங், "
+                "சாப்பாடு, இரண்டு, மூன்று, நான்கு, ஒன்று, எவ்வளவு, வேண்டும்"
             ),
         }
 
-        # Get language-specific prompt
+        # Get language-specific hint
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Force English Romanization for Hindi/Tamil (Approach B).
-        # Whisper transcribes all speech phonetically in English alphabet.
-        # GPT-4 natively understands Romanized Hinglish/Tanglish ("do chai chahiye").
-        # translate_for_tts() converts final response back to native script for TTS.
-        use_romanization = language in ["Hindi", "Tamil"]
-
+        # Use native language codes for Whisper transcription.
+        # language="en" does NOT force English output — Whisper still outputs
+        # Devanagari/Tamil for non-English speech. Native codes (hi/ta) produce
+        # accurate native script which GPT-4 understands and RAG translates.
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language="en",
+            language=language_code_map.get(language, "en"),
             prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.2 if use_romanization else 0.0,
+            temperature=0.0,
             response_format="verbose_json",
         )
 
