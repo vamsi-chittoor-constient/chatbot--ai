@@ -362,41 +362,56 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — native script for each language.
-        # DO NOT use English hints for Hindi/Tamil — it causes hallucinations.
-        # Let Whisper transcribe in native language, then translate for RAG/crew.
+        # Whisper vocabulary hints — bilingual for code-switching languages.
+        # Hindi/Tamil speakers mix English food terms with native language.
+        # Auto-detect with bilingual hints lets Whisper preserve English words
+        # ("nugget sauce", "checkout") while handling native speech naturally.
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "दोसा, इडली, वड़ा, सांभर, चटनी, मसाला डोसा, पराठा, बिरयानी, "
-                "पनीर, बटर चिकन, नान, रोटी, दाल, तंदूरी, टिक्का, कोरमा, "
-                "लस्सी, चाय, मेनू, कार्ट, ऑर्डर, चेकआउट, टेबल, बुकिंग, "
-                "खाना, पीना, दो, तीन, चार, एक, कितना, दीजिए, चाहिए"
+                "This conversation mixes Hindi and English (Hinglish). "
+                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "menu, cart, add, remove, checkout, view, show, search, "
+                "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
+                "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
+                "dine in, take away, takeaway, payment, cash, online, beeda, appalam, "
+                "nugget, sauce, nugget sauce, spicy, fries, burger, sandwich, combo, "
+                "coke, pepsi, bisleri, fanta, sprite. "
+                "Common Hindi phrases: मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
+                "एक, दो, तीन, चार, पांच, छह, सात, आठ, नौ, दस, "
+                "कितना, कितने, चाहिए, दीजिए, दीजिये, हटाओ, दिखाओ, डाइन इन, टेक अवे।"
             ),
             "Tamil": (
-                "தோசை, இட்லி, வடை, சாம்பார், சட்னி, மசாலா தோசை, பரோட்டா, பிரியாணி, "
-                "பன்னீர், நான், ரொட்டி, தால், தந்தூரி, டிக்கா, "
-                "லஸ்ஸி, டீ, மெனு, கார்ட், ஆர்டர், செக்அவுட், டேபிள், புக்கிங், "
-                "சாப்பாடு, இரண்டு, மூன்று, நான்கு, ஒன்று, எவ்வளவு, வேண்டும்"
+                "This conversation mixes Tamil and English (Tanglish). "
+                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "menu, cart, add, remove, checkout, view, show, "
+                "apple juice, orange juice, masala dosa, idli, vada, biryani, paneer, "
+                "nugget, sauce, nugget sauce, spicy, fries, burger, sandwich, combo, "
+                "coke, pepsi, bisleri, fanta, sprite. "
+                "Common Tamil phrases: மெனு காட்டுங்கள், கார்ட், ஆர்டர், செக்அவுட், "
+                "இரண்டு, மூன்று, நான்கு, ஐந்து, எவ்வளவு, வேண்டும், சாப்பாடு।"
             ),
         }
 
         # Get language-specific hint
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Use native language codes for Whisper transcription.
-        # language="en" does NOT force English output — Whisper still outputs
-        # Devanagari/Tamil for non-English speech. Native codes (hi/ta) produce
-        # accurate native script which GPT-4 understands and RAG translates.
+        # Auto-detect (language=None) for Hindi/Tamil code-switching.
+        # Native codes (hi/ta) force ALL words into native script, mangling
+        # English food terms ("nugget sauce" → "नगत सास" → "cash sausages").
+        # Auto-detect lets Whisper recognize English words within Hindi/Tamil
+        # speech and keep them in English. temperature=0.2 for flexibility.
+        use_auto_detect = language in ["Hindi", "Tamil"]
+
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language=language_code_map.get(language, "en"),
+            language=None if use_auto_detect else language_code_map.get(language, "en"),
             prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.0,
+            temperature=0.2 if use_auto_detect else 0.0,
             response_format="verbose_json",
         )
 
