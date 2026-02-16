@@ -1094,12 +1094,12 @@ async def process_with_agui_streaming(
                 logger.info("rag_query_enriched", original=user_message, enriched_query=rag_query[:100])
 
         # TRANSLATION LAYER: Translate non-English input to English for crew + RAG.
-        # Whisper transcribes to English in voice mode, but in CHAT mode users type
-        # Hinglish/Tanglish ("menu dikhao", "2 bisleri add karo").
-        # The crew agent and RAG tools work best with English input.
-        # We translate once and use the English version for both RAG and crew task.
+        # Only fires when input contains non-ASCII chars (native script like Devanagari/Tamil).
+        # Voice mode with Romanization produces ASCII Hinglish ("do caramel add karo")
+        # which GPT-4 understands natively — translating it mangles intent
+        # ("add karo" → "add-ons"). Chat mode typed in native script needs translation.
         english_input = user_message
-        if language != "English" and language in ["Hindi", "Tamil"]:
+        if language != "English" and language in ["Hindi", "Tamil"] and any(ord(c) > 127 for c in user_message):
             try:
                 from openai import AsyncOpenAI
                 _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
