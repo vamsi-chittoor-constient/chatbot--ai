@@ -355,6 +355,8 @@ async def _handle_agui_event(phone: str, agui: dict) -> None:
         await _convert_quick_replies(phone, agui)
     elif event_type == "ORDER_DATA":
         await _convert_order_data(phone, agui)
+    elif event_type == "RECEIPT_LINK":
+        await _convert_receipt_link(phone, agui)
     elif event_type in (
         "RUN_STARTED", "RUN_FINISHED", "RUN_ERROR",
         "ACTIVITY_START", "ACTIVITY_END",
@@ -378,32 +380,37 @@ def _truncate(text: str, max_len: int) -> str:
 
 # --- SEARCH_RESULTS ---
 async def _convert_search_results(phone: str, agui: dict) -> None:
-    """Convert search results to reply buttons (≤3) or list message (>3)."""
+    """Convert search results to reply buttons (≤3) or list message (>3) with availability indicators."""
     items = agui.get("items", [])
     if not items:
         return
 
     query = agui.get("query", "search")
+    available = [i for i in items if i.get("is_available_now", True)]
+    unavailable = [i for i in items if not i.get("is_available_now", True)]
 
     if len(items) <= 3:
-        # Reply buttons — one per item
+        # Reply buttons — one per available item only
         buttons = []
+        body = f"🔍 Results for *{query}*:\n"
         for item in items[:3]:
             name = item.get("name", "Item")
             price = item.get("price", 0)
-            btn_id = f"add {name} to cart"
-            buttons.append({
-                "type": "reply",
-                "reply": {
-                    "id": _truncate(btn_id, 256),
-                    "title": _truncate(name, 20)
-                }
-            })
-        body = f"🔍 Results for *{query}*:"
-        for item in items[:3]:
-            name = item.get("name", "Item")
-            price = item.get("price", 0)
-            body += f"\n• {name} — ₹{price}"
+            is_avail = item.get("is_available_now", True)
+            meal_types = item.get("meal_types", [])
+            
+            if is_avail:
+                body += f"\n✅ {name} — ₹{price}"
+                buttons.append({
+                    "type": "reply",
+                    "reply": {
+                        "id": _truncate(f"add {name} to cart", 256),
+                        "title": _truncate(name, 20)
+                    }
+                })
+            else:
+                meal_str = ", ".join(meal_types) if meal_types else "later"
+                body += f"\n🕐 {name} — ₹{price} ({meal_str})"
 
         await send_whatsapp_interactive(phone, {
             "type": "button",
@@ -411,26 +418,45 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
             "action": {"buttons": buttons}
         })
     else:
-        # List message for >3 items
-        rows = []
-        for item in items[:10]:  # WhatsApp max 10 rows
-            name = item.get("name", "Item")
-            price = item.get("price", 0)
-            category = item.get("category", "")
-            rows.append({
-                "id": _truncate(f"add {name} to cart", 200),
-                "title": _truncate(name, 24),
-                "description": _truncate(f"₹{price} • {category}", 72)
+        # List message with sections for available/unavailable
+        sections = []
+        if available:
+            rows = []
+            for item in available[:10]:
+                name = item.get("name", "Item")
+                price = item.get("price", 0)
+                category = item.get("category", "")
+                rows.append({
+                    "id": _truncate(f"add {name} to cart", 200),
+                    "title": _truncate(name, 24),
+                    "description": _truncate(f"₹{price} • {category}", 72)
+                })
+            sections.append({"title": f"✅ Available Now ({len(available)})", "rows": rows})
+        
+        if unavailable and len(sections) == 0:  # Only show unavailable if no available items
+            rows = []
+            for item in unavailable[:10]:
+                name = item.get("name", "Item")
+                price = item.get("price", 0)
+                meal_types = item.get("meal_types", [])
+                meal_str = ", ".join(meal_types[:2]) if meal_types else "later"
+                rows.append({
+                    "id": _truncate(f"notify {name}", 200),
+                    "title": _truncate(name, 24),
+                    "description": _truncate(f"₹{price} • {meal_str}", 72)
+                })
+            sections.append({"title": f"🕐 Available Later ({len(unavailable)})", "rows": rows})
+
+        if sections:
+            await send_whatsapp_interactive(phone, {
+                "type": "list",
+                "body": {"text": _truncate(f"🔍 Found {len(items)} items for *{query}*. Tap to add:", 1024)},
+                "action": {
+                    "button": "View Items",
+                    "sections": sections
+                }
             })
-        await send_whatsapp_interactive(phone, {
-            "type": "list",
-            "body": {"text": _truncate(f"🔍 Found {len(items)} items for *{query}*. Tap to add:", 1024)},
-            "action": {
-                "button": "View Items",
-                "sections": [{"title": "Search Results", "rows": rows}]
-            }
-        })
-    LOGGER.info(f"Sent search results ({len(items)} items) to {phone}")
+    LOGGER.info(f"Sent search results ({len(items)} items, {len(available)} available) to {phone}")
 
 
 # --- MENU_DATA ---
@@ -440,7 +466,7 @@ MENU_DIRECT_THRESHOLD = 100  # max items to show directly (10 sections × 10 row
 
 async def _convert_menu_data(phone: str, agui: dict) -> None:
     """
-    Convert menu to WhatsApp list message.
+    Convert menu to WhatsApp list message with meal period indicator.
     - Small menu (≤100 items): show items grouped by category in one list
     - Large menu (>100 items): show categories as a list, user taps to filter
     """
@@ -457,6 +483,9 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
 
     cat_order = categories or list(by_category.keys())
     meal = agui.get("current_meal_period", "")
+    
+    # Meal period emoji
+    meal_emoji = {"Breakfast": "☕", "Lunch": "☀️", "Dinner": "🌙"}.get(meal, "🍽️")
 
     if len(items) <= MENU_DIRECT_THRESHOLD:
         # --- Small menu: show all items grouped by category ---
@@ -479,10 +508,10 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
         if not sections:
             return
 
-        body = "🍽️ *Menu*"
+        body = f"{meal_emoji} *Menu*"
         if meal:
-            body += f" ({meal})"
-        body += f"\n{len(items)} items. Tap to add to cart:"
+            body += f" — {meal} Time"
+        body += f"\n{len(items)} items available now. Tap to add:"
 
         await send_whatsapp_interactive(phone, {
             "type": "list",
@@ -524,7 +553,7 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
 
 # --- CART_DATA ---
 async def _convert_cart_data(phone: str, agui: dict) -> None:
-    """Convert cart data to a formatted text message."""
+    """Convert cart to text summary + per-item action buttons (for small carts) or list (for large carts)."""
     items = agui.get("items", [])
     total = agui.get("total", 0)
     packaging = agui.get("packaging_charge_per_item", 30)
@@ -533,6 +562,7 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
         await send_whatsapp_reply(phone, "🛒 Your cart is empty.")
         return
 
+    # Send cart summary
     lines = ["🛒 *Your Cart*\n"]
     for i, item in enumerate(items, 1):
         name = item.get("name") or item.get("item_name", "Item")
@@ -542,9 +572,59 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
 
     lines.append(f"\n📦 Packaging: ₹{packaging} × {len(items)} = ₹{packaging * len(items)}")
     lines.append(f"💰 *Total: ₹{total}*")
-
     await send_whatsapp_reply(phone, "\n".join(lines))
+    
+    # Strategy: For small carts (≤3 items), send per-item buttons. For larger carts, use list.
+    if len(items) <= 3:
+        # Send individual item cards with +/- buttons
+        for item in items:
+            await _send_cart_item_buttons(phone, item)
+        
+        # Then send checkout button
+        buttons = [
+            {"type": "reply", "reply": {"id": "add more items", "title": "Add More Items"}},
+            {"type": "reply", "reply": {"id": "checkout", "title": "Proceed to Checkout"}}
+        ]
+        await send_whatsapp_interactive(phone, {
+            "type": "button",
+            "body": {"text": "Ready to checkout?"},
+            "action": {"buttons": buttons}
+        })
+    else:
+        # For large carts, use list-based modification
+        buttons = [
+            {"type": "reply", "reply": {"id": "modify_cart_items", "title": "Modify Items"}},
+            {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
+            {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}}
+        ]
+        await send_whatsapp_interactive(phone, {
+            "type": "button",
+            "body": {"text": "What would you like to do?"},
+            "action": {"buttons": buttons}
+        })
+    
     LOGGER.info(f"Sent cart ({len(items)} items, ₹{total}) to {phone}")
+
+
+async def _send_cart_item_buttons(phone: str, item: dict) -> None:
+    """Send a button card for a single cart item with +1, -1, Remove actions."""
+    name = item.get("name") or item.get("item_name", "Item")
+    qty = item.get("quantity", 1)
+    price = item.get("price", 0)
+    
+    buttons = [
+        {"type": "reply", "reply": {"id": _truncate(f"increase {name}", 256), "title": "➕ Add One"}},
+        {"type": "reply", "reply": {"id": _truncate(f"decrease {name}", 256), "title": "➖ Remove One"}},
+        {"type": "reply", "reply": {"id": _truncate(f"remove {name}", 256), "title": "🗑️ Delete"}}
+    ]
+    
+    body = f"*{name}*\nQuantity: {qty}\nPrice: ₹{price} each\nSubtotal: ₹{price * qty}"
+    
+    await send_whatsapp_interactive(phone, {
+        "type": "button",
+        "body": {"text": _truncate(body, 1024)},
+        "action": {"buttons": buttons}
+    })
 
 
 # --- PAYMENT_METHOD_SELECTION ---
@@ -705,6 +785,45 @@ async def _convert_order_data(phone: str, agui: dict) -> None:
 
     await send_whatsapp_reply(phone, "\n".join(lines))
     LOGGER.info(f"Sent order data ({order_id}) to {phone}")
+
+
+# --- RECEIPT_LINK ---
+async def _convert_receipt_link(phone: str, agui: dict) -> None:
+    """Convert receipt link to a CTA URL button for PDF download."""
+    order_number = agui.get("order_number", "")
+    amount = agui.get("amount", 0)
+    download_url = agui.get("download_url", "")
+    items = agui.get("items", [])
+
+    if not download_url:
+        return
+
+    # Build receipt summary text
+    text = f"🧾 *Receipt — {order_number}*\n"
+    if items:
+        for item in items[:5]:
+            name = item.get("name", "Item")
+            qty = item.get("quantity", 1)
+            price = item.get("price", 0)
+            text += f"\n• {name} × {qty} — ₹{price * qty}"
+        if len(items) > 5:
+            text += f"\n  ... and {len(items) - 5} more items"
+        text += "\n"
+    text += f"\n💰 *Total: ₹{amount}*"
+    text += "\n\nTap below to download your receipt:"
+
+    await send_whatsapp_interactive(phone, {
+        "type": "cta_url",
+        "body": {"text": _truncate(text, 1024)},
+        "action": {
+            "name": "cta_url",
+            "parameters": {
+                "display_text": "Download Receipt",
+                "url": download_url
+            }
+        }
+    })
+    LOGGER.info(f"Sent receipt link ({order_number}, ₹{amount}) to {phone}")
 
 
 # ===================================================================
