@@ -362,56 +362,65 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — bilingual for code-switching languages.
-        # Hindi/Tamil speakers mix English food terms with native language.
-        # Auto-detect with bilingual hints lets Whisper preserve English words
-        # ("nugget sauce", "checkout") while handling native speech naturally.
+        # Whisper vocabulary hints — Force English Romanization for Hindi/Tamil.
+        # Users speak Hinglish/Tanglish (code-switching). Force language="en" so
+        # Whisper outputs phonetic English alphabet (e.g. "mujhe menu dikhao"
+        # instead of "मुझे मेनू दिखाओ"). GPT-4 natively understands Romanized
+        # Hindi/Tamil, so crew can process it directly without translation.
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "This conversation mixes Hindi and English (Hinglish). "
-                "Transcribe exactly as spoken, keeping English words unchanged: "
-                "menu, cart, add, remove, checkout, view, show, search, "
-                "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
-                "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
-                "dine in, take away, takeaway, payment, cash, online, beeda, appalam, "
+                "Users speak Hinglish - Hindi and English mixed together. "
+                "Transcribe all speech phonetically using the English alphabet (Romanization). "
+                "Common Hindi words: do (two), teen (three), char (four), panch (five), "
+                "ek (one), chhe (six), saat (seven), aath (eight), nau (nine), das (ten), "
+                "kitna (how much), kitne (how many), chahiye (want/need), dijiye (please give), "
+                "dijie (please give), deejiye (please give), dikhao (show), dikhaiye (show me), "
+                "karo (do it), kariye (please do), hataao (remove), menu (menu), cart (cart), "
+                "add (add), remove (remove), checkout (checkout), order (order), view (view), "
+                "show (show), search (search), dine in (dine in), take away (take away), "
+                "takeaway (takeaway), payment (payment), cash (cash), online (online). "
+                "Food items: dosa, idli, vada, sambar, chutney, masala dosa, rava dosa, "
+                "ghee dosa, plain dosa, onion dosa, podi dosa, masala, paneer, biryani, "
+                "butter chicken, naan, roti, paratha, chai, lassi, beeda, appalam, paan, "
+                "apple juice, orange juice, cold coffee, badam milk, filter coffee, "
                 "nugget, sauce, nugget sauce, spicy, fries, burger, sandwich, combo, "
                 "coke, pepsi, bisleri, fanta, sprite. "
-                "Common Hindi phrases: मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
-                "एक, दो, तीन, चार, पांच, छह, सात, आठ, नौ, दस, "
-                "कितना, कितने, चाहिए, दीजिए, दीजिये, हटाओ, दिखाओ, डाइन इन, टेक अवे।"
+                "Phonetically transcribe: मेनू → menu, कार्ट → cart, ऑर्डर → order."
             ),
             "Tamil": (
-                "This conversation mixes Tamil and English (Tanglish). "
-                "Transcribe exactly as spoken, keeping English words unchanged: "
-                "menu, cart, add, remove, checkout, view, show, "
-                "apple juice, orange juice, masala dosa, idli, vada, biryani, paneer, "
+                "Users speak Tanglish - Tamil and English mixed together. "
+                "Transcribe all speech phonetically using the English alphabet (Romanization). "
+                "Common Tamil words: rendu (two), moonu (three), naalu (four), anju (five), "
+                "onnu (one), aaru (six), ezhu (seven), ettu (eight), ombadhu (nine), pathu (ten), "
+                "evvalavu (how much), venum (want/need), thaanga (please give), kaattunga (show), "
+                "pannunga (do it), menu (menu), cart (cart), add (add), remove (remove), "
+                "checkout (checkout), order (order), dine in (dine in), take away (take away), "
+                "saapadu (food), thanni (water), coffee (coffee), tea (tea). "
+                "Food items: dosa, dosai, idli, vada, vadai, sambar, chutney, masala dosa, "
+                "rava dosa, ghee dosa, pongal, biryani, parotta, appalam, "
                 "nugget, sauce, nugget sauce, spicy, fries, burger, sandwich, combo, "
-                "coke, pepsi, bisleri, fanta, sprite. "
-                "Common Tamil phrases: மெனு காட்டுங்கள், கார்ட், ஆர்டர், செக்அவுட், "
-                "இரண்டு, மூன்று, நான்கு, ஐந்து, எவ்வளவு, வேண்டும், சாப்பாடு।"
+                "coke, pepsi, bisleri, fanta, sprite."
             ),
         }
 
         # Get language-specific hint
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Auto-detect (language=None) for Hindi/Tamil code-switching.
-        # Native codes (hi/ta) force ALL words into native script, mangling
-        # English food terms ("nugget sauce" → "नगत सास" → "cash sausages").
-        # Auto-detect lets Whisper recognize English words within Hindi/Tamil
-        # speech and keep them in English. temperature=0.2 for flexibility.
-        use_auto_detect = language in ["Hindi", "Tamil"]
+        # Force English (language="en") for Hindi/Tamil to get Romanized output.
+        # This produces phonetic English like "mujhe menu dikhao" which GPT-4
+        # understands natively — no translation step needed for crew input.
+        use_romanization = language in ["Hindi", "Tamil"]
 
         transcription = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language=None if use_auto_detect else language_code_map.get(language, "en"),
+            language="en" if use_romanization else language_code_map.get(language, "en"),
             prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.2 if use_auto_detect else 0.0,
+            temperature=0.2 if use_romanization else 0.0,
             response_format="verbose_json",
         )
 
