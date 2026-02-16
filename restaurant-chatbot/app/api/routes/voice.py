@@ -362,24 +362,31 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — bilingual prompts for code-switching languages.
-        # Hindi/Tamil users mix English food terms with native language (Hinglish/Tanglish).
-        # Rich prompts guide Whisper to preserve English words while handling native script.
+        # Whisper vocabulary hints — Force English Romanization for code-switching.
+        # Hindi/Tamil users speak Hinglish/Tanglish. Whisper transcribes phonetically
+        # in English alphabet so GPT-4 understands natively without translation.
+        # e.g. "दो apple juice चाहिए" → "do apple juice chahiye"
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "This conversation mixes Hindi and English (Hinglish). "
-                "Transcribe exactly as spoken, keeping English words unchanged: "
-                "menu, cart, add, remove, checkout, view, show, search, "
-                "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
-                "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
-                "dine in, take away, takeaway, payment, cash, online, beeda, appalam. "
-                "Common Hindi phrases: मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
-                "एक, दो, तीन, चार, पांच, छह, सात, आठ, नौ, दस, "
-                "कितना, कितने, चाहिए, दीजिए, दीजिये, हटाओ, दिखाओ, डाइन इन, टेक अवे।"
+                "Users speak Hinglish - Hindi and English mixed together. "
+                "Transcribe all speech phonetically using the English alphabet (Romanization). "
+                "Common Hindi words: do (two), teen (three), char (four), panch (five), "
+                "ek (one), chhe (six), saat (seven), aath (eight), nau (nine), das (ten), "
+                "kitna (how much), kitne (how many), chahiye (want/need), dijiye (please give), "
+                "dijie (please give), deejiye (please give), dikhao (show), dikhaiye (show me), "
+                "karo (do it), kariye (please do), hataao (remove), menu (menu), cart (cart), "
+                "add (add), remove (remove), checkout (checkout), order (order), view (view), "
+                "show (show), search (search), dine in (dine in), take away (take away), "
+                "takeaway (takeaway), payment (payment), cash (cash), online (online). "
+                "Food items: dosa, idli, vada, sambar, chutney, masala dosa, rava dosa, "
+                "ghee dosa, plain dosa, onion dosa, podi dosa, masala, paneer, biryani, "
+                "butter chicken, naan, roti, paratha, chai, lassi, beeda, appalam, paan, "
+                "apple juice, orange juice, cold coffee, badam milk, filter coffee. "
+                "Phonetically transcribe: मेनू → menu, कार्ट → cart, ऑर्डर → order."
             ),
             "Tamil": (
                 "Users speak Tanglish - Tamil and English mixed together. "
@@ -398,44 +405,20 @@ async def process_speech_segment(
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Language-specific Whisper strategy:
-        # - Hindi: auto-detect (language=None) — Hindi speakers code-switch heavily
-        #   (Hinglish), Whisper preserves English words naturally. Crew translates.
-        # - Tamil: Force English Romanization (language="en") — Tamil auto-detect outputs
-        #   pure Tamil script which GPT-4o-mini mistranslates. With rich Romanization hints,
-        #   Whisper outputs Tanglish phonetics ("rendu dosa venum") that GPT-4 understands
-        #   natively. temperature=0.2 for flexibility in phonetic spelling.
-        # - English: explicit language="en".
-        if language == "Tamil":
-            # Force English phonetic transcription (Romanized Tanglish)
-            transcription = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="en",
-                prompt=vocabulary_hint if vocabulary_hint else None,
-                temperature=0.2,
-                response_format="verbose_json",
-            )
-        elif language == "Hindi":
-            # Auto-detect for Hinglish code-switching
-            transcription = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language=None,
-                prompt=vocabulary_hint if vocabulary_hint else None,
-                temperature=0.2,
-                response_format="verbose_json",
-            )
-        else:
-            # English: explicit language
-            transcription = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language=language_code_map.get(language, "en"),
-                prompt=vocabulary_hint if vocabulary_hint else None,
-                temperature=0.0,
-                response_format="verbose_json",
-            )
+        # Force English Romanization for Hindi/Tamil (Approach B).
+        # Whisper transcribes all speech phonetically in English alphabet.
+        # GPT-4 natively understands Romanized Hinglish/Tanglish ("do chai chahiye").
+        # translate_for_tts() converts final response back to native script for TTS.
+        use_romanization = language in ["Hindi", "Tamil"]
+
+        transcription = await client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            language="en",
+            prompt=vocabulary_hint if vocabulary_hint else None,
+            temperature=0.2 if use_romanization else 0.0,
+            response_format="verbose_json",
+        )
 
         # Validate transcription quality using confidence scores
         if hasattr(transcription, 'avg_logprob'):
