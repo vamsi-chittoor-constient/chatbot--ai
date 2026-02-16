@@ -362,67 +362,44 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — Force English Romanization for Hindi/Tamil.
-        # Users speak Hinglish/Tanglish (code-switching). Force language="en" so
-        # Whisper outputs phonetic English alphabet (e.g. "mujhe menu dikhao"
-        # instead of "मुझे मेनू दिखाओ"). GPT-4 natively understands Romanized
-        # Hindi/Tamil, so crew can process it directly without translation.
+        # Whisper vocabulary hints — ONLY food/brand names Whisper wouldn't know.
+        # Do NOT include phrases or sentences — Whisper echoes them as hallucinations
+        # when it can't understand the audio well (e.g. Tamil speech with language="en").
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "Users speak Hinglish - Hindi and English mixed together. "
-                "Transcribe all speech phonetically using the English alphabet (Romanization). "
-                "Common Hindi words: do (two), teen (three), char (four), panch (five), "
-                "ek (one), chhe (six), saat (seven), aath (eight), nau (nine), das (ten), "
-                "kitna (how much), kitne (how many), chahiye (want/need), dijiye (please give), "
-                "dijie (please give), deejiye (please give), dikhao (show), dikhaiye (show me), "
-                "karo (do it), kariye (please do), hataao (remove), menu (menu), cart (cart), "
-                "add (add), remove (remove), checkout (checkout), order (order), view (view), "
-                "show (show), search (search), dine in (dine in), take away (take away), "
-                "takeaway (takeaway), payment (payment), cash (cash), online (online). "
-                "Food items: dosa, idli, vada, sambar, chutney, masala dosa, rava dosa, "
-                "ghee dosa, plain dosa, onion dosa, podi dosa, masala, paneer, biryani, "
-                "butter chicken, naan, roti, paratha, chai, lassi, beeda, appalam, paan, "
-                "apple juice, orange juice, cold coffee, badam milk, filter coffee, "
-                "nugget, sauce, nugget sauce, spicy, fries, burger, sandwich, combo, "
-                "coke, pepsi, bisleri, fanta, sprite. "
-                "Phonetically transcribe: मेनू → menu, कार्ट → cart, ऑर्डर → order."
+                "Masala Dosa, Rava Dosa, Ghee Dosa, Paneer Biryani, Idli, Vada, "
+                "Sambar, Appalam, Beeda, Parota, Dosai, Cold Coffee, Apple Juice, "
+                "Cheese Slice, Chicken Fillet, Badam Kulfi, Jigardhanda, "
+                "Nugget Sauce, French Fries, Fries, Garlic Sauce, Cocktail Sauce"
             ),
             "Tamil": (
-                "Users speak Tanglish - Tamil and English mixed together. "
-                "Transcribe all speech phonetically using the English alphabet (Romanization). "
-                "Common Tamil words: rendu (two), moonu (three), naalu (four), anju (five), "
-                "onnu (one), aaru (six), ezhu (seven), ettu (eight), ombadhu (nine), pathu (ten), "
-                "evvalavu (how much), venum (want/need), thaanga (please give), kaattunga (show), "
-                "pannunga (do it), menu (menu), cart (cart), add (add), remove (remove), "
-                "checkout (checkout), order (order), dine in (dine in), take away (take away), "
-                "saapadu (food), thanni (water), coffee (coffee), tea (tea). "
-                "Food items: dosa, dosai, idli, vada, vadai, sambar, chutney, masala dosa, "
-                "rava dosa, ghee dosa, pongal, biryani, parotta, appalam, "
-                "nugget, sauce, nugget sauce, spicy, fries, burger, sandwich, combo, "
-                "coke, pepsi, bisleri, fanta, sprite."
+                "Masala Dosa, Rava Dosa, Ghee Dosa, Paneer Biryani, Idli, Vada, "
+                "Sambar, Appalam, Beeda, Parota, Dosai, Cold Coffee, Apple Juice, "
+                "Cheese Slice, Chicken Fillet, Badam Kulfi, Jigardhanda, "
+                "Nugget Sauce, French Fries, Fries, Garlic Sauce, Cocktail Sauce"
             ),
         }
 
-        # Get language-specific hint
+        # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Force English (language="en") for Hindi/Tamil to get Romanized output.
-        # This produces phonetic English like "mujhe menu dikhao" which GPT-4
-        # understands natively — no translation step needed for crew input.
-        use_romanization = language in ["Hindi", "Tamil"]
+        # Always use language="en" so Whisper outputs English letters.
+        # For code-switched speech (Tanglish/Hinglish) this transcribes
+        # exactly what the user said in English phonetics.
+        whisper_kwargs = {
+            "model": "whisper-1",
+            "file": audio_file,
+            "prompt": vocabulary_hint if vocabulary_hint else None,
+            "temperature": 0.0,
+            "response_format": "verbose_json",
+            "language": "en",
+        }
 
-        transcription = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            language="en" if use_romanization else language_code_map.get(language, "en"),
-            prompt=vocabulary_hint if vocabulary_hint else None,
-            temperature=0.2 if use_romanization else 0.0,
-            response_format="verbose_json",
-        )
+        transcription = await client.audio.transcriptions.create(**whisper_kwargs)
 
         # Validate transcription quality using confidence scores
         if hasattr(transcription, 'avg_logprob'):
@@ -601,8 +578,27 @@ async def process_speech_segment(
             transcript=transcript_text
         )
 
-        # No normalization needed — Whisper translations API already outputs clean English
-        # for Hindi/Tamil, and English transcription is already English.
+        # Normalize transcript to clean English for non-English voice.
+        # Whisper with language="en" is inconsistent on Hindi/Tamil speech —
+        # sometimes outputs English translation, sometimes Romanized Hinglish,
+        # sometimes completely wrong words ("Sambar" for a checkout request).
+        # One GPT-4o-mini call makes it consistently English for both UI and crew.
+        if language != "English" and language in ["Hindi", "Tamil"]:
+            try:
+                _norm_resp = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Translate to English. Keep food names, numbers, prices unchanged. Output ONLY the translation."},
+                        {"role": "user", "content": transcript_text}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                normalized = _norm_resp.choices[0].message.content.strip()
+                logger.info("voice_transcript_normalized", original=transcript_text, english=normalized)
+                transcript_text = normalized
+            except Exception as e:
+                logger.warning("voice_transcript_normalize_failed", error=str(e))
 
         # Send transcript to client (clean English for display)
         await websocket.send_json({
