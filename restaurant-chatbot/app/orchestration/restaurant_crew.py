@@ -805,21 +805,37 @@ async def process_with_restaurant_crew(
     # Convert tools list to dict for RAG
     all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
 
+    # MULTI-TURN CONTEXT RESOLUTION FOR RAG:
+    # Short/ambiguous messages like "Yes please", "do that", "ok" need context
+    # from the last assistant turn to resolve intent for tool retrieval.
+    # History can be strings ("Assistant: ...") or dicts ({"role": "assistant", "content": "..."})
+    rag_query = user_message
+    if len(user_message.split()) <= 4 and conversation_history:
+        last_assistant_msg = ""
+        for turn in reversed(conversation_history):
+            if isinstance(turn, dict):
+                if turn.get("role", "") == "assistant":
+                    last_assistant_msg = turn.get("content", "")[:150]
+                    break
+            elif isinstance(turn, str) and turn.startswith("Assistant:"):
+                last_assistant_msg = turn[len("Assistant:"):].strip()[:150]
+                break
+        if last_assistant_msg:
+            rag_query = f"{last_assistant_msg} | User: {user_message}"
+            logger.info("rag_query_enriched", original=user_message, enriched_query=rag_query[:100])
+
     # TRANSLATION LAYER FOR RAG:
     # If query is non-English (or we want to be safe), translate it to English for better retrieval
     # Tools are indexed in English, so searching in Hindi/Tamil yields poor results.
     # We use a lightweight LLM call to translate ONLY the search query.
-    rag_query = user_message
-    if any(ord(c) > 127 for c in user_message): # Simple heuristic: contains non-ASCII characters (likely Hindi/Tamil script)
+    if any(ord(c) > 127 for c in rag_query):
         try:
             from app.ai_services.openai_service import OpenAIService
             openai_service = OpenAIService()
-            # Fast translation to English for search only
-            rag_query = await openai_service.translate_query(user_message, "English")
+            rag_query = await openai_service.translate_query(rag_query, "English")
             logger.info("rag_query_translated", original=user_message, translated=rag_query)
         except Exception as e:
             logger.warning("rag_translation_failed", error=str(e))
-            rag_query = user_message
 
     relevant_tools = get_relevant_tools(rag_query, all_tools_dict, max_tools=6)
 
@@ -1058,6 +1074,25 @@ async def process_with_agui_streaming(
         # Convert tools list to dict for RAG
         all_tools_dict = {tool.name: tool for tool in crew._all_food_tools}
 
+        # MULTI-TURN CONTEXT RESOLUTION FOR RAG:
+        # Short/ambiguous messages like "Yes please", "do that", "ok" need context
+        # from the last assistant turn to resolve intent for tool retrieval.
+        # History can be strings ("Assistant: ...") or dicts ({"role": "assistant", "content": "..."})
+        rag_query = user_message
+        if len(user_message.split()) <= 4 and conversation_history:
+            last_assistant_msg = ""
+            for turn in reversed(conversation_history):
+                if isinstance(turn, dict):
+                    if turn.get("role", "") == "assistant":
+                        last_assistant_msg = turn.get("content", "")[:150]
+                        break
+                elif isinstance(turn, str) and turn.startswith("Assistant:"):
+                    last_assistant_msg = turn[len("Assistant:"):].strip()[:150]
+                    break
+            if last_assistant_msg:
+                rag_query = f"{last_assistant_msg} | User: {user_message}"
+                logger.info("rag_query_enriched", original=user_message, enriched_query=rag_query[:100])
+
         # TRANSLATION LAYER: Translate non-English input to English for crew + RAG.
         # Whisper transcribes to English in voice mode, but in CHAT mode users type
         # Hinglish/Tanglish ("menu dikhao", "2 bisleri add karo").
@@ -1083,7 +1118,9 @@ async def process_with_agui_streaming(
                 logger.warning("crew_input_translation_failed", error=str(e))
                 english_input = user_message
 
-        relevant_tools = get_relevant_tools(english_input, all_tools_dict, max_tools=6)
+        # Use enriched query for RAG, but original english_input for crew task
+        rag_input = rag_query if rag_query != user_message else english_input
+        relevant_tools = get_relevant_tools(rag_input, all_tools_dict, max_tools=6)
 
         # Update food ordering agent's tools dynamically (cached crew, fresh tools!)
         crew._food_ordering_agent.tools = relevant_tools

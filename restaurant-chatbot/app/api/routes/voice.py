@@ -362,43 +362,80 @@ async def process_speech_segment(
             language=language
         )
 
-        # Whisper vocabulary hints — ONLY food/brand names Whisper wouldn't know.
-        # Do NOT include phrases or sentences — Whisper echoes them as hallucinations
-        # when it can't understand the audio well (e.g. Tamil speech with language="en").
+        # Whisper vocabulary hints — bilingual prompts for code-switching languages.
+        # Hindi/Tamil users mix English food terms with native language (Hinglish/Tanglish).
+        # Rich prompts guide Whisper to preserve English words while handling native script.
         vocabulary_hints = {
             "English": (
                 "Aswins, amla, nannari, badam gheer, badam kulfi, jigardhanda, "
                 "ilaneer payasam, dosai, parota, appalam, beeda, podi"
             ),
             "Hindi": (
-                "Masala Dosa, Rava Dosa, Ghee Dosa, Paneer Biryani, Idli, Vada, "
-                "Sambar, Appalam, Beeda, Parota, Dosai, Cold Coffee, Apple Juice, "
-                "Cheese Slice, Chicken Fillet, Badam Kulfi, Jigardhanda"
+                "This conversation mixes Hindi and English (Hinglish). "
+                "Transcribe exactly as spoken, keeping English words unchanged: "
+                "menu, cart, add, remove, checkout, view, show, search, "
+                "apple juice, orange juice, cold coffee, masala dosa, rava dosa, ghee dosa, "
+                "plain dosa, onion dosa, masala, paneer, biryani, idli, vada, sambar, chutney, "
+                "dine in, take away, takeaway, payment, cash, online, beeda, appalam. "
+                "Common Hindi phrases: मेनू दिखाओ, कार्ट में ऐड करो, ऑर्डर करो, चेकआउट करो, "
+                "एक, दो, तीन, चार, पांच, छह, सात, आठ, नौ, दस, "
+                "कितना, कितने, चाहिए, दीजिए, दीजिये, हटाओ, दिखाओ, डाइन इन, टेक अवे।"
             ),
             "Tamil": (
-                "Masala Dosa, Rava Dosa, Ghee Dosa, Paneer Biryani, Idli, Vada, "
-                "Sambar, Appalam, Beeda, Parota, Dosai, Cold Coffee, Apple Juice, "
-                "Cheese Slice, Chicken Fillet, Badam Kulfi, Jigardhanda"
+                "Users speak Tanglish - Tamil and English mixed together. "
+                "Transcribe all speech phonetically using the English alphabet (Romanization). "
+                "Common Tamil words: rendu (two), moonu (three), naalu (four), anju (five), "
+                "onnu (one), aaru (six), ezhu (seven), ettu (eight), ombadhu (nine), pathu (ten), "
+                "evvalavu (how much), venum (want/need), thaanga (please give), kaattunga (show), "
+                "pannunga (do it), menu (menu), cart (cart), add (add), remove (remove), "
+                "checkout (checkout), order (order), dine in (dine in), take away (take away), "
+                "saapadu (food), thanni (water), coffee (coffee), tea (tea). "
+                "Food items: dosa, dosai, idli, vada, vadai, sambar, chutney, masala dosa, "
+                "rava dosa, ghee dosa, pongal, biryani, parotta, appalam."
             ),
         }
 
         # Get language-specific prompt
         vocabulary_hint = vocabulary_hints.get(language, "")
 
-        # Always use language="en" so Whisper outputs English letters.
-        # For code-switched speech (Tanglish/Hinglish) this transcribes
-        # exactly what the user said in English phonetics.
-        # Crew agent's input translation converts to proper English for tools.
-        whisper_kwargs = {
-            "model": "whisper-1",
-            "file": audio_file,
-            "prompt": vocabulary_hint if vocabulary_hint else None,
-            "temperature": 0.0,
-            "response_format": "verbose_json",
-            "language": "en",
-        }
-
-        transcription = await client.audio.transcriptions.create(**whisper_kwargs)
+        # Language-specific Whisper strategy:
+        # - Hindi: auto-detect (language=None) — Hindi speakers code-switch heavily
+        #   (Hinglish), Whisper preserves English words naturally. Crew translates.
+        # - Tamil: Force English Romanization (language="en") — Tamil auto-detect outputs
+        #   pure Tamil script which GPT-4o-mini mistranslates. With rich Romanization hints,
+        #   Whisper outputs Tanglish phonetics ("rendu dosa venum") that GPT-4 understands
+        #   natively. temperature=0.2 for flexibility in phonetic spelling.
+        # - English: explicit language="en".
+        if language == "Tamil":
+            # Force English phonetic transcription (Romanized Tanglish)
+            transcription = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="en",
+                prompt=vocabulary_hint if vocabulary_hint else None,
+                temperature=0.2,
+                response_format="verbose_json",
+            )
+        elif language == "Hindi":
+            # Auto-detect for Hinglish code-switching
+            transcription = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language=None,
+                prompt=vocabulary_hint if vocabulary_hint else None,
+                temperature=0.2,
+                response_format="verbose_json",
+            )
+        else:
+            # English: explicit language
+            transcription = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language=language_code_map.get(language, "en"),
+                prompt=vocabulary_hint if vocabulary_hint else None,
+                temperature=0.0,
+                response_format="verbose_json",
+            )
 
         # Validate transcription quality using confidence scores
         if hasattr(transcription, 'avg_logprob'):
@@ -449,7 +486,9 @@ async def process_speech_segment(
         # Check 0b: Vocabulary hint echo — Whisper echoes the food-name hints
         # when it can't understand the audio. Detect if transcript closely
         # matches the vocabulary hint string (>60% word overlap).
-        if not _is_hallucination:
+        # SKIP for Hindi/Tamil: bilingual hints contain common conversational words
+        # (मेनू, दिखाओ, checkout) that legitimately appear in real user speech.
+        if not _is_hallucination and language == "English":
             _vocab_hint = vocabulary_hints.get(language, "").lower()
             if _vocab_hint and len(_text_lower.split()) >= 3:
                 _hint_words = set(re.sub(r'[^\w\s]', ' ', _vocab_hint).split())
@@ -575,26 +614,8 @@ async def process_speech_segment(
             transcript=transcript_text
         )
 
-        # Normalize transcript to clean English for non-English voice.
-        # Whisper with language="en" is inconsistent on Hindi/Tamil speech —
-        # sometimes outputs English translation, sometimes Romanized Hinglish.
-        # One GPT-4o-mini call makes it consistently English for both UI and crew.
-        if language != "English" and language in ["Hindi", "Tamil"]:
-            try:
-                _norm_resp = await client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "Translate to English. Keep food names, numbers, prices unchanged. Output ONLY the translation."},
-                        {"role": "user", "content": transcript_text}
-                    ],
-                    temperature=0.1,
-                    max_tokens=200
-                )
-                normalized = _norm_resp.choices[0].message.content.strip()
-                logger.info("voice_transcript_normalized", original=transcript_text, english=normalized)
-                transcript_text = normalized
-            except Exception as e:
-                logger.warning("voice_transcript_normalize_failed", error=str(e))
+        # No normalization needed — Whisper translations API already outputs clean English
+        # for Hindi/Tamil, and English transcription is already English.
 
         # Send transcript to client (clean English for display)
         await websocket.send_json({

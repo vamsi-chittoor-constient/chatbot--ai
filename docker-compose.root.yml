@@ -130,11 +130,11 @@ services:
       - ENABLE_PETPOOJA_SYNC=true
       # Frontend & Payment URLs
       # For local dev: use localhost; for production: use public IP/domain
-      - FRONTEND_URL=https://localhost
-      - PAYMENT_SUCCESS_URL=https://localhost/payment/success
-      - PAYMENT_FAILURE_URL=https://localhost/payment/failure
-      - PAYMENT_CALLBACK_URL=https://localhost/api/v1/payment/callback
-      - PAYMENT_WEBHOOK_URL=https://localhost/api/v1/webhook/razorpay
+      - FRONTEND_URL=https://noninflectionally-ultramicrochemical-reece.ngrok-free.dev
+      - PAYMENT_SUCCESS_URL=https://noninflectionally-ultramicrochemical-reece.ngrok-free.dev/payment/success
+      - PAYMENT_FAILURE_URL=https://noninflectionally-ultramicrochemical-reece.ngrok-free.dev/payment/failure
+      - PAYMENT_CALLBACK_URL=https://noninflectionally-ultramicrochemical-reece.ngrok-free.dev/api/v1/payment/callback
+      - PAYMENT_WEBHOOK_URL=https://noninflectionally-ultramicrochemical-reece.ngrok-free.dev/api/v1/webhook/razorpay
       # Razorpay credentials (override placeholders from .env)
       - RAZORPAY_KEY_ID=rzp_test_dXwWkc7Rw3f52T
       - RAZORPAY_KEY_SECRET=bs6Jk9HhctjKCBPN3IE4iPsF
@@ -233,6 +233,23 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # ===========================================================================
+  # ngrok Tunnel (Free HTTPS for WhatsApp webhook + payments)
+  # ===========================================================================
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: a24-ngrok
+    restart: unless-stopped
+    command: http http://nginx:80 --authtoken 39lDT1ZRSy8Q3G8RUj6GT4HwrWD_6QqdE9gH18wYmxUzUmxk7 --log stdout
+    ports:
+      - "4040:4040"
+    depends_on:
+      nginx:
+        condition: service_healthy
+    networks:
+      - a24-network
 
   # ===========================================================================
   # MICROSERVICE 3: WhatsApp Bridge (Meta Business API <-> Chatbot)
