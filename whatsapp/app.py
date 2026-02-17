@@ -35,6 +35,8 @@ _user_locks: Dict[str, asyncio.Lock] = {}
 # Dedup: track processed WhatsApp message IDs to reject Meta retries
 _processed_msg_ids: Dict[str, float] = {}   # msg_id → monotonic timestamp
 _DEDUP_WINDOW = 300  # seconds (5 min)
+# Background listeners for server-pushed events (e.g. PAYMENT_SUCCESS after Razorpay)
+_bg_listeners: Dict[str, asyncio.Task] = {}
 
 
 # ===================================================================
@@ -130,6 +132,9 @@ async def _process_message(phone: str, user_message: str, msg_id: str):
         LOGGER.error(f"Error processing message {msg_id} for {phone}: {e}", exc_info=True)
         await send_whatsapp_reply(phone, "Sorry, something went wrong. Please try again.")
 
+    # Start background listener for server-pushed events (e.g. PAYMENT_SUCCESS)
+    _start_bg_listener(phone)
+
 
 def _cleanup_dedup():
     """Remove expired entries from the dedup map (older than _DEDUP_WINDOW)."""
@@ -137,6 +142,118 @@ def _cleanup_dedup():
     expired = [k for k, ts in _processed_msg_ids.items() if now - ts > _DEDUP_WINDOW]
     for k in expired:
         del _processed_msg_ids[k]
+
+
+# ===================================================================
+# BACKGROUND WEBSOCKET LISTENER (server-pushed events)
+# ===================================================================
+# After each request cycle, a background task listens on the WebSocket
+# for events pushed by the server outside of a user message (e.g.
+# PAYMENT_SUCCESS after Razorpay callback, receipts, notifications).
+# The listener is cancelled when the next user message arrives.
+# ===================================================================
+
+async def _cancel_bg_listener(phone: str):
+    """Cancel background listener before active message processing."""
+    task = _bg_listeners.pop(phone, None)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+def _start_bg_listener(phone: str):
+    """Start background listener for server-pushed events after response cycle."""
+    old = _bg_listeners.pop(phone, None)
+    if old and not old.done():
+        old.cancel()
+    _bg_listeners[phone] = asyncio.create_task(_bg_listen(phone))
+    LOGGER.debug(f"Started background WS listener for {phone}")
+
+
+async def _bg_listen(phone: str):
+    """
+    Background listener for server-pushed WebSocket events.
+    Handles events like PAYMENT_SUCCESS that arrive outside user-initiated
+    request cycles. Acquires the per-user lock briefly for each recv() so
+    that an incoming user message (which cancels this task) can take over.
+    """
+    user_lock = _user_locks.get(phone)
+    if not user_lock:
+        return
+
+    text_chunks: list = []
+
+    try:
+        while True:
+            async with user_lock:
+                ws = ws_connections.get(phone)
+                if not ws or not ws.open:
+                    return
+
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                except asyncio.TimeoutError:
+                    continue
+
+                LOGGER.debug(f"BG listener received for {phone}: {raw[:200]}...")
+
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = data.get("message_type", "")
+
+                if msg_type == "agui_event":
+                    agui_data = data.get("metadata", {}).get("agui", {})
+                    agui_type = agui_data.get("type", "")
+
+                    # Text streaming (in case server pushes text outside a request)
+                    if agui_type == "TEXT_MESSAGE_CONTENT":
+                        delta = agui_data.get("delta", "")
+                        if delta:
+                            text_chunks.append(delta)
+                    elif agui_type == "TEXT_MESSAGE_END":
+                        if text_chunks:
+                            text = "".join(text_chunks).strip()
+                            if text:
+                                await send_whatsapp_reply(phone, text)
+                            text_chunks.clear()
+                    elif agui_type in ("RUN_FINISHED", "RUN_ERROR"):
+                        if text_chunks:
+                            text = "".join(text_chunks).strip()
+                            if text:
+                                await send_whatsapp_reply(phone, text)
+                            text_chunks.clear()
+                    # Skip lifecycle noise
+                    elif agui_type in (
+                        "TEXT_MESSAGE_START", "RUN_STARTED",
+                        "ACTIVITY_START", "ACTIVITY_END",
+                        "TOOL_CALL_START", "TOOL_CALL_ARGS",
+                        "TOOL_CALL_END", "TOOL_CALL_RESULT",
+                        "STATE_SNAPSHOT", "STATE_DELTA",
+                        "STEP_STARTED", "STEP_FINISHED",
+                    ):
+                        continue
+                    else:
+                        # Interactive push events: PAYMENT_SUCCESS, QUICK_REPLIES, etc.
+                        await _handle_agui_event(phone, agui_data)
+
+                elif msg_type == "ai_response" and data.get("message"):
+                    await send_whatsapp_reply(phone, data["message"])
+
+                # Skip typing_indicator, system_message, etc.
+
+    except asyncio.CancelledError:
+        LOGGER.debug(f"Background listener cancelled for {phone}")
+    except websockets.exceptions.ConnectionClosed:
+        LOGGER.debug(f"Background listener: WS closed for {phone}")
+        ws_connections.pop(phone, None)
+    except Exception as e:
+        LOGGER.error(f"Background listener error for {phone}: {e}", exc_info=True)
 
 
 def _extract_user_message(message: dict, message_type: str) -> Optional[str]:
@@ -187,6 +304,9 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
     - RUN_FINISHED: signals response is complete
     """
     is_new_connection = False
+
+    # Cancel background listener (it holds user_lock intermittently)
+    await _cancel_bg_listener(phone)
 
     # Per-user lock to prevent concurrent recv() on the same WebSocket
     if phone not in _user_locks:
@@ -1124,10 +1244,14 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Application shutdown - close all WebSocket connections"""
+    """Application shutdown - cancel listeners and close all WebSocket connections"""
     LOGGER.info("Shutting down WhatsApp Bridge...")
-    LOGGER.info(f"Closing {len(ws_connections)} active WebSocket connections...")
 
+    # Cancel all background listeners
+    for phone in list(_bg_listeners):
+        await _cancel_bg_listener(phone)
+
+    LOGGER.info(f"Closing {len(ws_connections)} active WebSocket connections...")
     for phone, ws in list(ws_connections.items()):
         try:
             await ws.close()
