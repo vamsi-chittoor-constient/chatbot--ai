@@ -285,6 +285,17 @@ def _extract_user_message(message: dict, message_type: str) -> Optional[str]:
     return None
 
 
+_GREETING_WORDS = frozenset({
+    "hi", "hey", "hello", "hii", "hiii", "yo", "sup",
+    "namaste", "hola", "heya", "hiya", "howdy",
+})
+
+
+def _is_simple_greeting(text: str) -> bool:
+    """Check if message is a simple greeting with no follow-up intent."""
+    return text.strip().lower().rstrip("!.,? ") in _GREETING_WORDS
+
+
 # ===================================================================
 # WEBSOCKET MESSAGE HANDLER
 # ===================================================================
@@ -349,6 +360,13 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
                 if welcome_text:
                     LOGGER.info(f"Welcome message for {phone}: {welcome_text[:80]}...")
                     await send_whatsapp_reply(phone, welcome_text)
+
+                # If the user's message is just a greeting ("Hi", "Hey", etc.)
+                # skip forwarding it — the welcome already greeted them.
+                # Avoids a redundant second greeting appearing in the chat.
+                if _is_simple_greeting(user_message):
+                    LOGGER.info(f"Skipping greeting '{user_message}' for {phone} (welcome already sent)")
+                    return None
 
             # Send user message to chatbot
             payload = {
