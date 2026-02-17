@@ -92,10 +92,13 @@ async def receive_message(request: Request):
 
                     # Forward to chatbot and get reply
                     assistant_reply = await get_chatbot_reply(from_number, user_message)
-                    LOGGER.info(f"Sending response to WhatsApp: {assistant_reply[:50]}...")
 
-                    # Send reply back to WhatsApp
-                    await send_whatsapp_reply(from_number, assistant_reply)
+                    # Send reply (None means response was already sent via AGUI events)
+                    if assistant_reply is not None:
+                        LOGGER.info(f"Sending response to WhatsApp: {assistant_reply[:50]}...")
+                        await send_whatsapp_reply(from_number, assistant_reply)
+                    else:
+                        LOGGER.info(f"Response for {from_number} handled via AGUI events")
 
         # Always return 200 to Meta (to prevent retries)
         return JSONResponse(content={"status": "ok"}, status_code=200)
@@ -138,16 +141,20 @@ def _extract_user_message(message: dict, message_type: str) -> Optional[str]:
 # ===================================================================
 # WEBSOCKET MESSAGE HANDLER
 # ===================================================================
-async def get_chatbot_reply(phone: str, user_message: str) -> str:
+async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
     """
     Send message to main app via WebSocket and wait for response.
     Creates persistent WebSocket connection per user (phone number as session ID).
 
-    The chatbot sends JSON responses with message_type field:
-    - "ai_response": actual text reply (forward to WhatsApp)
-    - "typing_indicator": skip
-    - "agui_event": convert to WhatsApp interactive messages where possible
-    - "system_message": include as text
+    Returns:
+        str: text message to send to WhatsApp
+        None: response was already sent via AGUI events (interactive messages / streamed text)
+
+    The chatbot streams responses via AGUI events:
+    - TEXT_MESSAGE_CONTENT: text chunks streamed directly to WhatsApp
+    - SEARCH_RESULTS, QUICK_REPLIES, etc.: converted to WhatsApp interactive messages
+    - ai_response: only for welcome messages and direct actions (legacy)
+    - RUN_FINISHED: signals response is complete
     """
     is_new_connection = False
 
@@ -188,7 +195,7 @@ async def get_chatbot_reply(phone: str, user_message: str) -> str:
 
             # On new connection, drain welcome/init messages from chatbot
             if is_new_connection:
-                welcome_text = await _drain_and_collect_response(websocket, phone, timeout=15)
+                welcome_text, _ = await _drain_and_collect_response(websocket, phone, timeout=15)
                 if welcome_text:
                     LOGGER.info(f"Welcome message for {phone}: {welcome_text[:80]}...")
                     await send_whatsapp_reply(phone, welcome_text)
@@ -201,11 +208,13 @@ async def get_chatbot_reply(phone: str, user_message: str) -> str:
             await websocket.send(json.dumps(payload))
             LOGGER.info(f"Sent to chatbot from {phone}: {user_message[:50]}...")
 
-            # Collect AI response (convert AGUI events to WhatsApp interactive messages)
-            response = await _drain_and_collect_response(websocket, phone, timeout=45)
+            # Collect response (text via AGUI streaming + interactive cards sent directly)
+            text, any_sent = await _drain_and_collect_response(websocket, phone, timeout=45)
 
-            if response:
-                return response
+            if text:
+                return text  # Caller will send this as WhatsApp text message
+            elif any_sent:
+                return None  # Response already handled via AGUI (interactive messages / streamed text)
             else:
                 return "Sorry, I couldn't get a response. Please try again."
 
@@ -232,21 +241,24 @@ async def _drain_and_collect_response(
     websocket: websockets.WebSocketClientProtocol,
     phone: str,
     timeout: float = 45
-) -> str:
+) -> tuple:
     """
-    Read messages from the chatbot WebSocket and collect ai_response text.
-    Converts AGUI events to WhatsApp interactive messages and sends them directly.
+    Read messages from the chatbot WebSocket and collect response.
 
-    The chatbot sends JSON in this format:
-    {
-        "message": "text here",
-        "timestamp": "...",
-        "session_id": "wa-919876543210",
-        "message_type": "ai_response" | "typing_indicator" | "agui_event" | "system_message",
-        "metadata": {"agui": {"type": "SEARCH_RESULTS", ...}}
-    }
+    The chatbot streams responses via AGUI events:
+    - TEXT_MESSAGE_CONTENT: text chunks (delta) — these ARE the AI text response
+    - SEARCH_RESULTS, QUICK_REPLIES, etc.: interactive cards — sent to WhatsApp immediately
+    - RUN_FINISHED: signals end of response
+    - ai_response: only for welcome messages and direct actions (legacy path)
+
+    Returns:
+        (text, any_sent) where:
+        - text: remaining text to send as reply (or None if already sent)
+        - any_sent: True if any messages were already sent to WhatsApp during processing
     """
-    collected_parts = []
+    text_chunks = []       # TEXT_MESSAGE_CONTENT deltas (joined at TEXT_MESSAGE_END)
+    direct_parts = []      # ai_response / system_message text (legacy path)
+    any_sent = False       # Whether we already sent messages to WhatsApp
     deadline = asyncio.get_event_loop().time() + timeout
 
     while True:
@@ -260,8 +272,8 @@ async def _drain_and_collect_response(
                 timeout=min(remaining, 10)
             )
         except asyncio.TimeoutError:
-            # No more messages — return what we have
-            if collected_parts:
+            # No more messages — break if we already sent/collected something
+            if direct_parts or text_chunks or any_sent:
                 break
             continue
 
@@ -272,102 +284,172 @@ async def _drain_and_collect_response(
             msg_type = data.get("message_type", "")
             message_text = data.get("message", "")
 
+            # --- Legacy ai_response (welcome messages, direct actions like add-to-cart) ---
             if msg_type == "ai_response" and message_text:
-                collected_parts.append(message_text)
-                # AI response received — drain trailing events (AGUI cards often follow text)
-                await _drain_trailing_events(websocket, phone)
+                direct_parts.append(message_text)
+                # Drain trailing AGUI events (QUICK_REPLIES often follow direct actions)
+                trailing_sent = await _drain_trailing_events(websocket, phone)
+                any_sent = any_sent or trailing_sent
                 break
 
+            # --- AGUI events (primary response path) ---
             elif msg_type == "agui_event":
-                # Convert AGUI events to WhatsApp interactive messages
                 agui_data = data.get("metadata", {}).get("agui", {})
-                await _handle_agui_event(phone, agui_data)
-                continue
+                agui_type = agui_data.get("type", "")
+
+                # Text streaming: collect delta chunks
+                if agui_type == "TEXT_MESSAGE_CONTENT":
+                    delta = agui_data.get("delta", "")
+                    if delta:
+                        text_chunks.append(delta)
+                    continue
+
+                # Text stream ended: flush accumulated text to WhatsApp immediately
+                # (so text appears BEFORE interactive cards that follow)
+                elif agui_type == "TEXT_MESSAGE_END":
+                    if text_chunks:
+                        text = "".join(text_chunks).strip()
+                        if text:
+                            await send_whatsapp_reply(phone, text)
+                            any_sent = True
+                            LOGGER.info(f"Sent streamed text to {phone}: {text[:80]}...")
+                        text_chunks.clear()
+                    continue
+
+                # Text stream start: just a marker, skip
+                elif agui_type == "TEXT_MESSAGE_START":
+                    continue
+
+                # Completion signals — stop collecting
+                elif agui_type in ("RUN_FINISHED", "RUN_ERROR"):
+                    LOGGER.debug(f"Received {agui_type} for {phone}, response complete")
+                    break
+
+                # Interactive events: convert and send to WhatsApp
+                else:
+                    sent = await _handle_agui_event(phone, agui_data)
+                    if sent:
+                        any_sent = True
+                    continue
 
             elif msg_type == "typing_indicator":
-                # Skip typing indicators silently
                 continue
 
             elif msg_type == "system_message" and message_text:
-                # Include system messages (e.g. "Welcome to...")
-                collected_parts.append(message_text)
+                direct_parts.append(message_text)
                 continue
 
             elif message_text:
-                # Unknown type but has text content
-                collected_parts.append(message_text)
+                direct_parts.append(message_text)
 
         except json.JSONDecodeError:
-            # Plain text fallback
             if raw.strip():
-                collected_parts.append(raw.strip())
+                direct_parts.append(raw.strip())
                 break
 
-    return "\n\n".join(collected_parts)
+    # Build final text from any remaining pieces
+    remaining_text = None
+    if direct_parts:
+        remaining_text = "\n\n".join(direct_parts)
+    elif text_chunks:
+        # TEXT_MESSAGE_END never arrived — flush remaining chunks
+        text = "".join(text_chunks).strip()
+        if text:
+            remaining_text = text
+
+    return (remaining_text, any_sent)
 
 
 async def _drain_trailing_events(
     websocket: websockets.WebSocketClientProtocol,
     phone: str,
-    window: float = 3.0
-) -> None:
+    window: float = 5.0
+) -> bool:
     """
     After receiving an ai_response, drain any trailing AGUI events
     (e.g. SEARCH_RESULTS card, QUICK_REPLIES) that arrive shortly after.
-    Also catches a trailing ai_response (bonus text).
+    Stops on RUN_FINISHED or timeout.
+
+    Returns True if any messages were sent to WhatsApp.
     """
+    any_sent = False
     deadline = asyncio.get_event_loop().time() + window
     while True:
         remaining = deadline - asyncio.get_event_loop().time()
         if remaining <= 0:
             break
         try:
-            raw = await asyncio.wait_for(websocket.recv(), timeout=min(remaining, 1.5))
+            raw = await asyncio.wait_for(websocket.recv(), timeout=min(remaining, 2.0))
             data = json.loads(raw)
             msg_type = data.get("message_type", "")
 
             if msg_type == "agui_event":
                 agui_data = data.get("metadata", {}).get("agui", {})
-                await _handle_agui_event(phone, agui_data)
+                agui_type = agui_data.get("type", "")
+
+                # Stop on completion signals
+                if agui_type in ("RUN_FINISHED", "RUN_ERROR"):
+                    break
+
+                sent = await _handle_agui_event(phone, agui_data)
+                if sent:
+                    any_sent = True
+
             elif msg_type == "ai_response" and data.get("message"):
-                # Bonus text — send as plain text
                 await send_whatsapp_reply(phone, data["message"])
+                any_sent = True
             # Skip typing_indicator, system_message, etc.
         except (asyncio.TimeoutError, json.JSONDecodeError, Exception):
             break
+    return any_sent
 
 
 # ===================================================================
 # AGUI → WHATSAPP INTERACTIVE CONVERSION
 # ===================================================================
 
-async def _handle_agui_event(phone: str, agui: dict) -> None:
+async def _handle_agui_event(phone: str, agui: dict) -> bool:
     """
     Route AGUI events to the appropriate WhatsApp interactive converter.
     Skips events with no WhatsApp equivalent (lifecycle, activity, forms, etc.).
+
+    Returns True if a WhatsApp message was sent, False if skipped.
+    Note: TEXT_MESSAGE_* and RUN_FINISHED/RUN_ERROR are handled by the caller.
     """
     event_type = agui.get("type", "")
 
+    # Interactive events that send WhatsApp messages
     if event_type == "SEARCH_RESULTS":
         await _convert_search_results(phone, agui)
+        return True
     elif event_type == "MENU_DATA":
         await _convert_menu_data(phone, agui)
+        return True
     elif event_type == "CART_DATA":
         await _convert_cart_data(phone, agui)
+        return True
     elif event_type == "PAYMENT_METHOD_SELECTION":
         await _convert_payment_methods(phone, agui)
+        return True
     elif event_type == "PAYMENT_LINK":
         await _convert_payment_link(phone, agui)
+        return True
     elif event_type == "PAYMENT_SUCCESS":
         await _convert_payment_success(phone, agui)
+        return True
     elif event_type == "QUICK_REPLIES":
         await _convert_quick_replies(phone, agui)
+        return True
     elif event_type == "ORDER_DATA":
         await _convert_order_data(phone, agui)
+        return True
     elif event_type == "RECEIPT_LINK":
         await _convert_receipt_link(phone, agui)
+        return True
+
+    # Lifecycle events — skip silently (TEXT_MESSAGE_* handled by caller)
     elif event_type in (
-        "RUN_STARTED", "RUN_FINISHED", "RUN_ERROR",
+        "RUN_STARTED",
         "ACTIVITY_START", "ACTIVITY_END",
         "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END",
         "TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END", "TOOL_CALL_RESULT",
@@ -376,8 +458,10 @@ async def _handle_agui_event(phone: str, agui: dict) -> None:
         "STEP_STARTED", "STEP_FINISHED", "ARTIFACT",
     ):
         LOGGER.debug(f"Skipping AGUI event {event_type} for {phone} (no WA equivalent)")
+        return False
     else:
         LOGGER.warning(f"Unknown AGUI event type: {event_type} for {phone}")
+        return False
 
 
 def _truncate(text: str, max_len: int) -> str:
