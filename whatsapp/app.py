@@ -259,6 +259,7 @@ async def _drain_and_collect_response(
     text_chunks = []       # TEXT_MESSAGE_CONTENT deltas (joined at TEXT_MESSAGE_END)
     direct_parts = []      # ai_response / system_message text (legacy path)
     any_sent = False       # Whether we already sent messages to WhatsApp
+    last_quick_replies = None  # Buffer: only send the LAST QUICK_REPLIES (web UI replaces them)
     deadline = asyncio.get_event_loop().time() + timeout
 
     while True:
@@ -325,7 +326,14 @@ async def _drain_and_collect_response(
                     LOGGER.debug(f"Received {agui_type} for {phone}, response complete")
                     break
 
-                # Interactive events: convert and send to WhatsApp
+                # QUICK_REPLIES: buffer instead of sending (web UI replaces them;
+                # tools emit one, then orchestrator emits another — only last matters)
+                elif agui_type == "QUICK_REPLIES":
+                    last_quick_replies = agui_data
+                    LOGGER.debug(f"Buffered QUICK_REPLIES for {phone} (will send last one)")
+                    continue
+
+                # Other interactive events: convert and send to WhatsApp
                 else:
                     sent = await _handle_agui_event(phone, agui_data)
                     if sent:
@@ -346,6 +354,12 @@ async def _drain_and_collect_response(
             if raw.strip():
                 direct_parts.append(raw.strip())
                 break
+
+    # Flush the last buffered QUICK_REPLIES (deduplicates tool + orchestrator emissions)
+    if last_quick_replies:
+        await _convert_quick_replies(phone, last_quick_replies)
+        any_sent = True
+        LOGGER.info(f"Sent final QUICK_REPLIES to {phone}")
 
     # Build final text from any remaining pieces
     remaining_text = None
@@ -373,6 +387,7 @@ async def _drain_trailing_events(
     Returns True if any messages were sent to WhatsApp.
     """
     any_sent = False
+    last_quick_replies = None
     deadline = asyncio.get_event_loop().time() + window
     while True:
         remaining = deadline - asyncio.get_event_loop().time()
@@ -391,6 +406,11 @@ async def _drain_trailing_events(
                 if agui_type in ("RUN_FINISHED", "RUN_ERROR"):
                     break
 
+                # Buffer QUICK_REPLIES — only send last one
+                if agui_type == "QUICK_REPLIES":
+                    last_quick_replies = agui_data
+                    continue
+
                 sent = await _handle_agui_event(phone, agui_data)
                 if sent:
                     any_sent = True
@@ -401,6 +421,12 @@ async def _drain_trailing_events(
             # Skip typing_indicator, system_message, etc.
         except (asyncio.TimeoutError, json.JSONDecodeError, Exception):
             break
+
+    # Flush last buffered QUICK_REPLIES
+    if last_quick_replies:
+        await _convert_quick_replies(phone, last_quick_replies)
+        any_sent = True
+
     return any_sent
 
 
@@ -438,6 +464,8 @@ async def _handle_agui_event(phone: str, agui: dict) -> bool:
         await _convert_payment_success(phone, agui)
         return True
     elif event_type == "QUICK_REPLIES":
+        # Handled by caller (buffered to deduplicate — tools + orchestrator both emit)
+        LOGGER.debug(f"QUICK_REPLIES passed to _handle_agui_event for {phone} (should be buffered by caller)")
         await _convert_quick_replies(phone, agui)
         return True
     elif event_type == "ORDER_DATA":
