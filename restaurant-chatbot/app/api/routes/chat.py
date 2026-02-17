@@ -1252,8 +1252,12 @@ async def chat_endpoint(
             from app.services.payment_state_service import get_payment_state, set_payment_state
 
             payment_state = get_payment_state(session_id)
+            # Skip for WhatsApp sessions — WA bridge bg listener already
+            # handles payment delivery; re-sending causes duplicates.
+            is_wa_session = session_id.startswith("wa-")
             if (
-                payment_state.get("step") == "payment_success"
+                not is_wa_session
+                and payment_state.get("step") == "payment_success"
                 and payment_state.get("completed")
                 and not payment_state.get("ws_delivered")
             ):
@@ -1601,6 +1605,14 @@ async def chat_endpoint(
                 except Exception as _ptf_err:
                     logger.warning("payment_pending_handler_error", error=str(_ptf_err))
                 # ========================================================================
+
+                # Clear stale events from previous processing cycles so they
+                # don't leak into the new response stream.
+                try:
+                    from app.core.agui_events import clear_event_queue
+                    clear_event_queue(session_id)
+                except Exception:
+                    pass
 
                 # ============ TESTING MODULE - Metadata Streaming ============
                 # WARNING: This section can be removed when manual testing is complete
