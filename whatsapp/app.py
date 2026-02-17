@@ -32,6 +32,9 @@ ws_connections: Dict[str, websockets.WebSocketClientProtocol] = {}
 ws_lock = asyncio.Lock()
 # Per-user locks to prevent concurrent recv() on the same WebSocket
 _user_locks: Dict[str, asyncio.Lock] = {}
+# Dedup: track processed WhatsApp message IDs to reject Meta retries
+_processed_msg_ids: Dict[str, float] = {}   # msg_id → monotonic timestamp
+_DEDUP_WINDOW = 300  # seconds (5 min)
 
 
 # ===================================================================
@@ -64,7 +67,8 @@ async def verify_webhook(
 async def receive_message(request: Request):
     """
     Receive incoming WhatsApp messages from Meta webhook.
-    Handles text messages AND interactive replies (button taps, list selections).
+    Returns 200 immediately to Meta, then processes the message in the background.
+    This prevents Meta from retrying the webhook when AI response takes >20s.
     """
     try:
         data = await request.json()
@@ -77,9 +81,18 @@ async def receive_message(request: Request):
 
                 if messages:
                     message = messages[0]
+                    msg_id = message.get("id", "")
                     from_number = message.get("from")
                     message_type = message.get("type")
                     user_name = value.get("contacts", [{}])[0].get("profile", {}).get("name", "User")
+
+                    # --- Dedup: reject retries of already-processed messages ---
+                    if msg_id and msg_id in _processed_msg_ids:
+                        LOGGER.warning(f"Duplicate webhook for msg {msg_id} from {from_number}, skipping")
+                        return JSONResponse(content={"status": "ok"}, status_code=200)
+                    if msg_id:
+                        _processed_msg_ids[msg_id] = asyncio.get_event_loop().time()
+                        _cleanup_dedup()
 
                     # Extract user message based on message type
                     user_message = _extract_user_message(message, message_type)
@@ -90,23 +103,40 @@ async def receive_message(request: Request):
 
                     LOGGER.info(f"Message from {from_number} ({user_name}): {user_message[:50]}...")
 
-                    # Forward to chatbot and get reply
-                    assistant_reply = await get_chatbot_reply(from_number, user_message)
-
-                    # Send reply (None means response was already sent via AGUI events)
-                    if assistant_reply is not None:
-                        LOGGER.info(f"Sending response to WhatsApp: {assistant_reply[:50]}...")
-                        await send_whatsapp_reply(from_number, assistant_reply)
-                    else:
-                        LOGGER.info(f"Response for {from_number} handled via AGUI events")
-
-        # Always return 200 to Meta (to prevent retries)
-        return JSONResponse(content={"status": "ok"}, status_code=200)
+                    # Process in background — return 200 to Meta immediately
+                    asyncio.create_task(
+                        _process_message(from_number, user_message, msg_id)
+                    )
 
     except Exception as e:
         LOGGER.error(f"Error processing webhook: {e}", exc_info=True)
-        # Always return 200 to Meta (to prevent endless retries)
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
+
+    # Always return 200 immediately to Meta (prevents timeout retries)
+    return JSONResponse(content={"status": "ok"}, status_code=200)
+
+
+async def _process_message(phone: str, user_message: str, msg_id: str):
+    """Background task: forward message to chatbot, send response to WhatsApp."""
+    try:
+        assistant_reply = await get_chatbot_reply(phone, user_message)
+
+        if assistant_reply is not None:
+            LOGGER.info(f"Sending response to WhatsApp: {assistant_reply[:50]}...")
+            await send_whatsapp_reply(phone, assistant_reply)
+        else:
+            LOGGER.info(f"Response for {phone} handled via AGUI events")
+
+    except Exception as e:
+        LOGGER.error(f"Error processing message {msg_id} for {phone}: {e}", exc_info=True)
+        await send_whatsapp_reply(phone, "Sorry, something went wrong. Please try again.")
+
+
+def _cleanup_dedup():
+    """Remove expired entries from the dedup map (older than _DEDUP_WINDOW)."""
+    now = asyncio.get_event_loop().time()
+    expired = [k for k, ts in _processed_msg_ids.items() if now - ts > _DEDUP_WINDOW]
+    for k in expired:
+        del _processed_msg_ids[k]
 
 
 def _extract_user_message(message: dict, message_type: str) -> Optional[str]:
