@@ -22,6 +22,9 @@ VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN")
 ACCESS_TOKEN = os.getenv("WA_TOKEN")
 WHATSAPP_PHONE_ID = os.getenv("PHONE_NUMBER_ID")
 CHATBOT_WS_BASE_URL = os.getenv("CHATBOT_WS_BASE_URL", "ws://chatbot-app:8000/api/v1/chat")
+# Public base URL for the chatbot (used to make relative URLs absolute, e.g. receipt PDF)
+# Set this to the ngrok/domain URL, e.g. "https://abc123.ngrok-free.app"
+CHATBOT_PUBLIC_URL = os.getenv("CHATBOT_PUBLIC_URL", "").rstrip("/")
 WHATSAPP_API_VERSION = "v19.0"
 
 LOGGER.info("WhatsApp Bridge starting...")
@@ -179,12 +182,16 @@ async def _bg_listen(phone: str):
     Handles events like PAYMENT_SUCCESS that arrive outside user-initiated
     request cycles. Acquires the per-user lock briefly for each recv() so
     that an incoming user message (which cancels this task) can take over.
+
+    QUICK_REPLIES are buffered (last-wins) and flushed on RUN_FINISHED,
+    same as the main drain, to prevent duplicate quick reply messages.
     """
     user_lock = _user_locks.get(phone)
     if not user_lock:
         return
 
     text_chunks: list = []
+    last_quick_replies = None  # Buffer QUICK_REPLIES, flush on RUN_FINISHED
 
     try:
         while True:
@@ -223,11 +230,22 @@ async def _bg_listen(phone: str):
                                 await send_whatsapp_reply(phone, text)
                             text_chunks.clear()
                     elif agui_type in ("RUN_FINISHED", "RUN_ERROR"):
+                        # Flush any remaining text
                         if text_chunks:
                             text = "".join(text_chunks).strip()
                             if text:
                                 await send_whatsapp_reply(phone, text)
                             text_chunks.clear()
+                        # Flush buffered QUICK_REPLIES (only the last one)
+                        if last_quick_replies:
+                            await _convert_quick_replies(phone, last_quick_replies)
+                            last_quick_replies = None
+
+                    # QUICK_REPLIES: buffer, don't send (same dedup as main drain)
+                    elif agui_type == "QUICK_REPLIES":
+                        last_quick_replies = agui_data
+                        LOGGER.debug(f"BG listener buffered QUICK_REPLIES for {phone}")
+
                     # Skip lifecycle noise
                     elif agui_type in (
                         "TEXT_MESSAGE_START", "RUN_STARTED",
@@ -239,7 +257,7 @@ async def _bg_listen(phone: str):
                     ):
                         continue
                     else:
-                        # Interactive push events: PAYMENT_SUCCESS, QUICK_REPLIES, etc.
+                        # Interactive push events: PAYMENT_SUCCESS, SEARCH_RESULTS, etc.
                         await _handle_agui_event(phone, agui_data)
 
                 elif msg_type == "ai_response" and data.get("message"):
@@ -416,8 +434,12 @@ async def _drain_and_collect_response(
     The chatbot streams responses via AGUI events:
     - TEXT_MESSAGE_CONTENT: text chunks (delta) — these ARE the AI text response
     - SEARCH_RESULTS, QUICK_REPLIES, etc.: interactive cards — sent to WhatsApp immediately
-    - RUN_FINISHED: signals end of response
+    - RUN_FINISHED: signals end of a processing stage (chatbot may have multiple stages)
     - ai_response: only for welcome messages and direct actions (legacy path)
+
+    QUICK_REPLIES are buffered (last-wins) to deduplicate tool + orchestrator emissions.
+    On RUN_FINISHED we don't break immediately — we shorten the deadline by 3s to allow
+    follow-up processing stages (e.g. greeting stage + actual response stage).
 
     Returns:
         (text, any_sent) where:
@@ -489,9 +511,16 @@ async def _drain_and_collect_response(
                 elif agui_type == "TEXT_MESSAGE_START":
                     continue
 
-                # Completion signals — stop collecting
-                elif agui_type in ("RUN_FINISHED", "RUN_ERROR"):
-                    LOGGER.debug(f"Received {agui_type} for {phone}, response complete")
+                # RUN_FINISHED: chatbot may have follow-up processing stages.
+                # Don't break — shorten the deadline so we wait briefly for more.
+                elif agui_type == "RUN_FINISHED":
+                    follow_up = asyncio.get_event_loop().time() + 3.0
+                    deadline = min(deadline, follow_up)
+                    LOGGER.debug(f"RUN_FINISHED for {phone}, waiting up to 3s for follow-up")
+                    continue
+
+                elif agui_type == "RUN_ERROR":
+                    LOGGER.debug(f"RUN_ERROR for {phone}, stopping")
                     break
 
                 # QUICK_REPLIES: buffer instead of sending (web UI replaces them;
@@ -1086,6 +1115,12 @@ async def _convert_receipt_link(phone: str, agui: dict) -> None:
 
     if not download_url:
         return
+
+    # Make relative URLs absolute (chatbot emits "/api/v1/..." paths)
+    if download_url.startswith("/") and CHATBOT_PUBLIC_URL:
+        download_url = CHATBOT_PUBLIC_URL + download_url
+    elif download_url.startswith("/"):
+        LOGGER.warning(f"CHATBOT_PUBLIC_URL not set — receipt link will be relative: {download_url}")
 
     # Build receipt summary text
     text = f"🧾 *Receipt — {order_number}*\n"
