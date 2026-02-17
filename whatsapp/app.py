@@ -383,6 +383,20 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
                     LOGGER.info(f"Skipping greeting '{user_message}' for {phone} (welcome already sent)")
                     return None
 
+            # Purge stale events sitting in the WebSocket buffer from previous
+            # request cycles (e.g. receipt/quick-replies the bg listener didn't read).
+            if not is_new_connection:
+                purged = 0
+                while True:
+                    try:
+                        stale = await asyncio.wait_for(websocket.recv(), timeout=0.1)
+                        purged += 1
+                        LOGGER.debug(f"Purged stale WS message for {phone}: {stale[:120]}...")
+                    except asyncio.TimeoutError:
+                        break
+                if purged:
+                    LOGGER.info(f"Purged {purged} stale WS message(s) for {phone}")
+
             # Send user message to chatbot
             payload = {
                 "message": user_message,
