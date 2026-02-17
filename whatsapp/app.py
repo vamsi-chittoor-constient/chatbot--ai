@@ -30,6 +30,8 @@ LOGGER.info(f"Chatbot WebSocket base URL: {CHATBOT_WS_BASE_URL}")
 # === Global persistent WebSocket connections (per user) ===
 ws_connections: Dict[str, websockets.WebSocketClientProtocol] = {}
 ws_lock = asyncio.Lock()
+# Per-user locks to prevent concurrent recv() on the same WebSocket
+_user_locks: Dict[str, asyncio.Lock] = {}
 
 
 # ===================================================================
@@ -149,56 +151,63 @@ async def get_chatbot_reply(phone: str, user_message: str) -> str:
     """
     is_new_connection = False
 
+    # Per-user lock to prevent concurrent recv() on the same WebSocket
+    if phone not in _user_locks:
+        _user_locks[phone] = asyncio.Lock()
+    user_lock = _user_locks[phone]
+
     try:
-        # Lock only for connection management (not message exchange)
-        async with ws_lock:
-            # Check if connection exists and is open
-            if phone in ws_connections:
-                ws = ws_connections[phone]
-                if not ws.open:
-                    LOGGER.warning(f"WebSocket for {phone} is closed, reconnecting...")
-                    del ws_connections[phone]
-                else:
-                    LOGGER.debug(f"Reusing existing WebSocket for {phone}")
+        # Per-user lock covers BOTH connection management AND message exchange
+        async with user_lock:
+            # Lock for connection management
+            async with ws_lock:
+                # Check if connection exists and is open
+                if phone in ws_connections:
+                    ws = ws_connections[phone]
+                    if not ws.open:
+                        LOGGER.warning(f"WebSocket for {phone} is closed, reconnecting...")
+                        del ws_connections[phone]
+                    else:
+                        LOGGER.debug(f"Reusing existing WebSocket for {phone}")
 
-            # Create new connection if needed
-            if phone not in ws_connections:
-                # Session ID uses "wa-" prefix so chatbot skips auth forms
-                session_id = f"wa-{phone}"
-                ws_url = f"{CHATBOT_WS_BASE_URL}/{session_id}"
-                LOGGER.info(f"Creating new WebSocket connection for {phone} -> {ws_url}")
+                # Create new connection if needed
+                if phone not in ws_connections:
+                    # Session ID uses "wa-" prefix so chatbot skips auth forms
+                    session_id = f"wa-{phone}"
+                    ws_url = f"{CHATBOT_WS_BASE_URL}/{session_id}"
+                    LOGGER.info(f"Creating new WebSocket connection for {phone} -> {ws_url}")
 
-                ws_connections[phone] = await asyncio.wait_for(
-                    websockets.connect(ws_url),
-                    timeout=30
-                )
-                LOGGER.info(f"WebSocket connected for {phone}")
-                is_new_connection = True
+                    ws_connections[phone] = await asyncio.wait_for(
+                        websockets.connect(ws_url),
+                        timeout=30
+                    )
+                    LOGGER.info(f"WebSocket connected for {phone}")
+                    is_new_connection = True
 
-        websocket = ws_connections[phone]
+            websocket = ws_connections[phone]
 
-        # On new connection, drain welcome/init messages from chatbot
-        if is_new_connection:
-            welcome_text = await _drain_and_collect_response(websocket, phone, timeout=15)
-            if welcome_text:
-                LOGGER.info(f"Welcome message for {phone}: {welcome_text[:80]}...")
-                await send_whatsapp_reply(phone, welcome_text)
+            # On new connection, drain welcome/init messages from chatbot
+            if is_new_connection:
+                welcome_text = await _drain_and_collect_response(websocket, phone, timeout=15)
+                if welcome_text:
+                    LOGGER.info(f"Welcome message for {phone}: {welcome_text[:80]}...")
+                    await send_whatsapp_reply(phone, welcome_text)
 
-        # Send user message to chatbot
-        payload = {
-            "message": user_message,
-            "source": "whatsapp"
-        }
-        await websocket.send(json.dumps(payload))
-        LOGGER.info(f"Sent to chatbot from {phone}: {user_message[:50]}...")
+            # Send user message to chatbot
+            payload = {
+                "message": user_message,
+                "source": "whatsapp"
+            }
+            await websocket.send(json.dumps(payload))
+            LOGGER.info(f"Sent to chatbot from {phone}: {user_message[:50]}...")
 
-        # Collect AI response (convert AGUI events to WhatsApp interactive messages)
-        response = await _drain_and_collect_response(websocket, phone, timeout=45)
+            # Collect AI response (convert AGUI events to WhatsApp interactive messages)
+            response = await _drain_and_collect_response(websocket, phone, timeout=45)
 
-        if response:
-            return response
-        else:
-            return "Sorry, I couldn't get a response. Please try again."
+            if response:
+                return response
+            else:
+                return "Sorry, I couldn't get a response. Please try again."
 
     except asyncio.TimeoutError:
         LOGGER.error(f"Timeout waiting for response for {phone}")
