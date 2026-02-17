@@ -22,9 +22,6 @@ VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN")
 ACCESS_TOKEN = os.getenv("WA_TOKEN")
 WHATSAPP_PHONE_ID = os.getenv("PHONE_NUMBER_ID")
 CHATBOT_WS_BASE_URL = os.getenv("CHATBOT_WS_BASE_URL", "ws://chatbot-app:8000/api/v1/chat")
-# Public base URL for the chatbot (used to make relative URLs absolute, e.g. receipt PDF)
-# Set this to the ngrok/domain URL, e.g. "https://abc123.ngrok-free.app"
-CHATBOT_PUBLIC_URL = os.getenv("CHATBOT_PUBLIC_URL", "").rstrip("/")
 WHATSAPP_API_VERSION = "v19.0"
 
 LOGGER.info("WhatsApp Bridge starting...")
@@ -1115,12 +1112,6 @@ async def _convert_receipt_link(phone: str, agui: dict) -> None:
 
     if not download_url:
         return
-
-    # Make relative URLs absolute (chatbot emits "/api/v1/..." paths)
-    if download_url.startswith("/") and CHATBOT_PUBLIC_URL:
-        download_url = CHATBOT_PUBLIC_URL + download_url
-    elif download_url.startswith("/"):
-        LOGGER.warning(f"CHATBOT_PUBLIC_URL not set — receipt link will be relative: {download_url}")
 
     # Build receipt summary text
     text = f"🧾 *Receipt — {order_number}*\n"

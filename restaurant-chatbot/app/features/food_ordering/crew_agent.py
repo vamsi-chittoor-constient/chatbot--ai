@@ -599,7 +599,9 @@ def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
             date_str = datetime.now().strftime('%B %d, %Y at %I:%M %p')
 
         # Emit receipt card with PDF download link via AGUI
-        download_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
+        import os
+        base_url = os.getenv("FRONTEND_URL", "").rstrip("/")
+        download_url = f"{base_url}/api/v1/payment/receipt/pdf?session_id={session_id}"
         receipt_items = []
         for item in items:
             name = item.get("name") or item.get("item_name", "Item")
