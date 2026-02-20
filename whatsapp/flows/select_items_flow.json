@@ -1,0 +1,75 @@
+{
+  "version": "6.0",
+  "screens": [
+    {
+      "id": "SELECT_ITEMS",
+      "title": "Select Items",
+      "terminal": true,
+      "data": {
+        "screen_title": {
+          "type": "string",
+          "__example__": "Breakfast Items"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "enabled": { "type": "boolean" }
+            }
+          },
+          "__example__": [
+            { "id": "Masala Dosa", "title": "Masala Dosa", "description": "\u20b980", "enabled": true },
+            { "id": "Idli", "title": "Idli", "description": "\u20b930", "enabled": true }
+          ]
+        },
+        "init_values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "__example__": []
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "item_selection_form",
+            "init-values": {
+              "selected_items": "${data.init_values}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.screen_title}"
+              },
+              {
+                "type": "CheckboxGroup",
+                "name": "selected_items",
+                "label": "Select items to add",
+                "required": true,
+                "min-selected-items": 1,
+                "max-selected-items": 20,
+                "data-source": "${data.items}"
+              },
+              {
+                "type": "Footer",
+                "label": "Add to Cart",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "selected_items": "${form.selected_items}",
+                    "flow_type": "select_items"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "version": "6.0",
+  "screens": [
+    {
+      "id": "MANAGE_CART",
+      "title": "Manage Cart",
+      "terminal": true,
+      "data": {
+        "cart_summary": { "type": "string", "__example__": "3 items \u2014 \u20b9450" },
+        "qty_options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "0", "title": "Remove" },
+            { "id": "1", "title": "1" },
+            { "id": "2", "title": "2" }
+          ]
+        },
+        "item_0_visible": { "type": "boolean", "__example__": true },
+        "item_0_label": { "type": "string", "__example__": "Masala Dosa \u2014 \u20b980 each" },
+        "item_0_qty": { "type": "string", "__example__": "2" },
+        "item_1_visible": { "type": "boolean", "__example__": true },
+        "item_1_label": { "type": "string", "__example__": "Coffee \u2014 \u20b930 each" },
+        "item_1_qty": { "type": "string", "__example__": "1" },
+        "item_2_visible": { "type": "boolean", "__example__": false },
+        "item_2_label": { "type": "string", "__example__": "" },
+        "item_2_qty": { "type": "string", "__example__": "0" },
+        "item_3_visible": { "type": "boolean", "__example__": false },
+        "item_3_label": { "type": "string", "__example__": "" },
+        "item_3_qty": { "type": "string", "__example__": "0" },
+        "item_4_visible": { "type": "boolean", "__example__": false },
+        "item_4_label": { "type": "string", "__example__": "" },
+        "item_4_qty": { "type": "string", "__example__": "0" },
+        "item_5_visible": { "type": "boolean", "__example__": false },
+        "item_5_label": { "type": "string", "__example__": "" },
+        "item_5_qty": { "type": "string", "__example__": "0" },
+        "item_6_visible": { "type": "boolean", "__example__": false },
+        "item_6_label": { "type": "string", "__example__": "" },
+        "item_6_qty": { "type": "string", "__example__": "0" },
+        "item_7_visible": { "type": "boolean", "__example__": false },
+        "item_7_label": { "type": "string", "__example__": "" },
+        "item_7_qty": { "type": "string", "__example__": "0" },
+        "item_8_visible": { "type": "boolean", "__example__": false },
+        "item_8_label": { "type": "string", "__example__": "" },
+        "item_8_qty": { "type": "string", "__example__": "0" },
+        "item_9_visible": { "type": "boolean", "__example__": false },
+        "item_9_label": { "type": "string", "__example__": "" },
+        "item_9_qty": { "type": "string", "__example__": "0" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "cart_form",
+            "init-values": {
+              "qty_0": "${data.item_0_qty}",
+              "qty_1": "${data.item_1_qty}",
+              "qty_2": "${data.item_2_qty}",
+              "qty_3": "${data.item_3_qty}",
+              "qty_4": "${data.item_4_qty}",
+              "qty_5": "${data.item_5_qty}",
+              "qty_6": "${data.item_6_qty}",
+              "qty_7": "${data.item_7_qty}",
+              "qty_8": "${data.item_8_qty}",
+              "qty_9": "${data.item_9_qty}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.cart_summary}"
+              },
+              { "type": "TextSubheading", "text": "${data.item_0_label}", "visible": "${data.item_0_visible}" },
+              { "type": "Dropdown", "name": "qty_0", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_0_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_1_label}", "visible": "${data.item_1_visible}" },
+              { "type": "Dropdown", "name": "qty_1", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_1_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_2_label}", "visible": "${data.item_2_visible}" },
+              { "type": "Dropdown", "name": "qty_2", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_2_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_3_label}", "visible": "${data.item_3_visible}" },
+              { "type": "Dropdown", "name": "qty_3", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_3_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_4_label}", "visible": "${data.item_4_visible}" },
+              { "type": "Dropdown", "name": "qty_4", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_4_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_5_label}", "visible": "${data.item_5_visible}" },
+              { "type": "Dropdown", "name": "qty_5", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_5_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_6_label}", "visible": "${data.item_6_visible}" },
+              { "type": "Dropdown", "name": "qty_6", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_6_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_7_label}", "visible": "${data.item_7_visible}" },
+              { "type": "Dropdown", "name": "qty_7", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_7_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_8_label}", "visible": "${data.item_8_visible}" },
+              { "type": "Dropdown", "name": "qty_8", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_8_visible}", "required": false },
+              { "type": "TextSubheading", "text": "${data.item_9_label}", "visible": "${data.item_9_visible}" },
+              { "type": "Dropdown", "name": "qty_9", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.item_9_visible}", "required": false },
+              {
+                "type": "Footer",
+                "label": "Update Cart",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "qty_0": "${form.qty_0}",
+                    "qty_1": "${form.qty_1}",
+                    "qty_2": "${form.qty_2}",
+                    "qty_3": "${form.qty_3}",
+                    "qty_4": "${form.qty_4}",
+                    "qty_5": "${form.qty_5}",
+                    "qty_6": "${form.qty_6}",
+                    "qty_7": "${form.qty_7}",
+                    "qty_8": "${form.qty_8}",
+                    "qty_9": "${form.qty_9}",
+                    "flow_type": "manage_cart"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
