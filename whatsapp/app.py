@@ -805,15 +805,12 @@ async def _send_item_selection_flow(
         price = item.get("price", 0)
         flow_items.append({
             "id": name,
-            "title": _truncate(name, 30),
-            "description": f"\u20b9{price}",
-            "enabled": item.get("is_available_now", item.get("is_available", True)),
+            "title": _truncate(f"{name} - \u20b9{price}", 30),
         })
 
     flow_data = {
         "screen_title": _truncate(category_name, 80),
         "items": flow_items,
-        "init_values": [],
     }
 
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")

@@ -16,20 +16,13 @@
             "type": "object",
             "properties": {
               "id": { "type": "string" },
-              "title": { "type": "string" },
-              "description": { "type": "string" },
-              "enabled": { "type": "boolean" }
+              "title": { "type": "string" }
             }
           },
           "__example__": [
-            { "id": "Masala Dosa", "title": "Masala Dosa", "description": "\u20b980", "enabled": true },
-            { "id": "Idli", "title": "Idli", "description": "\u20b930", "enabled": true }
+            { "id": "Masala Dosa", "title": "Masala Dosa - \u20b980" },
+            { "id": "Idli", "title": "Idli - \u20b930" }
           ]
-        },
-        "init_values": {
-          "type": "array",
-          "items": { "type": "string" },
-          "__example__": []
         }
       },
       "layout": {
@@ -38,9 +31,6 @@
           {
             "type": "Form",
             "name": "item_selection_form",
-            "init-values": {
-              "selected_items": "${data.init_values}"
-            },
             "children": [
               {
                 "type": "TextHeading",
@@ -51,8 +41,6 @@
                 "name": "selected_items",
                 "label": "Select items to add",
                 "required": true,
-                "min-selected-items": 1,
-                "max-selected-items": 20,
                 "data-source": "${data.items}"
               },
               {
