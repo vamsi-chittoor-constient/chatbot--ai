@@ -37,6 +37,12 @@ FLOWS = {
         "categories": ["OTHER"],
         "env_var": "FLOW_MANAGE_CART_ID",
     },
+    "select_items_qty": {
+        "name": "A24 Item Selection with Qty",
+        "json_file": "flows/select_items_qty_flow.json",
+        "categories": ["OTHER"],
+        "env_var": "FLOW_SELECT_ITEMS_QTY_ID",
+    },
 }
 
 

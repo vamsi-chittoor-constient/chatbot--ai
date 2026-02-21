@@ -27,6 +27,7 @@ WHATSAPP_API_VERSION = "v21.0"
 # WhatsApp Flows (optional — graceful degradation if not configured)
 WABA_ID = os.getenv("WABA_ID", "")
 FLOW_SELECT_ITEMS_ID = os.getenv("FLOW_SELECT_ITEMS_ID", "")
+FLOW_SELECT_ITEMS_QTY_ID = os.getenv("FLOW_SELECT_ITEMS_QTY_ID", "")
 FLOW_MANAGE_CART_ID = os.getenv("FLOW_MANAGE_CART_ID", "")
 
 LOGGER.info("WhatsApp Bridge starting...")
@@ -837,20 +838,63 @@ async def _send_item_selection_flow(
     LOGGER.info(f"Sent item selection flow ({len(flow_items)} items, {category_name}) to {phone}")
 
 
-async def _send_cart_management_flow(phone: str, items: list, total: float) -> None:
-    """Send Cart Management Flow with per-item quantity dropdowns."""
+async def _send_item_selection_qty_flow(
+    phone: str, category_name: str, items: list, meal: str = ""
+) -> None:
+    """Send Item Selection + Qty Flow: per-item TextInput (number) for quantity entry."""
     import uuid as _uuid
 
-    qty_options = [{"id": "0", "title": "Remove"}]
-    for i in range(1, 11):
-        qty_options.append({"id": str(i), "title": str(i)})
-
     flow_data: Dict[str, Any] = {
-        "cart_summary": f"{len(items)} items \u2014 \u20b9{total:.0f}",
-        "qty_options": qty_options,
+        "screen_title": _truncate(category_name, 80),
     }
 
     item_names: List[str] = []
+    for idx in range(10):
+        if idx < len(items):
+            item = items[idx]
+            name = item.get("name", "Item")
+            price = item.get("price", 0)
+            flow_data[f"item_{idx}_visible"] = True
+            flow_data[f"item_{idx}_label"] = _truncate(f"{name} — \u20b9{price}", 80)
+            item_names.append(name)
+        else:
+            flow_data[f"item_{idx}_visible"] = False
+            flow_data[f"item_{idx}_label"] = "-"
+
+    meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
+    body = f"{meal_emoji} *{category_name}*\n{len(item_names)} items. Enter qty to add:"
+
+    flow_token = f"selqty_{phone}_{_uuid.uuid4().hex[:8]}"
+    _active_flows[phone] = {
+        "type": "select_items_qty",
+        "category": category_name,
+        "item_names": item_names,
+        "flow_token": flow_token,
+        "ts": asyncio.get_event_loop().time(),
+    }
+
+    await send_whatsapp_flow_message(
+        to_number=phone,
+        flow_id=FLOW_SELECT_ITEMS_QTY_ID,
+        flow_cta="Select Items",
+        body_text=body,
+        screen_id="SELECT_ITEMS_QTY",
+        flow_data=flow_data,
+        flow_token=flow_token,
+    )
+    LOGGER.info(f"Sent item selection+qty flow ({len(item_names)} items, {category_name}) to {phone}")
+
+
+async def _send_cart_management_flow(phone: str, items: list, total: float) -> None:
+    """Send Cart Management Flow with per-item TextInput for quantity entry."""
+    import uuid as _uuid
+
+    flow_data: Dict[str, Any] = {
+        "cart_summary": f"{len(items)} items \u2014 \u20b9{total:.0f}",
+    }
+
+    item_names: List[str] = []
+    item_qtys: List[int] = []
     for idx in range(10):
         if idx < len(items):
             item = items[idx]
@@ -858,9 +902,10 @@ async def _send_cart_management_flow(phone: str, items: list, total: float) -> N
             price = item.get("price", 0)
             qty = item.get("quantity", 1)
             flow_data[f"item_{idx}_visible"] = True
-            flow_data[f"item_{idx}_label"] = _truncate(f"{name} \u2014 \u20b9{price} each", 80)
+            flow_data[f"item_{idx}_label"] = _truncate(f"{name} \u2014 \u20b9{price} each (now: {qty})", 80)
             flow_data[f"item_{idx}_qty"] = str(qty)
             item_names.append(name)
+            item_qtys.append(qty)
         else:
             flow_data[f"item_{idx}_visible"] = False
             flow_data[f"item_{idx}_label"] = "-"
@@ -870,6 +915,7 @@ async def _send_cart_management_flow(phone: str, items: list, total: float) -> N
     _active_flows[phone] = {
         "type": "manage_cart",
         "item_names": item_names,
+        "item_qtys": item_qtys,
         "flow_token": flow_token,
         "ts": asyncio.get_event_loop().time(),
     }
@@ -913,14 +959,22 @@ async def _handle_flow_response(phone: str, response_data: dict) -> None:
             await send_whatsapp_reply(phone, "Session expired. Please view your cart again.")
             return
 
+        item_qtys = flow_ctx.get("item_qtys", [])
         updates = []
         removes = []
         for idx, name in enumerate(item_names):
             new_qty_str = response_data.get(f"qty_{idx}", "")
             if not new_qty_str:
                 continue
-            new_qty = int(new_qty_str)
-            if new_qty == 0:
+            try:
+                new_qty = int(new_qty_str)
+            except (ValueError, TypeError):
+                continue
+            # Skip if quantity unchanged
+            old_qty = item_qtys[idx] if idx < len(item_qtys) else 0
+            if new_qty == old_qty:
+                continue
+            if new_qty <= 0:
                 removes.append(name)
             else:
                 updates.append({"item_name": name, "quantity": new_qty})
@@ -946,6 +1000,37 @@ async def _handle_flow_response(phone: str, response_data: dict) -> None:
 
         if not removes and not updates:
             await send_whatsapp_reply(phone, "Cart unchanged.")
+
+    elif flow_type == "select_items_qty":
+        item_names = flow_ctx.get("item_names", [])
+        if not item_names:
+            LOGGER.warning(f"No flow context for select_items_qty from {phone}")
+            await send_whatsapp_reply(phone, "Session expired. Please try again.")
+            return
+
+        items_payload = []
+        for idx, name in enumerate(item_names):
+            qty_str = response_data.get(f"qty_{idx}", "")
+            if not qty_str:
+                continue
+            try:
+                qty = int(qty_str)
+            except (ValueError, TypeError):
+                continue
+            if qty > 0:
+                items_payload.append({"name": name, "quantity": qty})
+
+        if not items_payload:
+            await send_whatsapp_reply(phone, "No items selected. Enter a quantity to add items.")
+            return
+
+        form_response = {
+            "type": "form_response",
+            "form_type": "direct_add_to_cart",
+            "data": {"items": items_payload},
+        }
+        LOGGER.info(f"Flow select_items_qty -> direct_add_to_cart: {len(items_payload)} items for {phone}")
+        await _send_form_response_to_chatbot(phone, form_response)
 
     else:
         LOGGER.warning(f"Unknown flow_type in nfm_reply: {flow_type} for {phone}")
@@ -1037,7 +1122,7 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
             "body": {"text": _truncate(body, 1024)},
             "action": {"buttons": buttons}
         })
-    elif FLOW_SELECT_ITEMS_ID and len(available) >= 4:
+    elif (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID) and len(available) >= 4:
         # Use Flow for multi-select when there are enough available items
         if unavailable:
             note_lines = ["\ud83d\udd50 *Also available later:*"]
@@ -1046,7 +1131,10 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
                 meals = ", ".join(item.get("meal_types", ["later"])[:2])
                 note_lines.append(f"  - {name} ({meals})")
             await send_whatsapp_reply(phone, "\n".join(note_lines))
-        await _send_item_selection_flow(phone, f"Results: {query}", available, "")
+        if FLOW_SELECT_ITEMS_QTY_ID and len(available) <= 10:
+            await _send_item_selection_qty_flow(phone, f"Results: {query}", available, "")
+        else:
+            await _send_item_selection_flow(phone, f"Results: {query}", available, "")
 
     else:
         # List message with sections for available/unavailable
@@ -1123,13 +1211,17 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
     # ── Flow path: single category or small item set → Item Selection Flow ──
-    if FLOW_SELECT_ITEMS_ID and (len(cat_order) == 1 or len(items) <= 20):
+    _has_any_select_flow = FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID
+    if _has_any_select_flow and (len(cat_order) == 1 or len(items) <= 20):
         cat_name = cat_order[0] if len(cat_order) == 1 else "Menu"
-        await _send_item_selection_flow(phone, cat_name, items, meal)
+        if FLOW_SELECT_ITEMS_QTY_ID and len(items) <= 10:
+            await _send_item_selection_qty_flow(phone, cat_name, items, meal)
+        else:
+            await _send_item_selection_flow(phone, cat_name, items, meal)
         return
 
     # ── Flow path: multiple categories → show categories as inline buttons ──
-    if FLOW_SELECT_ITEMS_ID and len(cat_order) <= MENU_CATEGORY_BUTTON_THRESHOLD:
+    if _has_any_select_flow and len(cat_order) <= MENU_CATEGORY_BUTTON_THRESHOLD:
         body = f"{meal_emoji} *Menu*"
         if meal:
             body += f" \u2014 {meal} Time"
