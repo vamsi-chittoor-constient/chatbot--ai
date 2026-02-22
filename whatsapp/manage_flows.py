@@ -93,7 +93,7 @@ def create_flow(name: str, categories: list) -> Optional[str]:
 
 
 def upload_json(flow_id: str, json_path: str) -> bool:
-    """Upload Flow JSON file. Works for DRAFT flows; for PUBLISHED, puts it back to DRAFT."""
+    """Upload Flow JSON file. Works for both DRAFT and PUBLISHED flows (v6.2+)."""
     file_path = Path(__file__).parent / json_path
     if not file_path.exists():
         _log(f"JSON file not found: {file_path}", "ERROR")
@@ -155,9 +155,9 @@ def get_status(flow_id: str) -> dict:
 
 def auto_provision_flows() -> Dict[str, str]:
     """
-    Smart flow provisioning. For each configured flow:
+    Smart flow provisioning (v7.3 compatible). For each configured flow:
       1. Check if a flow with that name already exists on the WABA
-      2. If exists + PUBLISHED  → use as-is (already live)
+      2. If exists + PUBLISHED  → re-upload latest JSON (v6.2+ allows editing published flows)
       3. If exists + DRAFT      → re-upload JSON + publish
       4. If not exists           → create + upload + publish
 
@@ -189,8 +189,9 @@ def auto_provision_flows() -> Dict[str, str]:
             _log(f"Found existing: {flow_id} (status: {status})")
 
             if status == "PUBLISHED":
-                # Already live — don't touch it
-                _log(f"Already published, using as-is")
+                # v6.2+: published flows can be edited in-place
+                _log(f"Published — updating JSON in-place")
+                upload_json(flow_id, json_file)
                 result[key] = flow_id
                 continue
 

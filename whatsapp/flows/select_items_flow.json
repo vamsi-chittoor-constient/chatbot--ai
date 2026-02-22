@@ -1,5 +1,5 @@
 {
-  "version": "6.0",
+  "version": "7.3",
   "screens": [
     {
       "id": "SELECT_ITEMS",
@@ -20,8 +20,8 @@
             }
           },
           "__example__": [
-            { "id": "Masala Dosa", "title": "Masala Dosa - \u20b980" },
-            { "id": "Idli", "title": "Idli - \u20b930" }
+            { "id": "Masala Dosa", "title": "Masala Dosa - ₹80" },
+            { "id": "Idli", "title": "Idli - ₹30" }
           ]
         }
       },
