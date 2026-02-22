@@ -24,14 +24,53 @@ WHATSAPP_PHONE_ID = os.getenv("PHONE_NUMBER_ID")
 CHATBOT_WS_BASE_URL = os.getenv("CHATBOT_WS_BASE_URL", "ws://chatbot-app:8000/api/v1/chat")
 WHATSAPP_API_VERSION = "v21.0"
 
-# WhatsApp Flows (optional — graceful degradation if not configured)
+# WhatsApp Flows
+# FLOW_PROVISION_MODE: "auto" (default) = provision on startup, "manual" = use .env IDs only
 WABA_ID = os.getenv("WABA_ID", "")
+FLOW_PROVISION_MODE = os.getenv("FLOW_PROVISION_MODE", "auto").strip().lower()
 FLOW_SELECT_ITEMS_ID = os.getenv("FLOW_SELECT_ITEMS_ID", "")
 FLOW_SELECT_ITEMS_QTY_ID = os.getenv("FLOW_SELECT_ITEMS_QTY_ID", "")
 FLOW_MANAGE_CART_ID = os.getenv("FLOW_MANAGE_CART_ID", "")
 
 LOGGER.info("WhatsApp Bridge starting...")
 LOGGER.info(f"Chatbot WebSocket base URL: {CHATBOT_WS_BASE_URL}")
+LOGGER.info(f"Flow provision mode: {FLOW_PROVISION_MODE}")
+
+
+@app.on_event("startup")
+async def _auto_provision_flows():
+    """Auto-provision WhatsApp Flows on server startup when FLOW_PROVISION_MODE=auto.
+    Checks existing flows by name, creates missing ones, uploads JSON, publishes drafts.
+    In manual mode, flow IDs must be set in .env.
+    """
+    global FLOW_SELECT_ITEMS_ID, FLOW_SELECT_ITEMS_QTY_ID, FLOW_MANAGE_CART_ID
+
+    if FLOW_PROVISION_MODE != "auto":
+        LOGGER.info("FLOW_PROVISION_MODE=manual — using .env flow IDs")
+        return
+
+    if not WABA_ID:
+        LOGGER.info("WABA_ID not set — skipping flow auto-provision")
+        return
+
+    try:
+        from manage_flows import auto_provision_flows
+        LOGGER.info("Auto-provisioning WhatsApp Flows...")
+        flow_ids = await asyncio.to_thread(auto_provision_flows)
+
+        if "select_items" in flow_ids:
+            FLOW_SELECT_ITEMS_ID = flow_ids["select_items"]
+            LOGGER.info(f"Provisioned select_items: {FLOW_SELECT_ITEMS_ID}")
+        if "select_items_qty" in flow_ids:
+            FLOW_SELECT_ITEMS_QTY_ID = flow_ids["select_items_qty"]
+            LOGGER.info(f"Provisioned select_items_qty: {FLOW_SELECT_ITEMS_QTY_ID}")
+        if "manage_cart" in flow_ids:
+            FLOW_MANAGE_CART_ID = flow_ids["manage_cart"]
+            LOGGER.info(f"Provisioned manage_cart: {FLOW_MANAGE_CART_ID}")
+
+        LOGGER.info("Flow auto-provision complete")
+    except Exception as e:
+        LOGGER.error(f"Flow auto-provision failed (non-fatal): {e}", exc_info=True)
 
 # === Global persistent WebSocket connections (per user) ===
 ws_connections: Dict[str, websockets.WebSocketClientProtocol] = {}
@@ -1200,13 +1239,18 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     if not items:
         return
 
+    # Defensive: categories might arrive as string instead of list
+    if isinstance(categories, str):
+        categories = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
+    LOGGER.info(f"MENU_DATA: {len(items)} items, categories({type(categories).__name__})={categories!r}")
+
     # Group items by category
     by_category: Dict[str, list] = {}
     for item in items:
         cat = item.get("category", "Other")
         by_category.setdefault(cat, []).append(item)
 
-    cat_order = categories or list(by_category.keys())
+    cat_order = categories if categories else list(by_category.keys())
     meal = agui.get("current_meal_period", "")
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
@@ -1342,8 +1386,21 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
     lines.append(f"\ud83d\udcb0 *Total: \u20b9{total}*")
     await send_whatsapp_reply(phone, "\n".join(lines))
 
-    if len(items) <= 3:
-        # Per-item button cards with +/- buttons
+    if FLOW_MANAGE_CART_ID and len(items) <= 10:
+        # Cart Management Flow (TextInput qty for all cart sizes)
+        await _send_cart_management_flow(phone, items, total)
+        buttons = [
+            {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
+            {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}},
+        ]
+        await send_whatsapp_interactive(phone, {
+            "type": "button",
+            "body": {"text": "Or proceed directly:"},
+            "action": {"buttons": buttons},
+        })
+
+    elif len(items) <= 3:
+        # Fallback (no Flow): per-item button cards with +/- buttons
         for item in items:
             await _send_cart_item_buttons(phone, item)
         buttons = [
@@ -1356,22 +1413,8 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
             "action": {"buttons": buttons},
         })
 
-    elif FLOW_MANAGE_CART_ID and len(items) <= 10:
-        # Cart Management Flow for larger carts
-        await _send_cart_management_flow(phone, items, total)
-        # Also provide quick action buttons
-        buttons = [
-            {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
-            {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}},
-        ]
-        await send_whatsapp_interactive(phone, {
-            "type": "button",
-            "body": {"text": "Or proceed directly:"},
-            "action": {"buttons": buttons},
-        })
-
     else:
-        # Fallback: simplified action buttons
+        # Fallback (no Flow, >3 items): simplified action buttons
         buttons = [
             {"type": "reply", "reply": {"id": "modify_cart_items", "title": "Modify Items"}},
             {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
