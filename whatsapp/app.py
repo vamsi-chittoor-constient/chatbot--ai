@@ -942,13 +942,13 @@ async def _send_cart_management_flow(phone: str, items: list, total: float) -> N
             qty = item.get("quantity", 1)
             flow_data[f"item_{idx}_visible"] = True
             flow_data[f"item_{idx}_label"] = _truncate(f"{name} \u2014 \u20b9{price} each (now: {qty})", 80)
-            flow_data[f"item_{idx}_qty"] = str(qty)
+            flow_data[f"item_{idx}_qty"] = qty
             item_names.append(name)
             item_qtys.append(qty)
         else:
             flow_data[f"item_{idx}_visible"] = False
             flow_data[f"item_{idx}_label"] = "-"
-            flow_data[f"item_{idx}_qty"] = "0"
+            flow_data[f"item_{idx}_qty"] = 0
 
     flow_token = f"cart_{phone}_{_uuid.uuid4().hex[:8]}"
     _active_flows[phone] = {
