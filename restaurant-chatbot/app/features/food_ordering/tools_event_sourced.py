@@ -490,7 +490,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                     # Fallback: show full menu
                     items = preloader.search(query, meal_period=None)
                     if items:
-                        emit_menu_data(session_id, items[:50], meal_period)
+                        emit_menu_data(session_id, items[:50], current_meal_period=meal_period or "")
                     return "We don't have specific specials today. Here's our full menu to browse!"
 
             elif is_browsing:
@@ -511,7 +511,7 @@ def create_event_sourced_tools(session_id: str, customer_id: Optional[str] = Non
                 })
 
                 # Emit menu card to frontend
-                emit_menu_data(session_id, items[:50], meal_period)
+                emit_menu_data(session_id, items[:50], current_meal_period=meal_period or "")
 
                 # Emit quick replies for menu browsing
                 emit_quick_replies(session_id, [

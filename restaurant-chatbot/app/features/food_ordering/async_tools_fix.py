@@ -144,7 +144,7 @@ def create_sync_agui_events():
         """Emit menu data synchronously."""
         try:
             from app.core.agui_events import emit_menu_data
-            emit_menu_data(session_id, items, current_meal_period)
+            emit_menu_data(session_id, items, current_meal_period=current_meal_period or "")
         except Exception as e:
             logger.debug("sync_emit_menu_data_failed", error=str(e))
     
