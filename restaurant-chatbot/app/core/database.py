@@ -74,8 +74,8 @@ class DatabaseManager:
     def init_database(
         self,
         database_url: Optional[str] = None,
-        pool_size: int = 50,
-        max_overflow: int = 100,
+        pool_size: int = 5,
+        max_overflow: int = 10,
         pool_timeout: int = 30,
         pool_recycle: int = 3600,
         echo: bool = False
@@ -112,7 +112,7 @@ class DatabaseManager:
             max_overflow=max_overflow,         # Additional connections
             pool_timeout=pool_timeout,         # Wait time for connection
             pool_recycle=pool_recycle,         # Recycle connections hourly
-            pool_pre_ping=True,                # Test connections before use
+            # pool_pre_ping=True,              # Test connections before use
             echo=echo,                         # SQL logging (False in prod)
             echo_pool=False,                   # Pool logging
             future=True,                       # Use SQLAlchemy 2.0 style

@@ -44,7 +44,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 5s
     networks:
       - a24-network
 
@@ -55,7 +55,7 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy volatile-lru
     volumes:
       - redis-data:/data
     healthcheck:
@@ -80,7 +80,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 5s
     networks:
       - a24-network
 
@@ -102,7 +102,7 @@ services:
       - ./restaurant-chatbot/.env
     environment:
       # Database
-      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/restaurant_ai
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=restaurant_ai
@@ -116,14 +116,14 @@ services:
       - MONGODB_CONNECTION_STRING=mongodb://mongodb:27017
       - MONGODB_DATABASE_NAME=restaurant_ai_analytics
       # PetPooja Integration (call this service)
-      - PETPOOJA_SERVICE_URL=http://petpooja-app:8001
+      - PETPOOJA_SERVICE_URL=http://petpooja-app:8000
       # Note: PETPOOJA_SERVICE_TOKEN is loaded from .env file via env_file
       # Application
       - ENVIRONMENT=production
       - DEBUG=false
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=DEBUG
       # Disable CrewAI tracing prompt (blocks 20s on first query)
-      - CREWAI_TRACING_ENABLED=false
+      - CREWAI_TRACING_ENABLED=true
       # Enable authentication (phone + OTP flow)
       - AUTH_REQUIRED=true
       # Enable PetPooja kitchen sync (sandbox mode)
@@ -173,7 +173,7 @@ services:
       - ./petpooja-service/.env
     environment:
       # Database (shared with chatbot)
-      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/restaurant_ai
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=restaurant_ai
@@ -267,7 +267,7 @@ services:
       - ./whatsapp/.env
     environment:
       # Override WebSocket URL to use Docker service name
-      - CHATBOT_WS_BASE_URL=ws://chatbot-app:8000/api/v1/chat
+      - CHATBOT_WS_BASE_URL=http://chatbot-app:8000/api/v1/chat
       # Logging
       - LOG_LEVEL=INFO
     depends_on:

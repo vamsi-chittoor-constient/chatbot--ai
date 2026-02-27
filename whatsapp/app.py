@@ -22,7 +22,7 @@ VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN")
 ACCESS_TOKEN = os.getenv("WA_TOKEN")
 WHATSAPP_PHONE_ID = os.getenv("PHONE_NUMBER_ID")
 CHATBOT_WS_BASE_URL = os.getenv("CHATBOT_WS_BASE_URL", "ws://chatbot-app:8000/api/v1/chat")
-WHATSAPP_API_VERSION = "v21.0"
+WHATSAPP_API_VERSION = "v16.0"
 
 # WhatsApp Flows
 # FLOW_PROVISION_MODE: "auto" (default) = provision on startup, "manual" = use .env IDs only

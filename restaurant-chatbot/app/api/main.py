@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
         # Initialize centralized Redis connection pool (RedisManager)
         from app.core.redis import redis_manager
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        redis_manager.init_redis(redis_url=redis_url, max_connections=50)
+        redis_manager.init_redis(redis_url=redis_url, max_connections=10)
         logger.info("Centralized Redis connection pool initialized")
 
         # Initialize Redis service (now uses shared RedisManager pool)
@@ -328,7 +328,7 @@ allowed_headers = os.getenv("ALLOWED_HEADERS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=allowed_methods,
     allow_headers=allowed_headers,
     expose_headers=["*"],

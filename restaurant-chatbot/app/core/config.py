@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
-    REDIS_SOCKET_TIMEOUT: int = 5
+    REDIS_SOCKET_TIMEOUT: int = 1
     REDIS_SOCKET_CONNECT_TIMEOUT: int = 5
 
     # Response Caching
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     ENTITY_EXTRACTION_MODEL: str = "gpt-4o-mini"
 
     # OpenAI Timeouts and Temperature
-    OPENAI_TIMEOUT: int = 30
+    OPENAI_TIMEOUT: int = 10
     OPENAI_TEMPERATURE_DEFAULT: float = 0.3
     OPENAI_TEMPERATURE_GREETING: float = 0.7
     OPENAI_TEMPERATURE_ENTITY: float = 0.1
@@ -328,14 +328,14 @@ class Settings(BaseSettings):
     ALLOWED_HEADERS: str = "*"
 
     # Session Configuration
-    SESSION_TIMEOUT_MINUTES: int = 60
+    SESSION_TIMEOUT_MINUTES: int = 5
     CONVERSATION_TIMEOUT_MINUTES: int = 30
 
     # Waiter Configuration
     WAITER_NAMES: str = "Nesamani,Priya,Arjun,Meera,Ravi,Divya,Karthik,Anjali,Vikram,Lakshmi,Rajesh,Pooja,Arun,Nisha,Suresh,Deepa,Rohan,Kavya,Aditya,Sana"
 
     # Rate Limiting
-    RATE_LIMIT_PER_MINUTE: int = 60
+    RATE_LIMIT_PER_MINUTE: int = 10
     RATE_LIMIT_PER_HOUR: int = 1000
 
     # File Upload
@@ -346,7 +346,7 @@ class Settings(BaseSettings):
     USE_CREWAI_AGENT: bool = True
 
     # Test/Load Testing Configuration
-    TEST_OTP_ENABLED: bool = True  # Enable constant OTP for testing
+    TEST_OTP_ENABLED: bool = False  # Enable constant OTP for testing
     TEST_OTP_CODE: str = "123456"  # Constant OTP code for load testing
     AUTH_REQUIRED: bool = True     # Require authentication before chat
 
