@@ -1,0 +1,66 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Booking Confirmation - {{ restaurant_name }}{% endblock %}
+
+{% block content %}
+<div class="greeting">
+    Hello {{ guest_name | default('Valued Guest') }}! 👋
+</div>
+
+<div class="message">
+    <p>Great news! Your table reservation has been confirmed.</p>
+    <p>We're excited to welcome you to {{ restaurant_name }}. Here are your booking details:</p>
+</div>
+
+<div class="info-box">
+    <h3>Reservation Details</h3>
+    <div class="info-row">
+        <span class="info-label">Confirmation Code:</span>
+        <span class="info-value" style="font-weight: bold; color: #667eea;">{{ confirmation_code }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Date & Time:</span>
+        <span class="info-value">{{ booking_datetime }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Party Size:</span>
+        <span class="info-value">{{ party_size }} {{ 'person' if party_size == 1 else 'people' }}</span>
+    </div>
+    {% if table_number %}
+    <div class="info-row">
+        <span class="info-label">Table:</span>
+        <span class="info-value">{{ table_number }}</span>
+    </div>
+    {% endif %}
+    {% if special_requests %}
+    <div class="info-row">
+        <span class="info-label">Special Requests:</span>
+        <span class="info-value">{{ special_requests }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<div class="message">
+    <p><strong>Important Information:</strong></p>
+    <ul>
+        <li>Please arrive 10 minutes before your reservation time</li>
+        <li>Your table will be held for 15 minutes past the reservation time</li>
+        <li>To modify or cancel, please contact us at least 2 hours in advance</li>
+    </ul>
+</div>
+
+{% if manage_booking_url %}
+<div style="text-align: center;">
+    <a href="{{ manage_booking_url }}" class="button">Manage Your Booking</a>
+</div>
+{% endif %}
+
+<div class="message">
+    <p>If you have any questions or need to make changes, please don't hesitate to contact us.</p>
+    <p>We look forward to serving you!</p>
+    <p style="margin-top: 20px;">
+        Warm regards,<br>
+        <strong>{{ restaurant_name }} Team</strong>
+    </p>
+</div>
+{% endblock %}

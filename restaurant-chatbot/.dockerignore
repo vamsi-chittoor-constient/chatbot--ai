@@ -1,0 +1,56 @@
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Frontend node_modules (npm ci runs inside Docker)
+frontend/node_modules/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files (passed via env_file in docker-compose)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Docker files themselves
+docker-compose*.yml
+Dockerfile
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in image)
+*.md
+!README.md
+
+# Test files
+test_*.json
+test_frontend/
+
+# Backup files
+*.backup

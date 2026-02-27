@@ -1,0 +1,295 @@
+# =============================================================================
+# A24 Restaurant Platform - Root Orchestrator
+# =============================================================================
+# Manages both microservices: Chatbot + PetPooja Integration
+# Usage: docker compose -f docker-compose.root.yml up -d
+# =============================================================================
+
+networks:
+  a24-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongodb-data:
+  app-logs:
+  petpooja-logs:
+  nginx-ssl:
+
+services:
+  # ===========================================================================
+  # SHARED SERVICES (Used by both microservices)
+  # ===========================================================================
+
+  # PostgreSQL Database (Shared)
+  postgres:
+    image: postgres:15-alpine
+    container_name: a24-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=restaurant_ai
+    ports:
+      - "5433:5432"  # Map to 5433 on host to avoid conflict with local postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Single merged SQL: extensions + all tables + all data + app tables
+      # Runs via shell wrapper with ON_ERROR_STOP=0 for minor error tolerance
+      - ./scripts/db-init.sh:/docker-entrypoint-initdb.d/00-init-all.sh:ro
+      - ./db-init-merged.sql:/sql-init/00-full-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d restaurant_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - a24-network
+
+  # Redis Cache (Shared)
+  redis:
+    image: redis:7-alpine
+    container_name: a24-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - a24-network
+
+  # MongoDB Analytics (Shared)
+  mongodb:
+    image: mongo:7
+    container_name: a24-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - a24-network
+
+  # ===========================================================================
+  # MICROSERVICE 1: Restaurant Chatbot (Main App)
+  # ===========================================================================
+
+  chatbot-app:
+    build:
+      context: ./restaurant-chatbot
+      dockerfile: docker/Dockerfile
+    container_name: a24-chatbot-app
+    restart: unless-stopped
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"  # Expose for testing
+    env_file:
+      - ./restaurant-chatbot/.env
+    environment:
+      # Database
+      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=restaurant_ai
+      - DB_USER=admin
+      - DB_PASSWORD=admin123
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # MongoDB
+      - MONGODB_CONNECTION_STRING=mongodb://mongodb:27017
+      - MONGODB_DATABASE_NAME=restaurant_ai_analytics
+      # PetPooja Integration (call this service)
+      - PETPOOJA_SERVICE_URL=http://petpooja-app:8001
+      # Note: PETPOOJA_SERVICE_TOKEN is loaded from .env file via env_file
+      # Application
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      # Disable CrewAI tracing prompt (blocks 20s on first query)
+      - CREWAI_TRACING_ENABLED=false
+      # Enable authentication (phone + OTP flow)
+      - AUTH_REQUIRED=true
+      # Enable PetPooja kitchen sync (sandbox mode)
+      - ENABLE_PETPOOJA_SYNC=true
+      # Frontend & Payment URLs (auto-set by deploy.sh from ngrok tunnel)
+      - FRONTEND_URL=${NGROK_URL:-https://localhost}
+      - PAYMENT_SUCCESS_URL=${NGROK_URL:-https://localhost}/payment/success
+      - PAYMENT_FAILURE_URL=${NGROK_URL:-https://localhost}/payment/failure
+      - PAYMENT_CALLBACK_URL=${NGROK_URL:-https://localhost}/api/v1/payment/callback
+      - PAYMENT_WEBHOOK_URL=${NGROK_URL:-https://localhost}/api/v1/webhook/razorpay
+      # Razorpay credentials (override placeholders from .env)
+      - RAZORPAY_KEY_ID=rzp_test_dXwWkc7Rw3f52T
+      - RAZORPAY_KEY_SECRET=bs6Jk9HhctjKCBPN3IE4iPsF
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - a24-network
+    volumes:
+      - app-logs:/app/logs
+
+  # ===========================================================================
+  # MICROSERVICE 2: PetPooja Integration Service
+  # ===========================================================================
+
+  petpooja-app:
+    build:
+      context: ./petpooja-service
+      dockerfile: Dockerfile
+    container_name: a24-petpooja-app
+    restart: unless-stopped
+    expose:
+      - "8001"
+    ports:
+      - "8001:8001"  # Expose for direct testing
+    env_file:
+      - ./petpooja-service/.env
+    environment:
+      # Database (shared with chatbot)
+      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=restaurant_ai
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      # API Configuration (override .env defaults for Docker)
+      - API_HOST=0.0.0.0
+      - API_PORT=8001
+      - API_WORKERS=2
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      # Callback & integration URLs (override localhost for server deployment)
+      - PETPOOJA_CALLBACK_URL=${NGROK_URL:-https://localhost}/api/petpooja/webhooks/petpooja/order-status
+      - MAIN_BACKEND_URL=http://chatbot-app:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - a24-network
+    volumes:
+      - petpooja-logs:/app/logs
+
+  # ===========================================================================
+  # NGINX - Reverse Proxy (Single Entry Point)
+  # ===========================================================================
+
+  nginx:
+    build:
+      context: ./restaurant-chatbot
+      dockerfile: docker/Dockerfile.nginx
+    container_name: a24-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      chatbot-app:
+        condition: service_healthy
+      petpooja-app:
+        condition: service_healthy
+      whatsapp-bridge:
+        condition: service_healthy
+    networks:
+      - a24-network
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro  # Custom nginx config
+      - nginx-ssl:/etc/nginx/ssl  # SSL certificates volume
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # ngrok Tunnel (Free HTTPS for WhatsApp webhook + payments)
+  # ===========================================================================
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: a24-ngrok
+    restart: unless-stopped
+    command: http http://nginx:80 --authtoken 39lDT1ZRSy8Q3G8RUj6GT4HwrWD_6QqdE9gH18wYmxUzUmxk7 --log stdout
+    ports:
+      - "4040:4040"
+    # No depends_on — starts first so deploy.sh can grab the tunnel URL
+    # before other services need it. Retries connection to nginx automatically.
+    networks:
+      - a24-network
+
+  # ===========================================================================
+  # MICROSERVICE 3: WhatsApp Bridge (Meta Business API <-> Chatbot)
+  # ===========================================================================
+
+  whatsapp-bridge:
+    build:
+      context: ./whatsapp
+      dockerfile: Dockerfile
+    container_name: a24-whatsapp-bridge
+    restart: unless-stopped
+    expose:
+      - "8002"
+    ports:
+      - "8002:8002"  # Expose for direct testing
+    env_file:
+      - ./whatsapp/.env
+    environment:
+      # Override WebSocket URL to use Docker service name
+      - CHATBOT_WS_BASE_URL=ws://chatbot-app:8000/api/v1/chat
+      # Logging
+      - LOG_LEVEL=INFO
+    depends_on:
+      chatbot-app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - a24-network
+    volumes:
+      - app-logs:/app/logs
+
+# =============================================================================
+# Usage Commands:
+# =============================================================================
+# Start all services:    docker compose -f docker-compose.root.yml up -d
+# View logs:             docker compose -f docker-compose.root.yml logs -f
+# Stop all:              docker compose -f docker-compose.root.yml down
+# Rebuild:               docker compose -f docker-compose.root.yml up -d --build
+# Scale PetPooja:        docker compose -f docker-compose.root.yml up -d --scale petpooja-app=3
+# =============================================================================

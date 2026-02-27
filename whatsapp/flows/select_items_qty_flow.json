@@ -1,0 +1,85 @@
+{
+  "version": "7.3",
+  "screens": [
+    {
+      "id": "SELECT_ITEMS_QTY",
+      "title": "Select Items",
+      "terminal": true,
+      "data": {
+        "screen_title": {
+          "type": "string",
+          "__example__": "Breakfast Items"
+        },
+        "item_0_visible": { "type": "boolean", "__example__": true },
+        "item_0_label": { "type": "string", "__example__": "Masala Dosa — ₹80" },
+        "item_1_visible": { "type": "boolean", "__example__": true },
+        "item_1_label": { "type": "string", "__example__": "Idli — ₹30" },
+        "item_2_visible": { "type": "boolean", "__example__": false },
+        "item_2_label": { "type": "string", "__example__": "-" },
+        "item_3_visible": { "type": "boolean", "__example__": false },
+        "item_3_label": { "type": "string", "__example__": "-" },
+        "item_4_visible": { "type": "boolean", "__example__": false },
+        "item_4_label": { "type": "string", "__example__": "-" },
+        "item_5_visible": { "type": "boolean", "__example__": false },
+        "item_5_label": { "type": "string", "__example__": "-" },
+        "item_6_visible": { "type": "boolean", "__example__": false },
+        "item_6_label": { "type": "string", "__example__": "-" },
+        "item_7_visible": { "type": "boolean", "__example__": false },
+        "item_7_label": { "type": "string", "__example__": "-" },
+        "item_8_visible": { "type": "boolean", "__example__": false },
+        "item_8_label": { "type": "string", "__example__": "-" },
+        "item_9_visible": { "type": "boolean", "__example__": false },
+        "item_9_label": { "type": "string", "__example__": "-" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "select_qty_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.screen_title}"
+              },
+              {
+                "type": "TextBody",
+                "text": "Enter quantity for items you want to order. Leave empty to skip."
+              },
+              { "type": "TextInput", "name": "qty_0", "label": "${data.item_0_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_0_visible}" },
+              { "type": "TextInput", "name": "qty_1", "label": "${data.item_1_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_1_visible}" },
+              { "type": "TextInput", "name": "qty_2", "label": "${data.item_2_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_2_visible}" },
+              { "type": "TextInput", "name": "qty_3", "label": "${data.item_3_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_3_visible}" },
+              { "type": "TextInput", "name": "qty_4", "label": "${data.item_4_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_4_visible}" },
+              { "type": "TextInput", "name": "qty_5", "label": "${data.item_5_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_5_visible}" },
+              { "type": "TextInput", "name": "qty_6", "label": "${data.item_6_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_6_visible}" },
+              { "type": "TextInput", "name": "qty_7", "label": "${data.item_7_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_7_visible}" },
+              { "type": "TextInput", "name": "qty_8", "label": "${data.item_8_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_8_visible}" },
+              { "type": "TextInput", "name": "qty_9", "label": "${data.item_9_label}", "label-variant": "large", "input-type": "number", "required": false, "visible": "${data.item_9_visible}" },
+              {
+                "type": "Footer",
+                "label": "Add to Cart",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "qty_0": "${form.qty_0}",
+                    "qty_1": "${form.qty_1}",
+                    "qty_2": "${form.qty_2}",
+                    "qty_3": "${form.qty_3}",
+                    "qty_4": "${form.qty_4}",
+                    "qty_5": "${form.qty_5}",
+                    "qty_6": "${form.qty_6}",
+                    "qty_7": "${form.qty_7}",
+                    "qty_8": "${form.qty_8}",
+                    "qty_9": "${form.qty_9}",
+                    "flow_type": "select_items_qty"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,161 @@
+# =============================================================================
+# Restaurant AI - Development Environment
+# =============================================================================
+# For local development with hot-reload
+# Usage: docker compose -f docker-compose.dev.yml up
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Frontend Development Server (Port 3000) - Hot Reload Enabled
+  # ===========================================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend.dev
+    container_name: restaurant-frontend-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source for hot reload
+      - ./frontend:/app
+      - /app/node_modules  # Prevent node_modules from being overwritten
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000
+    networks:
+      - restaurant-network
+    depends_on:
+      - app
+
+  # ===========================================================================
+  # FastAPI Application (Port 8000) - Hot Reload Enabled
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: restaurant-app-dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Database
+      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=restaurant_ai
+      - DB_USER=admin
+      - DB_PASSWORD=admin123
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # MongoDB
+      - MONGODB_CONNECTION_STRING=mongodb://mongodb:27017
+      - MONGODB_DATABASE_NAME=restaurant_ai_analytics
+      # Application
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # CORS - Allow all origins in dev
+      - ALLOWED_ORIGINS=*
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - restaurant-network
+    volumes:
+      # Mount source for hot reload
+      - ./app:/app/app
+      - ./frontend:/app/frontend
+      - ./static:/app/static
+      - app-logs:/app/logs
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ===========================================================================
+  # PostgreSQL Database (Port 5433)
+  # ===========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: restaurant-postgres-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=restaurant_ai
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data-dev:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./db/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/02-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+      - ./db/03-app-tables.sql:/docker-entrypoint-initdb.d/03-app-tables.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d restaurant_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - restaurant-network
+
+  # ===========================================================================
+  # Redis Cache (Port 6379)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: restaurant-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data-dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - restaurant-network
+
+  # ===========================================================================
+  # MongoDB Analytics (Port 27017)
+  # ===========================================================================
+  mongodb:
+    image: mongo:7
+    container_name: restaurant-mongodb-dev
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data-dev:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - restaurant-network
+
+networks:
+  restaurant-network:
+    driver: bridge
+
+volumes:
+  postgres-data-dev:
+  redis-data-dev:
+  mongodb-data-dev:
+  app-logs:

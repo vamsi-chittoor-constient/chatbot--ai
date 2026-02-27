@@ -1,0 +1,272 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1000" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <linearGradient id="awsHeader" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#232f3e"/>
+      <stop offset="100%" style="stop-color:#ff9900"/>
+    </linearGradient>
+    <linearGradient id="dockerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0db7ed"/>
+      <stop offset="100%" style="stop-color:#0996c7"/>
+    </linearGradient>
+    <linearGradient id="ec2Grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff9900"/>
+      <stop offset="100%" style="stop-color:#e68a00"/>
+    </linearGradient>
+    <filter id="deployShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="3" dy="4" stdDeviation="4" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1400" height="1000" fill="#f5f7fa"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1400" height="60" fill="url(#awsHeader)"/>
+  <text x="700" y="38" text-anchor="middle" fill="white" font-size="24" font-weight="bold">Deployment Architecture - AWS EC2 + Docker Compose</text>
+
+  <!-- Internet/Users -->
+  <g transform="translate(100, 90)">
+    <rect width="200" height="100" rx="10" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="2"/>
+    <text x="100" y="30" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Internet Users</text>
+    <g transform="translate(30, 45)">
+      <circle cx="15" cy="12" r="10" fill="#3498db"/>
+      <rect x="7" y="25" width="16" height="12" rx="3" fill="#3498db"/>
+    </g>
+    <g transform="translate(70, 45)">
+      <circle cx="15" cy="12" r="10" fill="#27ae60"/>
+      <rect x="7" y="25" width="16" height="12" rx="3" fill="#27ae60"/>
+    </g>
+    <g transform="translate(110, 45)">
+      <circle cx="15" cy="12" r="10" fill="#e74c3c"/>
+      <rect x="7" y="25" width="16" height="12" rx="3" fill="#e74c3c"/>
+    </g>
+    <g transform="translate(150, 45)">
+      <circle cx="15" cy="12" r="10" fill="#9b59b6"/>
+      <rect x="7" y="25" width="16" height="12" rx="3" fill="#9b59b6"/>
+    </g>
+    <text x="100" y="95" text-anchor="middle" font-size="9" fill="#666">Browsers / Mobile</text>
+  </g>
+
+  <!-- Arrow to AWS -->
+  <path d="M200 200 L200 250" stroke="#666" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="210" y="230" font-size="10" fill="#666">HTTPS</text>
+
+  <!-- AWS Cloud -->
+  <g transform="translate(30, 260)">
+    <rect width="1340" height="700" rx="15" fill="white" stroke="#ff9900" stroke-width="3" filter="url(#deployShadow)"/>
+    <rect width="1340" height="50" rx="15" fill="#ff9900"/>
+    <rect y="35" width="1340" height="15" fill="#ff9900"/>
+
+    <!-- AWS Logo area -->
+    <text x="70" y="35" fill="white" font-size="18" font-weight="bold">AWS</text>
+    <text x="150" y="35" fill="white" font-size="14">Region: eu-north-1 (Stockholm)</text>
+
+    <!-- EC2 Instance -->
+    <g transform="translate(50, 70)">
+      <rect width="1240" height="600" rx="12" fill="#f8f9fa" stroke="#ec7211" stroke-width="2"/>
+      <rect width="1240" height="40" rx="12" fill="url(#ec2Grad)"/>
+      <rect y="28" width="1240" height="12" fill="url(#ec2Grad)"/>
+
+      <text x="30" y="28" fill="white" font-size="14" font-weight="bold">EC2 Instance: t3.medium (2 vCPU, 4GB RAM)</text>
+      <text x="400" y="28" fill="white" font-size="12">Public IP: 13.60.10.215</text>
+      <text x="700" y="28" fill="white" font-size="12">Ubuntu 22.04 LTS</text>
+
+      <!-- Docker Compose Container -->
+      <g transform="translate(30, 55)">
+        <rect width="1180" height="520" rx="10" fill="white" stroke="#0db7ed" stroke-width="2"/>
+        <rect width="1180" height="35" rx="10" fill="url(#dockerGrad)"/>
+        <rect y="25" width="1180" height="10" fill="url(#dockerGrad)"/>
+
+        <text x="30" y="25" fill="white" font-size="12" font-weight="bold">Docker Compose</text>
+        <text x="200" y="25" fill="rgba(255,255,255,0.9)" font-size="10">docker compose up -d --build</text>
+        <text x="1050" y="25" fill="rgba(255,255,255,0.9)" font-size="10">5 Containers</text>
+
+        <!-- Docker Network -->
+        <g transform="translate(20, 50)">
+          <rect width="1140" height="450" rx="8" fill="#e8f4f8" stroke="#0db7ed" stroke-dasharray="5,3"/>
+          <text x="570" y="20" text-anchor="middle" font-size="11" font-weight="bold" fill="#0db7ed">restaurant-network (bridge)</text>
+
+          <!-- NGINX Container -->
+          <g transform="translate(20, 35)">
+            <rect width="200" height="180" rx="8" fill="white" stroke="#009639" stroke-width="2" filter="url(#deployShadow)"/>
+            <rect width="200" height="30" rx="8" fill="#009639"/>
+            <rect y="20" width="200" height="10" fill="#009639"/>
+            <text x="100" y="22" text-anchor="middle" fill="white" font-size="11" font-weight="bold">nginx</text>
+
+            <text x="15" y="50" font-size="9" fill="#333">Image: custom (Dockerfile.nginx)</text>
+            <text x="15" y="65" font-size="9" fill="#333">Port: 80:80</text>
+            <text x="15" y="80" font-size="9" fill="#333">Serves: React Frontend</text>
+            <text x="15" y="95" font-size="9" fill="#333">Proxies: /api → app:8000</text>
+            <text x="15" y="110" font-size="9" fill="#333">Proxies: /ws → app:8000</text>
+
+            <rect x="15" y="120" width="170" height="50" rx="5" fill="#e8f8f5" stroke="#27ae60"/>
+            <text x="100" y="138" text-anchor="middle" font-size="8" font-weight="bold" fill="#27ae60">Health Check</text>
+            <text x="100" y="152" text-anchor="middle" font-size="7" fill="#666">curl http://localhost/health</text>
+            <text x="100" y="164" text-anchor="middle" font-size="7" fill="#666">interval: 30s</text>
+          </g>
+
+          <!-- App Container -->
+          <g transform="translate(240, 35)">
+            <rect width="280" height="180" rx="8" fill="white" stroke="#009688" stroke-width="2" filter="url(#deployShadow)"/>
+            <rect width="280" height="30" rx="8" fill="#009688"/>
+            <rect y="20" width="280" height="10" fill="#009688"/>
+            <text x="140" y="22" text-anchor="middle" fill="white" font-size="11" font-weight="bold">app (FastAPI)</text>
+
+            <text x="15" y="50" font-size="9" fill="#333">Image: custom (Dockerfile)</text>
+            <text x="15" y="65" font-size="9" fill="#333">Port: 8000 (internal)</text>
+            <text x="15" y="80" font-size="9" fill="#333">Python 3.11 + Uvicorn</text>
+            <text x="15" y="95" font-size="9" fill="#333">Workers: 4 (auto-scaled)</text>
+
+            <rect x="15" y="105" width="250" height="65" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+            <text x="140" y="120" text-anchor="middle" font-size="8" font-weight="bold" fill="#d68910">Environment</text>
+            <text x="20" y="135" font-size="7" fill="#333">DATABASE_URL=postgres://admin:***@postgres:5432</text>
+            <text x="20" y="147" font-size="7" fill="#333">REDIS_URL=redis://redis:6379/0</text>
+            <text x="20" y="159" font-size="7" fill="#333">OPENAI_API_KEY=${OPENAI_API_KEY}</text>
+            <text x="20" y="168" font-size="7" fill="#333">+ 20 ACCOUNT_*_API_KEY vars</text>
+          </g>
+
+          <!-- PostgreSQL Container -->
+          <g transform="translate(540, 35)">
+            <rect width="180" height="180" rx="8" fill="white" stroke="#336791" stroke-width="2" filter="url(#deployShadow)"/>
+            <rect width="180" height="30" rx="8" fill="#336791"/>
+            <rect y="20" width="180" height="10" fill="#336791"/>
+            <text x="90" y="22" text-anchor="middle" fill="white" font-size="11" font-weight="bold">postgres</text>
+
+            <text x="15" y="50" font-size="9" fill="#333">Image: postgres:15-alpine</text>
+            <text x="15" y="65" font-size="9" fill="#333">Port: 5432:5432</text>
+            <text x="15" y="80" font-size="9" fill="#333">User: admin</text>
+            <text x="15" y="95" font-size="9" fill="#333">DB: restaurant_ai</text>
+
+            <rect x="15" y="105" width="150" height="65" rx="5" fill="#ebf5fb" stroke="#3498db"/>
+            <text x="90" y="120" text-anchor="middle" font-size="8" font-weight="bold" fill="#2980b9">Volumes</text>
+            <text x="20" y="135" font-size="7" fill="#333">postgres-data:/var/lib/</text>
+            <text x="20" y="147" font-size="7" fill="#333">./db/*.sql → init.d/</text>
+            <text x="20" y="159" font-size="7" fill="#666">152 tables | 365 items</text>
+          </g>
+
+          <!-- Redis Container -->
+          <g transform="translate(740, 35)">
+            <rect width="180" height="180" rx="8" fill="white" stroke="#dc382d" stroke-width="2" filter="url(#deployShadow)"/>
+            <rect width="180" height="30" rx="8" fill="#dc382d"/>
+            <rect y="20" width="180" height="10" fill="#dc382d"/>
+            <text x="90" y="22" text-anchor="middle" fill="white" font-size="11" font-weight="bold">redis</text>
+
+            <text x="15" y="50" font-size="9" fill="#333">Image: redis:7-alpine</text>
+            <text x="15" y="65" font-size="9" fill="#333">Port: 6379:6379</text>
+            <text x="15" y="80" font-size="9" fill="#333">Memory: 512MB max</text>
+            <text x="15" y="95" font-size="9" fill="#333">Policy: allkeys-lru</text>
+
+            <rect x="15" y="105" width="150" height="65" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+            <text x="90" y="120" text-anchor="middle" font-size="8" font-weight="bold" fill="#c0392b">Data</text>
+            <text x="20" y="135" font-size="7" fill="#333">Sessions</text>
+            <text x="20" y="147" font-size="7" fill="#333">Cart storage</text>
+            <text x="20" y="159" font-size="7" fill="#333">LangGraph checkpoints</text>
+          </g>
+
+          <!-- MongoDB Container -->
+          <g transform="translate(940, 35)">
+            <rect width="180" height="180" rx="8" fill="white" stroke="#4db33d" stroke-width="2" filter="url(#deployShadow)"/>
+            <rect width="180" height="30" rx="8" fill="#4db33d"/>
+            <rect y="20" width="180" height="10" fill="#4db33d"/>
+            <text x="90" y="22" text-anchor="middle" fill="white" font-size="11" font-weight="bold">mongodb</text>
+
+            <text x="15" y="50" font-size="9" fill="#333">Image: mongo:7</text>
+            <text x="15" y="65" font-size="9" fill="#333">Port: 27017:27017</text>
+            <text x="15" y="80" font-size="9" fill="#333">No auth (internal)</text>
+
+            <rect x="15" y="95" width="150" height="75" rx="5" fill="#e8f8f5" stroke="#27ae60"/>
+            <text x="90" y="110" text-anchor="middle" font-size="8" font-weight="bold" fill="#1e8449">Collections</text>
+            <text x="20" y="125" font-size="7" fill="#333">conversations</text>
+            <text x="20" y="137" font-size="7" fill="#333">agent_logs</text>
+            <text x="20" y="149" font-size="7" fill="#333">llm_usage</text>
+            <text x="20" y="161" font-size="7" fill="#333">user_events</text>
+          </g>
+
+          <!-- Container Dependencies Arrows -->
+          <g stroke="#666" stroke-width="1.5" fill="none" stroke-dasharray="4,2">
+            <path d="M220 125 L240 125"/>
+            <text x="230" y="120" font-size="7" fill="#666">→</text>
+
+            <path d="M520 125 L540 125"/>
+            <path d="M520 140 L540 190 L720 190 L740 140"/>
+            <path d="M520 160 L540 220 L920 220 L940 160"/>
+          </g>
+
+          <!-- Volumes Section -->
+          <g transform="translate(20, 240)">
+            <rect width="1100" height="80" rx="8" fill="#f8f9fa" stroke="#95a5a6"/>
+            <text x="550" y="22" text-anchor="middle" font-size="11" font-weight="bold" fill="#7f8c8d">Docker Volumes (Persistent Storage)</text>
+
+            <g transform="translate(30, 35)">
+              <rect width="200" height="35" rx="5" fill="#ebf5fb" stroke="#3498db"/>
+              <text x="100" y="22" text-anchor="middle" font-size="9" fill="#2980b9">postgres-data</text>
+            </g>
+            <g transform="translate(260, 35)">
+              <rect width="200" height="35" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+              <text x="100" y="22" text-anchor="middle" font-size="9" fill="#c0392b">redis-data</text>
+            </g>
+            <g transform="translate(490, 35)">
+              <rect width="200" height="35" rx="5" fill="#e8f8f5" stroke="#27ae60"/>
+              <text x="100" y="22" text-anchor="middle" font-size="9" fill="#1e8449">mongodb-data</text>
+            </g>
+            <g transform="translate(720, 35)">
+              <rect width="200" height="35" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+              <text x="100" y="22" text-anchor="middle" font-size="9" fill="#d68910">app-logs</text>
+            </g>
+          </g>
+
+          <!-- Health Checks -->
+          <g transform="translate(20, 340)">
+            <rect width="1100" height="90" rx="8" fill="white" stroke="#27ae60" stroke-width="2"/>
+            <text x="550" y="22" text-anchor="middle" font-size="11" font-weight="bold" fill="#27ae60">Health Checks &amp; Dependencies</text>
+
+            <g transform="translate(30, 35)">
+              <text x="0" y="15" font-size="9" fill="#333" font-weight="bold">Startup Order:</text>
+              <text x="0" y="35" font-size="8" fill="#666">1. postgres (healthy) → 2. redis (healthy) → 3. mongodb (healthy) → 4. app (healthy) → 5. nginx</text>
+              <text x="0" y="55" font-size="8" fill="#666">Each service waits for dependencies via condition: service_healthy</text>
+            </g>
+
+            <g transform="translate(600, 35)">
+              <text x="0" y="15" font-size="9" fill="#333" font-weight="bold">Health Endpoints:</text>
+              <text x="0" y="35" font-size="8" fill="#666">NGINX: curl localhost/health</text>
+              <text x="0" y="50" font-size="8" fill="#666">App: curl localhost:8000/api/v1/health</text>
+              <text x="250" y="35" font-size="8" fill="#666">Postgres: pg_isready -U admin</text>
+              <text x="250" y="50" font-size="8" fill="#666">Redis: redis-cli ping</text>
+            </g>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <!-- External Services -->
+  <g transform="translate(1000, 90)">
+    <rect width="350" height="140" rx="10" fill="white" stroke="#9b59b6" stroke-width="2" filter="url(#deployShadow)"/>
+    <text x="175" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#8e44ad">External Services</text>
+
+    <g transform="translate(20, 40)">
+      <rect width="150" height="40" rx="5" fill="#412991"/>
+      <text x="75" y="25" text-anchor="middle" fill="white" font-size="10" font-weight="bold">OpenAI API</text>
+    </g>
+    <g transform="translate(180, 40)">
+      <rect width="150" height="40" rx="5" fill="#25D366"/>
+      <text x="75" y="25" text-anchor="middle" fill="white" font-size="10" font-weight="bold">SMS/WhatsApp</text>
+    </g>
+
+    <text x="175" y="110" text-anchor="middle" font-size="9" fill="#666">20 OpenAI accounts for load balancing</text>
+    <text x="175" y="125" text-anchor="middle" font-size="9" fill="#666">Test mode: OTP 123456</text>
+  </g>
+
+  <!-- Arrow from EC2 to External -->
+  <path d="M1000 350 L1100 230" stroke="#9b59b6" stroke-width="2" stroke-dasharray="5,3"/>
+
+  <!-- Footer Commands -->
+  <g transform="translate(50, 970)">
+    <rect width="1300" height="25" rx="5" fill="#2c3e50"/>
+    <text x="20" y="17" fill="#27ae60" font-size="10" font-family="monospace">$ docker compose up -d --build</text>
+    <text x="350" y="17" fill="#f39c12" font-size="10" font-family="monospace">$ docker compose logs -f</text>
+    <text x="600" y="17" fill="#3498db" font-size="10" font-family="monospace">$ docker compose down -v</text>
+    <text x="850" y="17" fill="#e74c3c" font-size="10" font-family="monospace">$ docker compose ps</text>
+    <text x="1100" y="17" fill="white" font-size="10">One-Command Deploy!</text>
+  </g>
+</svg>

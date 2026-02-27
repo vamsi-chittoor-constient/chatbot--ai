@@ -1,0 +1,281 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+    <linearGradient id="nginxGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#009639"/>
+      <stop offset="100%" style="stop-color:#006d2c"/>
+    </linearGradient>
+    <linearGradient id="fastapiGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#009688"/>
+      <stop offset="100%" style="stop-color:#00695c"/>
+    </linearGradient>
+    <linearGradient id="postgresGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#336791"/>
+      <stop offset="100%" style="stop-color:#1d4f6e"/>
+    </linearGradient>
+    <linearGradient id="redisGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#dc382d"/>
+      <stop offset="100%" style="stop-color:#a41e11"/>
+    </linearGradient>
+    <linearGradient id="mongoGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4db33d"/>
+      <stop offset="100%" style="stop-color:#3a8c2e"/>
+    </linearGradient>
+    <linearGradient id="openaiGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#412991"/>
+      <stop offset="100%" style="stop-color:#2d1a66"/>
+    </linearGradient>
+    <linearGradient id="reactGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#61dafb"/>
+      <stop offset="100%" style="stop-color:#21a1c4"/>
+    </linearGradient>
+    <linearGradient id="userGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff9800"/>
+      <stop offset="100%" style="stop-color:#e65100"/>
+    </linearGradient>
+    <linearGradient id="awsGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff9900"/>
+      <stop offset="100%" style="stop-color:#cc7a00"/>
+    </linearGradient>
+
+    <!-- Shadow filter -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.2"/>
+    </filter>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="900" fill="#f8fafc"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1200" height="70" fill="url(#headerGrad)"/>
+  <text x="600" y="45" text-anchor="middle" fill="white" font-size="28" font-weight="bold">Restaurant AI - System Architecture</text>
+
+  <!-- AWS Cloud Container -->
+  <rect x="30" y="90" width="1140" height="790" rx="20" fill="white" stroke="#ff9900" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="30" y="90" width="1140" height="50" rx="20" fill="url(#awsGrad)"/>
+  <rect x="30" y="120" width="1140" height="20" fill="url(#awsGrad)"/>
+
+  <!-- AWS Icon -->
+  <text x="100" y="123" fill="white" font-size="20" font-weight="bold">AWS EC2</text>
+  <text x="1100" y="123" fill="white" font-size="14" text-anchor="end">Docker Compose</text>
+
+  <!-- User Icon -->
+  <g transform="translate(100, 200)">
+    <circle cx="40" cy="25" r="20" fill="url(#userGrad)" filter="url(#shadow)"/>
+    <path d="M15 70 Q40 50 65 70 L65 85 Q40 75 15 85 Z" fill="url(#userGrad)"/>
+    <text x="40" y="110" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Users</text>
+    <text x="40" y="125" text-anchor="middle" font-size="11" fill="#666">Browser/Mobile</text>
+  </g>
+
+  <!-- Arrow: User to NGINX -->
+  <path d="M180 240 L270 240" stroke="#667eea" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="225" y="230" text-anchor="middle" font-size="10" fill="#666">HTTPS</text>
+
+  <!-- NGINX Box -->
+  <g transform="translate(280, 180)">
+    <rect width="140" height="120" rx="10" fill="url(#nginxGrad)" filter="url(#shadow)"/>
+    <!-- NGINX Icon -->
+    <text x="70" y="35" text-anchor="middle" fill="white" font-size="28" font-weight="bold">N</text>
+    <text x="70" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="bold">NGINX</text>
+    <text x="70" y="80" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">Reverse Proxy</text>
+    <text x="70" y="95" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">Port 80</text>
+    <text x="70" y="110" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">Load Balancer</text>
+  </g>
+
+  <!-- Arrow: NGINX to FastAPI -->
+  <path d="M430 240 L520 240" stroke="#667eea" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="475" y="230" text-anchor="middle" font-size="10" fill="#666">HTTP</text>
+
+  <!-- FastAPI Application Box (Large) -->
+  <g transform="translate(530, 160)">
+    <rect width="380" height="400" rx="15" fill="white" stroke="#009688" stroke-width="2" filter="url(#shadow)"/>
+    <rect width="380" height="45" rx="15" fill="url(#fastapiGrad)"/>
+    <rect y="30" width="380" height="15" fill="url(#fastapiGrad)"/>
+
+    <!-- FastAPI Header -->
+    <text x="190" y="30" text-anchor="middle" fill="white" font-size="16" font-weight="bold">FastAPI Application</text>
+    <text x="340" y="30" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">Port 8000</text>
+
+    <!-- Internal Components -->
+    <!-- API Router -->
+    <rect x="20" y="60" width="160" height="50" rx="8" fill="#e0f2f1" stroke="#009688"/>
+    <text x="100" y="85" text-anchor="middle" font-size="12" font-weight="bold" fill="#00695c">API Router</text>
+    <text x="100" y="100" text-anchor="middle" font-size="9" fill="#666">/api/v1/*</text>
+
+    <!-- WebSocket -->
+    <rect x="200" y="60" width="160" height="50" rx="8" fill="#e0f2f1" stroke="#009688"/>
+    <text x="280" y="85" text-anchor="middle" font-size="12" font-weight="bold" fill="#00695c">WebSocket</text>
+    <text x="280" y="100" text-anchor="middle" font-size="9" fill="#666">/chat/{session}</text>
+
+    <!-- LangGraph Orchestrator -->
+    <rect x="20" y="125" width="340" height="60" rx="8" fill="#fff3e0" stroke="#ff9800"/>
+    <text x="190" y="150" text-anchor="middle" font-size="13" font-weight="bold" fill="#e65100">LangGraph Agent Orchestrator</text>
+    <text x="190" y="168" text-anchor="middle" font-size="10" fill="#666">Multi-Agent System | State Management | Tool Routing</text>
+
+    <!-- AI Agents Row -->
+    <g transform="translate(20, 200)">
+      <rect width="75" height="55" rx="6" fill="#e8eaf6" stroke="#3f51b5"/>
+      <text x="37" y="25" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Menu</text>
+      <text x="37" y="38" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Agent</text>
+      <text x="37" y="50" text-anchor="middle" font-size="7" fill="#666">Search/Filter</text>
+    </g>
+    <g transform="translate(105, 200)">
+      <rect width="75" height="55" rx="6" fill="#e8eaf6" stroke="#3f51b5"/>
+      <text x="37" y="25" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Cart</text>
+      <text x="37" y="38" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Agent</text>
+      <text x="37" y="50" text-anchor="middle" font-size="7" fill="#666">Add/Remove</text>
+    </g>
+    <g transform="translate(190, 200)">
+      <rect width="75" height="55" rx="6" fill="#e8eaf6" stroke="#3f51b5"/>
+      <text x="37" y="25" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Booking</text>
+      <text x="37" y="38" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Agent</text>
+      <text x="37" y="50" text-anchor="middle" font-size="7" fill="#666">Reserve</text>
+    </g>
+    <g transform="translate(275, 200)">
+      <rect width="85" height="55" rx="6" fill="#e8eaf6" stroke="#3f51b5"/>
+      <text x="42" y="25" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Satisfaction</text>
+      <text x="42" y="38" text-anchor="middle" font-size="9" font-weight="bold" fill="#1a237e">Agent</text>
+      <text x="42" y="50" text-anchor="middle" font-size="7" fill="#666">Feedback</text>
+    </g>
+
+    <!-- Tools Layer -->
+    <rect x="20" y="270" width="340" height="40" rx="6" fill="#f3e5f5" stroke="#9c27b0"/>
+    <text x="190" y="295" text-anchor="middle" font-size="11" font-weight="bold" fill="#6a1b9a">Tools: Menu Search | Cart Ops | Payment | OTP | Booking</text>
+
+    <!-- Database Layer -->
+    <rect x="20" y="325" width="340" height="35" rx="6" fill="#e3f2fd" stroke="#2196f3"/>
+    <text x="190" y="348" text-anchor="middle" font-size="11" font-weight="bold" fill="#1565c0">SQLAlchemy ORM | Async Sessions | Connection Pool</text>
+  </g>
+
+  <!-- OpenAI Box -->
+  <g transform="translate(980, 180)">
+    <rect width="140" height="120" rx="10" fill="url(#openaiGrad)" filter="url(#shadow)"/>
+    <circle cx="70" cy="35" r="20" fill="white"/>
+    <text x="70" y="42" text-anchor="middle" font-size="18" fill="#412991" font-weight="bold">AI</text>
+    <text x="70" y="75" text-anchor="middle" fill="white" font-size="14" font-weight="bold">OpenAI</text>
+    <text x="70" y="92" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">GPT-4</text>
+    <text x="70" y="107" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">20-Account LB</text>
+  </g>
+
+  <!-- Arrow: FastAPI to OpenAI -->
+  <path d="M920 240 L970 240" stroke="#9c27b0" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="945" y="230" text-anchor="middle" font-size="9" fill="#666">LLM</text>
+
+  <!-- Database Layer -->
+  <!-- PostgreSQL -->
+  <g transform="translate(280, 620)">
+    <rect width="180" height="130" rx="10" fill="url(#postgresGrad)" filter="url(#shadow)"/>
+    <!-- Postgres Icon (cylinder) -->
+    <ellipse cx="90" cy="35" rx="30" ry="12" fill="white" opacity="0.9"/>
+    <rect x="60" y="35" width="60" height="30" fill="white" opacity="0.9"/>
+    <ellipse cx="90" cy="65" rx="30" ry="12" fill="white" opacity="0.9"/>
+    <text x="90" y="55" text-anchor="middle" font-size="11" fill="#336791" font-weight="bold">SQL</text>
+    <text x="90" y="95" text-anchor="middle" fill="white" font-size="14" font-weight="bold">PostgreSQL</text>
+    <text x="90" y="112" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">Port 5432</text>
+    <text x="90" y="127" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">152 Tables | 365 Items</text>
+  </g>
+
+  <!-- Redis -->
+  <g transform="translate(510, 620)">
+    <rect width="180" height="130" rx="10" fill="url(#redisGrad)" filter="url(#shadow)"/>
+    <!-- Redis Icon (cube-like) -->
+    <rect x="65" y="20" width="50" height="50" rx="5" fill="white" opacity="0.9"/>
+    <text x="90" y="52" text-anchor="middle" font-size="14" fill="#dc382d" font-weight="bold">{ }</text>
+    <text x="90" y="95" text-anchor="middle" fill="white" font-size="14" font-weight="bold">Redis</text>
+    <text x="90" y="112" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">Port 6379</text>
+    <text x="90" y="127" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">Session | Cache</text>
+  </g>
+
+  <!-- MongoDB -->
+  <g transform="translate(740, 620)">
+    <rect width="180" height="130" rx="10" fill="url(#mongoGrad)" filter="url(#shadow)"/>
+    <!-- MongoDB Icon (leaf) -->
+    <path d="M90 20 C75 35 75 55 90 70 C105 55 105 35 90 20" fill="white" opacity="0.9"/>
+    <text x="90" y="95" text-anchor="middle" fill="white" font-size="14" font-weight="bold">MongoDB</text>
+    <text x="90" y="112" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">Port 27017</text>
+    <text x="90" y="127" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">Analytics | Logs</text>
+  </g>
+
+  <!-- Arrows to databases -->
+  <path d="M720 560 L370 610" stroke="#336791" stroke-width="2"/>
+  <path d="M720 560 L600 610" stroke="#dc382d" stroke-width="2"/>
+  <path d="M720 560 L830 610" stroke="#4db33d" stroke-width="2"/>
+
+  <!-- Connection labels -->
+  <text x="520" y="580" text-anchor="middle" font-size="10" fill="#666">Async Connections</text>
+
+  <!-- Legend -->
+  <g transform="translate(980, 350)">
+    <rect width="160" height="200" rx="10" fill="white" stroke="#ddd" filter="url(#shadow)"/>
+    <text x="80" y="25" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Performance</text>
+    <line x1="20" y1="35" x2="140" y2="35" stroke="#ddd"/>
+
+    <text x="20" y="55" font-size="10" fill="#666">API Layer:</text>
+    <text x="140" y="55" text-anchor="end" font-size="10" font-weight="bold" fill="#009688">484 RPS</text>
+
+    <text x="20" y="75" font-size="10" fill="#666">Max Users:</text>
+    <text x="140" y="75" text-anchor="end" font-size="10" font-weight="bold" fill="#009688">500+</text>
+
+    <text x="20" y="95" font-size="10" fill="#666">LLM Concurrent:</text>
+    <text x="140" y="95" text-anchor="end" font-size="10" font-weight="bold" fill="#ff9800">50</text>
+
+    <text x="20" y="115" font-size="10" fill="#666">Error Rate:</text>
+    <text x="140" y="115" text-anchor="end" font-size="10" font-weight="bold" fill="#4caf50">0%</text>
+
+    <text x="20" y="135" font-size="10" fill="#666">Avg Response:</text>
+    <text x="140" y="135" text-anchor="end" font-size="10" font-weight="bold" fill="#2196f3">0.5-2s</text>
+
+    <line x1="20" y1="145" x2="140" y2="145" stroke="#ddd"/>
+    <text x="80" y="165" text-anchor="middle" font-size="10" fill="#4caf50" font-weight="bold">PRODUCTION</text>
+    <text x="80" y="180" text-anchor="middle" font-size="10" fill="#4caf50" font-weight="bold">READY</text>
+  </g>
+
+  <!-- Data Flow Legend -->
+  <g transform="translate(980, 570)">
+    <rect width="160" height="100" rx="10" fill="white" stroke="#ddd" filter="url(#shadow)"/>
+    <text x="80" y="22" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Data Flow</text>
+    <line x1="20" y1="32" x2="140" y2="32" stroke="#ddd"/>
+
+    <line x1="25" y1="50" x2="55" y2="50" stroke="#667eea" stroke-width="2"/>
+    <text x="65" y="53" font-size="9" fill="#666">HTTP/WS</text>
+
+    <line x1="25" y1="70" x2="55" y2="70" stroke="#9c27b0" stroke-width="2" stroke-dasharray="5,3"/>
+    <text x="65" y="73" font-size="9" fill="#666">LLM API</text>
+
+    <line x1="25" y1="90" x2="55" y2="90" stroke="#336791" stroke-width="2"/>
+    <text x="65" y="93" font-size="9" fill="#666">Database</text>
+  </g>
+
+  <!-- React Frontend callout -->
+  <g transform="translate(280, 320)">
+    <rect width="140" height="60" rx="8" fill="url(#reactGrad)" filter="url(#shadow)"/>
+    <text x="70" y="25" text-anchor="middle" fill="white" font-size="12" font-weight="bold">React Frontend</text>
+    <text x="70" y="42" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="10">TypeScript + Vite</text>
+    <text x="70" y="55" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="9">Served by NGINX</text>
+  </g>
+
+  <!-- Arrow from NGINX to React -->
+  <path d="M350 300 L350 315" stroke="#21a1c4" stroke-width="2"/>
+
+  <!-- Arrow definitions -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#667eea"/>
+    </marker>
+  </defs>
+
+  <!-- Version info -->
+  <text x="1170" y="870" text-anchor="end" font-size="10" fill="#999">v1.0 | December 2025</text>
+</svg>

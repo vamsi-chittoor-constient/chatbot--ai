@@ -1,0 +1,3 @@
+# Vector Database Dependencies for Semantic Search
+# chromadb is already installed by crewai (~=1.1.0) — do NOT pin a different version
+# Embeddings: chromadb's built-in default (ONNX all-MiniLM-L6-v2) — no extra deps needed

@@ -1,0 +1,65 @@
+# =============================================================================
+# Restaurant AI - Python Dependencies
+# =============================================================================
+
+# Web Framework
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+asyncpg
+nest_asyncio
+psycopg2-binary
+pgvector
+
+# Cache & Session
+redis
+aioredis
+
+# HTTP & WebSocket
+aiohttp
+websockets
+httpx
+
+# Configuration
+python-dotenv
+pydantic
+pydantic-settings
+
+# Logging
+structlog
+
+# AI/LLM
+crewai>=1.8.1
+crewai-tools
+langchain
+langchain-openai
+langchain-core
+langchain-text-splitters
+langgraph
+
+# MongoDB
+pymongo
+motor
+
+# Utilities
+python-multipart
+pybreaker
+
+# Payment Gateway
+razorpay
+reportlab
+
+# Voice Chat (Speech-to-Text & Text-to-Speech)
+torch
+numpy
+openai
+noisereduce         # Spectral noise reduction for cleaner Whisper input
+
+# Voice Activity Detection (VAD) - Select via VAD_ENGINE env var
+# Default: silero (best multilingual support)
+# Options: silero, ten, webrtc
+silero-vad          # Silero VAD - 6000+ languages, high accuracy
+onnxruntime>=1.17.1 # TEN VAD - low latency, better accuracy on short pauses
+webrtcvad           # WebRTC VAD - lightweight, minimal resources

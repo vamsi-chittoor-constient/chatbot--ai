@@ -1,0 +1,186 @@
+# =============================================================================
+# Restaurant AI - Single Command Deployment
+# =============================================================================
+# Deploy everything with: docker compose up -d --build
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # NGINX - Reverse Proxy + Frontend (Port 80)
+  # ===========================================================================
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nginx
+    container_name: restaurant-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # FastAPI Application (Port 8000)
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: restaurant-app
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    environment:
+      # Database (override for Docker networking)
+      - DATABASE_URL=postgresql+asyncpg://admin:admin123@postgres:5432/restaurant_ai
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=restaurant_ai
+      - DB_USER=admin
+      - DB_PASSWORD=admin123
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # MongoDB
+      - MONGODB_CONNECTION_STRING=mongodb://mongodb:27017
+      - MONGODB_DATABASE_NAME=restaurant_ai_analytics
+      # Application
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      # Auth
+      - AUTH_REQUIRED=true
+      - TEST_OTP_ENABLED=true
+      - TEST_OTP_CODE=123456
+      # OpenAI - Primary key (from .env)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # 20-Account LLM Load Balancing (from .env)
+      - ACCOUNT_1_API_KEY=${ACCOUNT_1_API_KEY}
+      - ACCOUNT_2_API_KEY=${ACCOUNT_2_API_KEY}
+      - ACCOUNT_3_API_KEY=${ACCOUNT_3_API_KEY}
+      - ACCOUNT_4_API_KEY=${ACCOUNT_4_API_KEY}
+      - ACCOUNT_5_API_KEY=${ACCOUNT_5_API_KEY}
+      - ACCOUNT_6_API_KEY=${ACCOUNT_6_API_KEY}
+      - ACCOUNT_7_API_KEY=${ACCOUNT_7_API_KEY}
+      - ACCOUNT_8_API_KEY=${ACCOUNT_8_API_KEY}
+      - ACCOUNT_9_API_KEY=${ACCOUNT_9_API_KEY}
+      - ACCOUNT_10_API_KEY=${ACCOUNT_10_API_KEY}
+      - ACCOUNT_11_API_KEY=${ACCOUNT_11_API_KEY}
+      - ACCOUNT_12_API_KEY=${ACCOUNT_12_API_KEY}
+      - ACCOUNT_13_API_KEY=${ACCOUNT_13_API_KEY}
+      - ACCOUNT_14_API_KEY=${ACCOUNT_14_API_KEY}
+      - ACCOUNT_15_API_KEY=${ACCOUNT_15_API_KEY}
+      - ACCOUNT_16_API_KEY=${ACCOUNT_16_API_KEY}
+      - ACCOUNT_17_API_KEY=${ACCOUNT_17_API_KEY}
+      - ACCOUNT_18_API_KEY=${ACCOUNT_18_API_KEY}
+      - ACCOUNT_19_API_KEY=${ACCOUNT_19_API_KEY}
+      - ACCOUNT_20_API_KEY=${ACCOUNT_20_API_KEY}
+      # CORS
+      - ALLOWED_ORIGINS=*
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - restaurant-network
+    volumes:
+      - app-logs:/app/logs
+
+  # ===========================================================================
+  # PostgreSQL Database (Port 5433)
+  # ===========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: restaurant-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=restaurant_ai
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Docker handles initial schema setup (01-03), app handles incremental migrations (04+)
+      - ./db/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./db/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/02-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+      - ./db/03-app-tables.sql:/docker-entrypoint-initdb.d/03-app-tables.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d restaurant_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - restaurant-network
+
+  # ===========================================================================
+  # Redis Cache (Port 6379)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: restaurant-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - restaurant-network
+
+  # ===========================================================================
+  # MongoDB Analytics (Port 27017)
+  # ===========================================================================
+  mongodb:
+    image: mongo:7
+    container_name: restaurant-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - restaurant-network
+
+networks:
+  restaurant-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongodb-data:
+  app-logs:

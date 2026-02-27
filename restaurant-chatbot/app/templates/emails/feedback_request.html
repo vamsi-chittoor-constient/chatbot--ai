@@ -1,0 +1,76 @@
+{% extends "emails/base.html" %}
+
+{% block title %}We'd Love Your Feedback - {{ restaurant_name }}{% endblock %}
+
+{% block content %}
+<div class="greeting">
+    Hello {{ customer_name | default('Valued Customer') }}! 👋
+</div>
+
+<div class="message">
+    <p>Thank you for dining with us! We hope you enjoyed your experience at {{ restaurant_name }}.</p>
+    <p>Your feedback helps us serve you better. Would you mind taking a moment to share your thoughts?</p>
+</div>
+
+{% if recent_order %}
+<div class="info-box" style="background-color: #f0f4ff;">
+    <h3>Your Recent Visit</h3>
+    <div class="info-row">
+        <span class="info-label">Date:</span>
+        <span class="info-value">{{ recent_order.date }}</span>
+    </div>
+    {% if recent_order.order_type %}
+    <div class="info-row">
+        <span class="info-label">Order Type:</span>
+        <span class="info-value">{{ recent_order.order_type | title }}</span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if feedback_url %}
+<div style="text-align: center;">
+    <a href="{{ feedback_url }}" class="button">Share Your Feedback</a>
+</div>
+{% endif %}
+
+<div class="message">
+    <p>We'd love to hear about:</p>
+    <ul>
+        <li>🍽️ Food quality and taste</li>
+        <li>⚡ Service speed and efficiency</li>
+        <li>😊 Staff friendliness</li>
+        <li>🏠 Restaurant ambiance and cleanliness</li>
+        <li>💰 Value for money</li>
+    </ul>
+</div>
+
+<div class="message">
+    <p><strong>Quick Rating:</strong> How would you rate your overall experience?</p>
+    <div style="text-align: center; padding: 20px; font-size: 32px;">
+        {% if quick_rating_links %}
+        {% for rating in [5, 4, 3, 2, 1] %}
+        <a href="{{ quick_rating_links[rating] }}" style="text-decoration: none; margin: 0 5px;">
+            {% if rating >= 4 %}😊{% elif rating == 3 %}😐{% else %}😞{% endif %}
+        </a>
+        {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+<div class="message">
+    <p>Your feedback takes less than 2 minutes and means the world to us!</p>
+    <p style="margin-top: 20px;">
+        Thank you for being a valued customer!<br>
+        <strong>{{ restaurant_name }} Team</strong>
+    </p>
+</div>
+
+<div class="message" style="margin-top: 30px; padding: 15px; background-color: #f8f9fa; border-radius: 6px;">
+    <p style="font-size: 14px; color: #666666; margin: 0;">
+        <strong>P.S.</strong> Have a complaint or special request?
+        <a href="mailto:{{ restaurant_email | default('support@restaurant.com') }}" style="color: #667eea;">Contact us directly</a>
+        and we'll resolve it immediately.
+    </p>
+</div>
+{% endblock %}

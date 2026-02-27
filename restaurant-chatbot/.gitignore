@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Database
+*.sqlite
+*.db
+*.db-journal
+
+# MongoDB
+mongodb/data/
+mongodb/logs/
+*.lock
+
+# Environment variables
+.env.local
+.env.*.local
+.env
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+restaurant_ai.log
+test.log
+
+# Claude
+.claude
+.claude-*/
+
+#docs
+
+#folders
+test_frontend/node_modules/

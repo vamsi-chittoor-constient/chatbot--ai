@@ -1,0 +1,51 @@
+# =============================================================================
+# Restaurant AI - Nginx + Frontend
+# =============================================================================
+# Multi-stage build: Build React app, then serve with Nginx
+# =============================================================================
+
+# Stage 1: Build React Frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+# Copy package files
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci --silent
+
+# Copy frontend source
+COPY frontend/ .
+
+# Build for production
+RUN npm run build
+
+# Stage 2: Nginx with built frontend
+FROM nginx:alpine
+
+# Install curl and openssl for healthcheck and SSL certificate generation
+RUN apk add --no-cache curl openssl
+
+# Copy nginx configuration
+COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
+
+# Copy built frontend from builder stage
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+
+# Copy SSL certificate generation script (sed fixes Windows \r\n line endings)
+COPY docker/generate-ssl-cert.sh /usr/local/bin/generate-ssl-cert.sh
+RUN sed -i 's/\r$//' /usr/local/bin/generate-ssl-cert.sh && chmod +x /usr/local/bin/generate-ssl-cert.sh
+
+# Create SSL directory
+RUN mkdir -p /etc/nginx/ssl
+
+# Expose ports
+EXPOSE 80 443
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost/health || exit 1
+
+# Generate SSL cert and start nginx
+CMD ["/bin/sh", "-c", "/usr/local/bin/generate-ssl-cert.sh && nginx -g 'daemon off;'"]

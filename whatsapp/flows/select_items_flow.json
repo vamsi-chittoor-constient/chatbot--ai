@@ -1,0 +1,63 @@
+{
+  "version": "7.3",
+  "screens": [
+    {
+      "id": "SELECT_ITEMS",
+      "title": "Select Items",
+      "terminal": true,
+      "data": {
+        "screen_title": {
+          "type": "string",
+          "__example__": "Breakfast Items"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "Masala Dosa", "title": "Masala Dosa - ₹80" },
+            { "id": "Idli", "title": "Idli - ₹30" }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "item_selection_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.screen_title}"
+              },
+              {
+                "type": "CheckboxGroup",
+                "name": "selected_items",
+                "label": "Select items to add",
+                "required": true,
+                "data-source": "${data.items}"
+              },
+              {
+                "type": "Footer",
+                "label": "Add to Cart",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "selected_items": "${form.selected_items}",
+                    "flow_type": "select_items"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

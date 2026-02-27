@@ -1,0 +1,39 @@
+# Core Dependencies
+fastapi==0.115.0
+uvicorn[standard]==0.31.0
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Database
+psycopg[binary]==3.2.12  # PostgreSQL driver for SQLAlchemy (psycopg3 - sync)
+asyncpg==0.29.0  # Async PostgreSQL driver for high-concurrency
+sqlalchemy==2.0.36  # ORM for all database operations
+alembic==1.13.3  # Database migrations
+
+# HTTP Requests
+requests==2.32.3
+httpx==0.27.2
+tenacity==8.2.3
+boto3==1.35.0  # AWS SDK for SigV4 signing
+
+# Environment & Configuration
+python-dotenv==1.1.0
+
+# Validation & Parsing
+email-validator==2.2.0
+
+# Logging & Monitoring
+python-multipart==0.0.12
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==42.0.5  # Fernet encryption for credentials at rest
+slowapi==0.1.9  # Rate limiting middleware
+
+# Development & Testing (optional)
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
+# Production Server
+gunicorn==23.0.0
