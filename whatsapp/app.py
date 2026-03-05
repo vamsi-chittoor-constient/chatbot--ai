@@ -89,6 +89,8 @@ _bg_listeners: Dict[str, asyncio.Task] = {}
 # Used to correlate nfm_reply responses with the flow that triggered them
 _active_flows: Dict[str, dict] = {}
 _FLOW_CONTEXT_TTL = 1800  # 30 min
+# WhatsApp profile names: phone -> display name (for booking guest name)
+_wa_profile_names: Dict[str, str] = {}
 
 
 # ===================================================================
@@ -157,6 +159,10 @@ async def receive_message(request: Request):
 
                     LOGGER.info(f"Message from {from_number} ({user_name}): {user_message[:50]}...")
 
+                    # Cache WhatsApp profile name for booking guest name
+                    if user_name and user_name != "User":
+                        _wa_profile_names[from_number] = user_name
+
                     # Process in background — return 200 to Meta immediately
                     asyncio.create_task(
                         _process_message(from_number, user_message, msg_id)
@@ -183,6 +189,59 @@ async def _process_message(phone: str, user_message: str, msg_id: str):
                 _start_bg_listener(phone)
                 return
             await _handle_flow_response(phone, response_data)
+            _start_bg_listener(phone)
+            return
+
+        # Intercept booking form interactive replies (3-step: party → date → time)
+        if user_message.startswith("__BOOK_PARTY__"):
+            # Step 1 complete: User selected party size → show date picker
+            try:
+                party_size = int(user_message.replace("__BOOK_PARTY__", ""))
+            except ValueError:
+                party_size = 2
+            if phone not in _active_flows:
+                _active_flows[phone] = {"type": "booking_intake", "ts": asyncio.get_event_loop().time()}
+            _active_flows[phone]["party_size"] = party_size
+            _active_flows[phone]["ts"] = asyncio.get_event_loop().time()
+            # Show date selection list (next 7 days)
+            await _send_booking_date_picker(phone)
+            _start_bg_listener(phone)
+            return
+
+        if user_message.startswith("__BOOK_DATE__"):
+            # Step 2 complete: User selected date → show time picker
+            date_str = user_message.replace("__BOOK_DATE__", "")
+            if phone in _active_flows:
+                _active_flows[phone]["date"] = date_str
+                _active_flows[phone]["ts"] = asyncio.get_event_loop().time()
+            else:
+                _active_flows[phone] = {"type": "booking_intake", "party_size": 2, "date": date_str, "ts": asyncio.get_event_loop().time()}
+            # Show time selection buttons
+            await _send_booking_time_picker(phone, date_str)
+            _start_bg_listener(phone)
+            return
+
+        if user_message.startswith("__BOOK_TIME__"):
+            # Step 3 complete: User selected time → submit booking
+            time_str = user_message.replace("__BOOK_TIME__", "")
+            flow_ctx = _active_flows.pop(phone, {})
+            party_size = flow_ctx.get("party_size", 2)
+            date_str = flow_ctx.get("date", "")
+            guest_name = _wa_profile_names.get(phone, "Guest")
+
+            form_response = {
+                "type": "form_response",
+                "form_type": "booking_intake",
+                "data": {
+                    "date": date_str,
+                    "time": time_str,
+                    "party_size": party_size,
+                    "guest_name": guest_name,
+                    "phone": phone,
+                },
+            }
+            LOGGER.info(f"Booking form submitted: {party_size} guests, {date_str} {time_str} for {phone}")
+            await _send_form_response_to_chatbot(phone, form_response)
             _start_bg_listener(phone)
             return
 
@@ -767,6 +826,9 @@ async def _handle_agui_event(phone: str, agui: dict) -> bool:
         return True
     elif event_type == "BOOKING_CONFIRMATION":
         await _convert_booking_confirmation(phone, agui)
+        return True
+    elif event_type == "BOOKING_INTAKE_FORM":
+        await _convert_booking_intake_form(phone, agui)
         return True
 
     # Lifecycle events — skip silently (TEXT_MESSAGE_* handled by caller)
@@ -1701,6 +1763,110 @@ async def _convert_booking_confirmation(phone: str, agui: dict) -> None:
         await send_whatsapp_reply(phone, text)
 
     LOGGER.info(f"Sent booking confirmation ({code}) to {phone}")
+
+
+# --- BOOKING_INTAKE_FORM ---
+async def _convert_booking_intake_form(phone: str, agui: dict) -> None:
+    """
+    Convert booking intake form to WhatsApp multi-step interactive flow.
+
+    Step 1 (this function): Show party size buttons
+    Step 2 (_send_booking_date_picker): Show date list (next 7 days)
+    Step 3 (_send_booking_time_picker): Show time buttons
+    → All selections combined into form_response for deterministic booking
+    """
+    party_sizes = agui.get("party_sizes", [2, 4, 6, 8])
+    restaurant_name = agui.get("restaurant_name", "our restaurant")
+
+    # Initialize booking flow context
+    _active_flows[phone] = {
+        "type": "booking_intake",
+        "ts": asyncio.get_event_loop().time(),
+    }
+
+    # Step 1: Party size buttons
+    party_buttons = []
+    for size in party_sizes[:3]:  # WhatsApp max 3 buttons
+        party_buttons.append({
+            "type": "reply",
+            "reply": {
+                "id": f"__BOOK_PARTY__{size}",
+                "title": f"{size} Guests"
+            }
+        })
+
+    header_text = f"Book a Table at {restaurant_name}" if restaurant_name else "Book a Table"
+
+    await send_whatsapp_interactive(phone, {
+        "type": "button",
+        "body": {"text": f"*{header_text}*\n\nHow many guests will be dining?"},
+        "action": {"buttons": party_buttons}
+    })
+
+    LOGGER.info(f"Sent booking intake step 1 (party size) to {phone}")
+
+
+async def _send_booking_date_picker(phone: str) -> None:
+    """Step 2: Show date selection list (next 7 days)."""
+    from datetime import date, timedelta
+
+    today = date.today()
+    rows = []
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    for i in range(7):
+        d = today + timedelta(days=i)
+        if i == 0:
+            label = "Today"
+        elif i == 1:
+            label = "Tomorrow"
+        else:
+            label = day_names[d.weekday()]
+
+        date_display = d.strftime("%b %d")  # e.g., "Mar 07"
+        rows.append({
+            "id": f"__BOOK_DATE__{d.isoformat()}",
+            "title": _truncate(f"{label}, {date_display}", 24),
+            "description": d.strftime("%A, %B %d, %Y")
+        })
+
+    await send_whatsapp_interactive(phone, {
+        "type": "list",
+        "body": {"text": "What date would you like to book?"},
+        "action": {
+            "button": "Pick a Date",
+            "sections": [{
+                "title": "Available Dates",
+                "rows": rows
+            }]
+        }
+    })
+
+    LOGGER.info(f"Sent booking intake step 2 (date picker, 7 days) to {phone}")
+
+
+async def _send_booking_time_picker(phone: str, date_str: str) -> None:
+    """Step 3: Show time selection buttons for the chosen date."""
+    # Parse date for display
+    try:
+        from datetime import datetime as _dt
+        chosen_date = _dt.fromisoformat(date_str).strftime("%b %d")
+    except Exception:
+        chosen_date = date_str
+
+    time_buttons = [
+        {"type": "reply", "reply": {"id": "__BOOK_TIME__12:30 PM", "title": "12:30 PM (Lunch)"}},
+        {"type": "reply", "reply": {"id": "__BOOK_TIME__7:00 PM", "title": "7:00 PM (Dinner)"}},
+        {"type": "reply", "reply": {"id": "__BOOK_TIME__8:00 PM", "title": "8:00 PM (Dinner)"}},
+    ]
+
+    await send_whatsapp_interactive(phone, {
+        "type": "button",
+        "body": {"text": f"What time on *{chosen_date}*?"},
+        "action": {"buttons": time_buttons}
+    })
+
+    LOGGER.info(f"Sent booking intake step 3 (time picker) to {phone}")
 
 
 # ===================================================================

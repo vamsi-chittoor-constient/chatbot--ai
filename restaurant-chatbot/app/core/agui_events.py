@@ -159,6 +159,7 @@ class EventType(str, Enum):
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     RECEIPT_LINK = "RECEIPT_LINK"
     BOOKING_CONFIRMATION = "BOOKING_CONFIRMATION"
+    BOOKING_INTAKE_FORM = "BOOKING_INTAKE_FORM"
 
 
 @dataclass
@@ -428,6 +429,22 @@ class BookingConfirmationEvent(AGUIEvent):
     table_number: str = ""
     table_location: str = ""
     quick_replies: List[Dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class BookingIntakeFormEvent(AGUIEvent):
+    """
+    Emitted when AI detects booking intent to show a booking form/card.
+
+    Contains:
+    - time_slots: Available booking slot options [{date, time, label}]
+    - party_sizes: Selectable party sizes [2, 4, 6, 8]
+    - restaurant_name: Restaurant name for display
+    """
+    type: EventType = EventType.BOOKING_INTAKE_FORM
+    time_slots: List[Dict[str, str]] = field(default_factory=list)
+    party_sizes: List[int] = field(default_factory=lambda: [2, 4, 6, 8])
+    restaurant_name: str = ""
 
 
 @dataclass
@@ -2107,6 +2124,78 @@ def emit_booking_confirmation(
         logger.error("booking_confirmation_emit_failed", error=str(e), session_id=session_id)
 
 
+def emit_booking_intake_form(
+    session_id: str,
+    time_slots: List[Dict[str, str]] = None,
+    party_sizes: List[int] = None,
+    restaurant_name: str = ""
+):
+    """
+    Emit booking intake form when AI detects booking intent.
+
+    Shows interactive form/card for collecting reservation details.
+    Thread-safe: uses _put_event_threadsafe() for cross-thread queue operations.
+    """
+    try:
+        if time_slots is None:
+            time_slots = _generate_default_time_slots()
+        if party_sizes is None:
+            party_sizes = [2, 4, 6, 8]
+
+        event = BookingIntakeFormEvent(
+            time_slots=time_slots,
+            party_sizes=party_sizes,
+            restaurant_name=restaurant_name,
+        )
+        _put_event_threadsafe(session_id, event)
+        logger.info(
+            "booking_intake_form_emitted",
+            session_id=session_id,
+            slots_count=len(time_slots),
+        )
+    except Exception as e:
+        logger.error("booking_intake_form_emit_failed", error=str(e), session_id=session_id)
+
+
+def _generate_default_time_slots() -> List[Dict[str, str]]:
+    """Generate default booking time slots for today and tomorrow."""
+    from datetime import date, timedelta
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    day_after = today + timedelta(days=2)
+
+    slots = []
+    time_options = [
+        ("12:30 PM", "Lunch"),
+        ("1:00 PM", "Lunch"),
+        ("7:00 PM", "Dinner"),
+        ("7:30 PM", "Dinner"),
+        ("8:00 PM", "Dinner"),
+        ("8:30 PM", "Dinner"),
+    ]
+
+    for d, day_label in [(today, "Today"), (tomorrow, "Tomorrow"), (day_after, day_after.strftime("%A"))]:
+        for time_str, meal in time_options:
+            # Skip past time slots for today
+            if d == today:
+                from datetime import datetime
+                hour = int(time_str.split(":")[0])
+                if "PM" in time_str and hour != 12:
+                    hour += 12
+                if hour <= datetime.now().hour:
+                    continue
+            slots.append({
+                "date": d.isoformat(),
+                "date_label": day_label,
+                "time": time_str,
+                "meal": meal,
+                "label": f"{day_label} {time_str} ({meal})",
+            })
+
+    return slots
+
+
 def _get_activity_type_for_tool(tool_name: str) -> str:
     """Map tool name to activity type for icon selection."""
     tool_activity_types = {
@@ -2121,6 +2210,7 @@ def _get_activity_type_for_tool(tool_name: str) -> str:
         "set_special_instructions": "noting",
         "get_item_details": "searching",
         "check_table_availability": "checking",
+        "show_booking_form": "loading",
         "make_reservation": "booking",
         "get_my_bookings": "checking",
         "cancel_reservation": "processing",

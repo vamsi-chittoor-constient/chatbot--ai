@@ -1463,6 +1463,47 @@ async def chat_endpoint(
                             flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
+
+                    if form_type == "booking_intake":
+                        # Direct booking from interactive form (WhatsApp list/flow or web card)
+                        # Bypasses AI — calls make_reservation deterministically
+                        date_str = form_data.get("date", "")
+                        time_str = form_data.get("time", "7:00 PM")
+                        party_size = int(form_data.get("party_size", 2))
+                        guest_name = form_data.get("guest_name", "Guest")
+                        phone = form_data.get("phone", "")
+
+                        try:
+                            from app.features.booking.crew_agent import (
+                                create_booking_tool,
+                            )
+                            make_reservation_tool = create_booking_tool(session_id)
+                            result = make_reservation_tool.run(
+                                date=date_str,
+                                time=time_str,
+                                party_size=party_size,
+                                guest_name=guest_name,
+                                phone=phone
+                            )
+                        except Exception as e:
+                            logger.error("booking_intake_failed", error=str(e), session_id=session_id)
+                            result = f"Sorry, booking failed: {str(e)}"
+
+                        # Flush staged events (booking_confirmation card) and stream
+                        from app.core.agui_events import flush_pending_events
+                        flush_pending_events(session_id)
+                        await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                        # Send text response
+                        if language != "English":
+                            result = await translate_response(result, language)
+                        await websocket_manager.send_message_with_metadata(
+                            session_id=session_id,
+                            message=result,
+                            message_type="ai_response",
+                            metadata={"direct_action": "booking_intake"}
+                        )
+                        continue
                 # ========================================================================
 
                 # Check rate limit before processing

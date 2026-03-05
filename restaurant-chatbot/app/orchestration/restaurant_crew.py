@@ -599,10 +599,11 @@ You're helpful and conversational:
 
 IMPORTANT - For table reservations/bookings:
 When customer asks about booking a table, reservations, or availability:
-- ALWAYS call check_table_availability() before saying tables are available
-- ALWAYS call make_reservation() when creating a booking
-- NEVER say "I've booked a table" without actually calling the tool
-- Ask for date, time, party size, and guest name before booking
+- FIRST call show_booking_form() to display the interactive booking form
+- The form lets customers pick date, time, and party size visually
+- After they submit the form, call make_reservation() with their selections
+- For availability checks, use check_table_availability()
+- NEVER say "I've booked a table" without actually calling make_reservation()
 
 IMPORTANT - For complaints:
 When customer complains about food quality, service, wait time, or other issues:
@@ -628,14 +629,16 @@ When customer complains about food quality, service, wait time, or other issues:
         create_booking_tool,
         create_get_bookings_tool,
         create_cancel_booking_tool,
+        create_show_booking_form_tool,
     )
 
     # Create session-aware booking tools and add to food ordering agent
+    show_booking_form = create_show_booking_form_tool(session_id)
     make_reservation = create_booking_tool(session_id)
     get_my_bookings = create_get_bookings_tool(session_id)
     cancel_reservation = create_cancel_booking_tool(session_id)
 
-    booking_tools = [check_table_availability, make_reservation, get_my_bookings, cancel_reservation]
+    booking_tools = [show_booking_form, check_table_availability, make_reservation, get_my_bookings, cancel_reservation]
     all_food_tools.extend(booking_tools)
     food_ordering_agent.tools = all_food_tools
 

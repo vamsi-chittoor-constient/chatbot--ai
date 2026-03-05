@@ -338,6 +338,62 @@ def _cancel_booking_in_db(confirmation_code: str, session_id: str) -> Optional[D
 # BOOKING TOOLS WITH @tool DECORATOR
 # ============================================================================
 
+def create_show_booking_form_tool(session_id: str):
+    """Factory to create show_booking_form tool with session context."""
+
+    @tool("show_booking_form")
+    def show_booking_form() -> str:
+        """
+        Show an interactive booking form/card to the customer.
+
+        Use this FIRST when a customer mentions wanting to book or reserve a table.
+        This shows a visual form with available time slots and party size options.
+        The customer will select their preferred options from the form.
+
+        No parameters needed - the form shows available slots automatically.
+
+        Returns:
+            Confirmation that the booking form was displayed.
+        """
+        from app.core.agui_events import emit_tool_activity, emit_booking_intake_form
+        emit_tool_activity(session_id, "show_booking_form")
+
+        try:
+            # Get restaurant name for display
+            restaurant_name = ""
+            restaurant_id = _get_restaurant_id()
+            if restaurant_id:
+                try:
+                    from app.core.db_pool import SyncDBConnection
+                    from psycopg2.extras import RealDictCursor
+                    with SyncDBConnection() as conn:
+                        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                            cur.execute("SELECT restaurant_name FROM restaurant_config WHERE id = %s", (restaurant_id,))
+                            row = cur.fetchone()
+                            if row:
+                                restaurant_name = row['restaurant_name']
+                except Exception:
+                    pass
+
+            # Emit the booking intake form event
+            emit_booking_intake_form(
+                session_id=session_id,
+                restaurant_name=restaurant_name,
+            )
+
+            logger.info("show_booking_form_emitted", session_id=session_id)
+            return (
+                "Booking form displayed to the customer. "
+                "They will select their preferred date, time, and party size from the form. "
+                "Wait for their selection before proceeding."
+            )
+        except Exception as e:
+            logger.error("show_booking_form_failed", error=str(e), session_id=session_id)
+            return "Could not display booking form. Please ask the customer for their preferred date, time, and party size."
+
+    return show_booking_form
+
+
 @tool("check_table_availability")
 def check_table_availability(date: str, time: str = "7pm", party_size: int = 2) -> str:
     """
