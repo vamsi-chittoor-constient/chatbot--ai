@@ -784,14 +784,16 @@ def create_booking_agent(session_id: str, llm) -> Agent:
 
     Returns an Agent that can be added to a multi-agent crew.
 
-    Tools (5):
+    Tools (6):
+    - show_booking_form: Display interactive booking form
     - check_table_availability: Check available tables
     - make_reservation: Create a new booking
     - get_my_bookings: View existing reservations
     - modify_reservation: Change booking details
     - cancel_reservation: Cancel a booking
     """
-    # Create session-aware tools (5 tools total)
+    # Create session-aware tools (6 tools total)
+    show_form_tool = create_show_booking_form_tool(session_id)
     booking_tool = create_booking_tool(session_id)
     get_bookings_tool = create_get_bookings_tool(session_id)
     modify_tool = create_modify_booking_tool(session_id)
@@ -813,7 +815,7 @@ You understand that reservations often involve special moments - celebrations, b
 
 You excel at finding creative solutions when preferred times are unavailable, always offering alternatives that work for the customer.""",
         llm=llm,
-        tools=[check_table_availability, booking_tool, get_bookings_tool, modify_tool, cancel_tool],
+        tools=[show_form_tool, check_table_availability, booking_tool, get_bookings_tool, modify_tool, cancel_tool],
         verbose=False,
         allow_delegation=True,  # Can delegate to other agents
         respect_context_window=True,
