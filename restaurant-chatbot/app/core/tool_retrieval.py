@@ -18,7 +18,7 @@ logger = structlog.get_logger(__name__)
 AgentType = Literal["food_ordering", "booking"]
 
 # =============================================================================
-# FOOD ORDERING AGENT TOOLS (25 tools)
+# FOOD ORDERING AGENT TOOLS (30 tools — includes booking)
 # =============================================================================
 # IMPORTANT: These names MUST match the @tool("name") decorators in the actual
 # tool factories. Mismatches cause phantom tools that waste RAG retrieval slots.
@@ -273,6 +273,60 @@ FOOD_ORDERING_TOOLS = {
         "category": "support",
         "priority": 5
     },
+
+    # =========================================================================
+    # Booking / Reservation (5 tools)
+    # =========================================================================
+    "show_booking_form": {
+        "name": "show_booking_form",
+        "description": "Show an interactive booking form/card for the customer to select date, time, and party size",
+        "usage": "When customer first mentions wanting to book or reserve a table, show the form first",
+        "examples": [
+            "book a table", "I want to reserve", "table reservation", "can I book",
+            "book table for tomorrow", "reserve a table", "I'd like to book"
+        ],
+        "category": "booking",
+        "priority": 10
+    },
+    "check_table_availability": {
+        "name": "check_table_availability",
+        "description": "Check table availability for date, time, and party size",
+        "usage": "When customer wants to check table availability, book table, make reservation",
+        "examples": [
+            "check availability", "table for 4", "book table", "reservation",
+            "any tables available", "is there a table", "available slots",
+            "9 pm 3 guests", "tomorrow evening", "table for 2 tonight"
+        ],
+        "category": "booking",
+        "priority": 10
+    },
+    "make_reservation": {
+        "name": "make_reservation",
+        "description": "Create a table reservation for specified date, time, and party size",
+        "usage": "When customer wants to book, reserve, or make reservation after checking availability",
+        "examples": [
+            "book table", "make reservation", "reserve for 6pm", "table booking",
+            "yes book it", "confirm reservation", "reserve that table"
+        ],
+        "category": "booking",
+        "priority": 10
+    },
+    "get_my_bookings": {
+        "name": "get_my_bookings",
+        "description": "Retrieve customer's current and upcoming reservations",
+        "usage": "When customer wants to see their bookings, reservations, or table bookings",
+        "examples": ["my bookings", "show reservations", "upcoming tables", "my reservations"],
+        "category": "booking",
+        "priority": 8
+    },
+    "cancel_reservation": {
+        "name": "cancel_reservation",
+        "description": "Cancel an existing table reservation",
+        "usage": "When customer wants to cancel reservation or booking",
+        "examples": ["cancel reservation", "cancel booking", "cancel table", "cancel my reservation"],
+        "category": "booking",
+        "priority": 7
+    },
 }
 
 # =============================================================================
@@ -280,6 +334,14 @@ FOOD_ORDERING_TOOLS = {
 # =============================================================================
 
 BOOKING_TOOLS = {
+    "show_booking_form": {
+        "name": "show_booking_form",
+        "description": "Show interactive booking form with available time slots and party sizes",
+        "usage": "When customer wants to book a table, show booking form with available slots",
+        "examples": ["book a table", "reserve table", "I want to book", "table reservation"],
+        "category": "booking",
+        "priority": 10
+    },
     "check_table_availability": {
         "name": "check_table_availability",
         "description": "Check table availability for date, time, and party size",
@@ -519,6 +581,19 @@ def get_relevant_tools_for_agent(
         # Payment intent (natural language like "I want to pay online")
         if any(kw in msg_lower for kw in ["pay online", "pay cash", "pay by card", "payment", "pay now", "i want to pay"]):
             _must_include.append("select_payment_method")
+
+        # Booking / reservation intent
+        if any(kw in msg_lower for kw in [
+            "book", "reserve", "reservation", "table for", "booking",
+            "available table", "table availability",
+        ]):
+            _must_include.extend(["show_booking_form", "check_table_availability", "make_reservation"])
+
+        if any(kw in msg_lower for kw in ["cancel reservation", "cancel booking", "cancel my booking"]):
+            _must_include.append("cancel_reservation")
+
+        if any(kw in msg_lower for kw in ["my bookings", "my reservations", "show bookings"]):
+            _must_include.append("get_my_bookings")
 
         for must_tool in _must_include:
             if must_tool not in included_names and must_tool in all_tools:

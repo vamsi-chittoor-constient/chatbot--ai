@@ -269,6 +269,43 @@ function aguiReducer(state, action) {
         }),
       }
 
+    case 'BOOKING_CONFIRMATION':
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+          id: Date.now(),
+          role: 'system',
+          type: 'booking_confirmation',
+          data: {
+            confirmation_code: action.payload.confirmation_code,
+            guest_name: action.payload.guest_name,
+            party_size: action.payload.party_size,
+            booking_date: action.payload.booking_date,
+            booking_time: action.payload.booking_time,
+            table_number: action.payload.table_number,
+            table_location: action.payload.table_location,
+            quick_replies: action.payload.quick_replies,
+          },
+          timestamp: new Date(),
+        }],
+      }
+
+    case 'BOOKING_INTAKE_FORM':
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+          id: Date.now(),
+          role: 'system',
+          type: 'booking_form',
+          data: {
+            time_slots: action.payload.time_slots,
+            party_sizes: action.payload.party_sizes,
+            restaurant_name: action.payload.restaurant_name,
+          },
+          timestamp: new Date(),
+        }],
+      }
+
     case 'CLEAR_QUICK_REPLIES':
       return {
         ...state,
