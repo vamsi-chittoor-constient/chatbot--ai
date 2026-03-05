@@ -158,6 +158,7 @@ class EventType(str, Enum):
     PAYMENT_METHOD_SELECTION = "PAYMENT_METHOD_SELECTION"
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     RECEIPT_LINK = "RECEIPT_LINK"
+    BOOKING_CONFIRMATION = "BOOKING_CONFIRMATION"
 
 
 @dataclass
@@ -401,6 +402,32 @@ class ReceiptLinkEvent(AGUIEvent):
     amount: float = 0.0
     download_url: str = ""
     items: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class BookingConfirmationEvent(AGUIEvent):
+    """
+    Emitted when a table booking is successfully created.
+
+    Contains:
+    - confirmation_code: Unique booking confirmation code
+    - guest_name: Name on the reservation
+    - party_size: Number of guests
+    - booking_date: Display date string (e.g., "Thursday, March 6")
+    - booking_time: Display time string (e.g., "7:00 PM")
+    - table_number: Assigned table number
+    - table_location: Table location (e.g., "Main Area", "Patio")
+    - quick_replies: Next action buttons
+    """
+    type: EventType = EventType.BOOKING_CONFIRMATION
+    confirmation_code: str = ""
+    guest_name: str = ""
+    party_size: int = 0
+    booking_date: str = ""
+    booking_time: str = ""
+    table_number: str = ""
+    table_location: str = ""
+    quick_replies: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -2033,6 +2060,51 @@ def emit_receipt_link(session_id: str, order_number: str, amount: float, downloa
         logger.info("receipt_link_emitted", session_id=session_id, order_number=order_number)
     except Exception as e:
         logger.error("receipt_link_emit_failed", error=str(e), session_id=session_id)
+
+
+def emit_booking_confirmation(
+    session_id: str,
+    confirmation_code: str,
+    guest_name: str,
+    party_size: int,
+    booking_date: str,
+    booking_time: str,
+    table_number: str,
+    table_location: str = "",
+    quick_replies: List[Dict[str, str]] = None
+):
+    """
+    Emit booking confirmation card after successful table reservation.
+
+    Thread-safe: uses _put_event_threadsafe() for cross-thread queue operations.
+    """
+    try:
+        if quick_replies is None:
+            quick_replies = [
+                {"label": "View My Bookings", "action": "get_my_bookings"},
+                {"label": "Order Food", "action": "show menu"},
+                {"label": "Cancel Booking", "action": f"cancel reservation {confirmation_code}"},
+            ]
+
+        event = BookingConfirmationEvent(
+            confirmation_code=confirmation_code,
+            guest_name=guest_name,
+            party_size=party_size,
+            booking_date=booking_date,
+            booking_time=booking_time,
+            table_number=table_number,
+            table_location=table_location,
+            quick_replies=quick_replies,
+        )
+        _put_event_threadsafe(session_id, event)
+        logger.info(
+            "booking_confirmation_emitted",
+            session_id=session_id,
+            confirmation_code=confirmation_code,
+            table_number=table_number,
+        )
+    except Exception as e:
+        logger.error("booking_confirmation_emit_failed", error=str(e), session_id=session_id)
 
 
 def _get_activity_type_for_tool(tool_name: str) -> str:

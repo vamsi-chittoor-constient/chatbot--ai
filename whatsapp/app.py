@@ -765,6 +765,9 @@ async def _handle_agui_event(phone: str, agui: dict) -> bool:
     elif event_type == "RECEIPT_LINK":
         await _convert_receipt_link(phone, agui)
         return True
+    elif event_type == "BOOKING_CONFIRMATION":
+        await _convert_booking_confirmation(phone, agui)
+        return True
 
     # Lifecycle events — skip silently (TEXT_MESSAGE_* handled by caller)
     elif event_type in (
@@ -1655,6 +1658,49 @@ async def _convert_receipt_link(phone: str, agui: dict) -> None:
         }
     })
     LOGGER.info(f"Sent receipt link ({order_number}, ₹{amount}) to {phone}")
+
+
+# --- BOOKING_CONFIRMATION ---
+async def _convert_booking_confirmation(phone: str, agui: dict) -> None:
+    """Convert booking confirmation to text summary + quick action buttons."""
+    code = agui.get("confirmation_code", "")
+    guest = agui.get("guest_name", "Guest")
+    party = agui.get("party_size", 0)
+    date_str = agui.get("booking_date", "")
+    time_str = agui.get("booking_time", "")
+    table = agui.get("table_number", "")
+    location = agui.get("table_location", "")
+
+    text = "*Table Reservation Confirmed!*\n\n"
+    text += f"Confirmation Code: *{code}*\n"
+    text += f"Guest: {guest}\n"
+    text += f"Party Size: {party} guests\n"
+    text += f"Date: {date_str}\n"
+    text += f"Time: {time_str}\n"
+    text += f"Table: {table}"
+    if location:
+        text += f" ({location})"
+
+    quick_replies = agui.get("quick_replies", [])
+    if quick_replies and len(quick_replies) <= 3:
+        buttons = []
+        for qr in quick_replies[:3]:
+            buttons.append({
+                "type": "reply",
+                "reply": {
+                    "id": _truncate(qr.get("action", ""), 256),
+                    "title": _truncate(qr.get("label", ""), 20)
+                }
+            })
+        await send_whatsapp_interactive(phone, {
+            "type": "button",
+            "body": {"text": _truncate(text, 1024)},
+            "action": {"buttons": buttons}
+        })
+    else:
+        await send_whatsapp_reply(phone, text)
+
+    LOGGER.info(f"Sent booking confirmation ({code}) to {phone}")
 
 
 # ===================================================================

@@ -446,6 +446,19 @@ def create_booking_tool(session_id: str):
             if not success:
                 return "Sorry, we couldn't complete your reservation. Please try again."
 
+            # Emit booking confirmation AGUI event (renders as card in frontend/WhatsApp)
+            from app.core.agui_events import emit_booking_confirmation
+            emit_booking_confirmation(
+                session_id=session_id,
+                confirmation_code=confirmation_code,
+                guest_name=guest_name or "Guest",
+                party_size=party_size,
+                booking_date=booking_dt.strftime('%A, %B %d'),
+                booking_time=booking_dt.strftime('%I:%M %p'),
+                table_number=str(best_table['table_number']),
+                table_location=best_table.get('location', ''),
+            )
+
             # Build response with table details
             location_info = f" ({best_table['location']})" if best_table.get('location') else ""
             features_info = ""
