@@ -599,9 +599,10 @@ You're helpful and conversational:
 
 IMPORTANT - For table reservations/bookings:
 When customer asks about booking a table, reservations, or availability:
-- Use the 'Delegate work to coworker' tool
-- Coworker: "Booking Specialist"
-- Provide the customer's request details (date, time, party size) in the task
+- ALWAYS call check_table_availability() before saying tables are available
+- ALWAYS call make_reservation() when creating a booking
+- NEVER say "I've booked a table" without actually calling the tool
+- Ask for date, time, party size, and guest name before booking
 
 IMPORTANT - For complaints:
 When customer complains about food quality, service, wait time, or other issues:
@@ -620,7 +621,7 @@ When customer complains about food quality, service, wait time, or other issues:
     )
 
     # ========================================================================
-    # BOOKING AGENT
+    # BOOKING TOOLS (added to food ordering agent — single agent handles all)
     # ========================================================================
     from app.features.booking.crew_agent import (
         check_table_availability,
@@ -629,36 +630,14 @@ When customer complains about food quality, service, wait time, or other issues:
         create_cancel_booking_tool,
     )
 
-    # Create session-aware booking tools
+    # Create session-aware booking tools and add to food ordering agent
     make_reservation = create_booking_tool(session_id)
     get_my_bookings = create_get_bookings_tool(session_id)
     cancel_reservation = create_cancel_booking_tool(session_id)
 
-    booking_agent = Agent(
-        role="Booking Specialist",
-        goal="Help customers make table reservations, check availability, and manage bookings",
-        backstory="""You are a friendly booking specialist at the restaurant.
-
-🎯 CRITICAL: YOU MUST USE TOOLS - DO NOT HALLUCINATE!
-- ALWAYS call check_table_availability() before saying tables are available
-- ALWAYS call make_reservation() tool when creating a booking
-- NEVER say "I've booked a table" without actually calling the tool
-
-You help customers check table availability, make reservations, view their bookings,
-and cancel reservations. Be warm and efficient.
-
-When customer asks about food, menu, or ordering, delegate to Kavya the Food Ordering Specialist.""",
-        llm=llm,
-        tools=[check_table_availability, make_reservation, get_my_bookings, cancel_reservation],
-        verbose=True,  # Required for proper result extraction
-        allow_delegation=True,  # Can delegate to food ordering agent
-        respect_context_window=True,
-        cache=False,  # Disable - prevents "reusing same input" loop
-        max_iter=8,  # Reduced for faster responses
-        max_retry_limit=2,
-        reasoning=False,  # Disabled for speed
-        memory=False,  # ❌ DISABLED - Embedding model access denied (needs text-embedding-3-small)
-    )
+    booking_tools = [check_table_availability, make_reservation, get_my_bookings, cancel_reservation]
+    all_food_tools.extend(booking_tools)
+    food_ordering_agent.tools = all_food_tools
 
     # ========================================================================
     # TASK - Single task assigned to food ordering agent (can delegate to booking)
@@ -706,7 +685,7 @@ RULES:
     )
 
     crew = Crew(
-        agents=[food_ordering_agent, booking_agent],
+        agents=[food_ordering_agent],
         tasks=[customer_request_task],
         process=Process.sequential,  # Sequential but with delegation
         verbose=True,  # Enable for proper result extraction
