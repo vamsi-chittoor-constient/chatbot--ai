@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Query, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 import httpx
 import asyncio
 import websockets
@@ -105,7 +105,7 @@ async def verify_webhook(
 
     if mode == "subscribe" and token == VERIFY_TOKEN:
         LOGGER.info("Webhook verified successfully")
-        return int(challenge)
+        return PlainTextResponse(content=challenge)
     else:
         LOGGER.warning(f"Webhook verification failed: mode={mode}")
         raise HTTPException(status_code=403, detail="Verification failed")
