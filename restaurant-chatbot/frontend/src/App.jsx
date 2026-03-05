@@ -20,6 +20,8 @@ import {
   VoiceModeBanner,
 } from './components'
 import { SearchResultsCard } from './components/SearchResultsCard'
+import { BookingConfirmationCard } from './components/BookingConfirmationCard'
+import { BookingFormCard } from './components/BookingFormCard'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
 
@@ -186,6 +188,22 @@ function ChatInterface() {
             key={message.id}
             data={message.data}
             onQuickReply={handleQuickReply}
+          />
+        )
+      case 'booking_confirmation':
+        return (
+          <BookingConfirmationCard
+            key={message.id}
+            data={message.data}
+            onQuickReply={handleQuickReply}
+          />
+        )
+      case 'booking_form':
+        return (
+          <BookingFormCard
+            key={message.id}
+            data={message.data}
+            onSubmit={handleFormSubmit}
           />
         )
       case 'quick_replies':
