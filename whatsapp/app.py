@@ -25,7 +25,9 @@ CHATBOT_WS_BASE_URL = os.getenv("CHATBOT_WS_BASE_URL", "ws://chatbot-app:8000/ap
 WHATSAPP_API_VERSION = "v21.0"
 
 # WhatsApp Flows
+# USE_WHATSAPP_FLOWS: "true" (default) = use Flows when available, "false" = always use list/button fallback
 # FLOW_PROVISION_MODE: "auto" (default) = provision on startup, "manual" = use .env IDs only
+USE_WHATSAPP_FLOWS = os.getenv("USE_WHATSAPP_FLOWS", "true").strip().lower() == "true"
 WABA_ID = os.getenv("WABA_ID", "")
 FLOW_PROVISION_MODE = os.getenv("FLOW_PROVISION_MODE", "auto").strip().lower()
 FLOW_SELECT_ITEMS_ID = os.getenv("FLOW_SELECT_ITEMS_ID", "")
@@ -34,6 +36,7 @@ FLOW_MANAGE_CART_ID = os.getenv("FLOW_MANAGE_CART_ID", "")
 
 LOGGER.info("WhatsApp Bridge starting...")
 LOGGER.info(f"Chatbot WebSocket base URL: {CHATBOT_WS_BASE_URL}")
+LOGGER.info(f"Use WhatsApp Flows: {USE_WHATSAPP_FLOWS}")
 LOGGER.info(f"Flow provision mode: {FLOW_PROVISION_MODE}")
 
 
@@ -1161,7 +1164,7 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
             "body": {"text": _truncate(body, 1024)},
             "action": {"buttons": buttons}
         })
-    elif (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID) and len(available) >= 4:
+    elif USE_WHATSAPP_FLOWS and (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID) and len(available) >= 4:
         # Use Flow for multi-select when there are enough available items
         if unavailable:
             note_lines = ["\ud83d\udd50 *Also available later:*"]
@@ -1255,7 +1258,7 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
     # ── Flow path: single category or small item set → Item Selection Flow ──
-    _has_any_select_flow = FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID
+    _has_any_select_flow = USE_WHATSAPP_FLOWS and (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID)
     if _has_any_select_flow and (len(cat_order) == 1 or len(items) <= 20):
         cat_name = cat_order[0] if len(cat_order) == 1 else "Menu"
         if FLOW_SELECT_ITEMS_QTY_ID and len(items) <= 10:
@@ -1386,7 +1389,7 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
     lines.append(f"\ud83d\udcb0 *Total: \u20b9{total}*")
     await send_whatsapp_reply(phone, "\n".join(lines))
 
-    if FLOW_MANAGE_CART_ID and len(items) <= 10:
+    if USE_WHATSAPP_FLOWS and FLOW_MANAGE_CART_ID and len(items) <= 10:
         # Cart Management Flow (TextInput qty for all cart sizes)
         await _send_cart_management_flow(phone, items, total)
         buttons = [
