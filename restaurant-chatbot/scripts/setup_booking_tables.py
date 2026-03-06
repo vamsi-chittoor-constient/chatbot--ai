@@ -1,7 +1,11 @@
 """
 Setup Booking Tables - Aligned with A24 Schema
 ===============================================
-Create table_info and table_booking_info tables matching the dump schema.
+Tables (table_info, table_booking_info, etc.) already exist from the DB dump.
+This script:
+  1. Adds missing columns to table_booking_info (device_id, guest_name, etc.)
+  2. Seeds 200 tables into table_info
+  3. Seeds occasion types
 
 Run:
     python scripts/setup_booking_tables.py
@@ -11,129 +15,51 @@ import sys
 sys.path.insert(0, '.')
 
 
-def create_tables():
-    """Create tables matching A24_restaurant_dev_dump.sql schema."""
+def add_missing_columns():
+    """Add columns needed by the chatbot that don't exist in the A24 dump schema."""
     from app.core.db_pool import SyncDBConnection
 
-    sql_statements = [
-        # Enable uuid-ossp extension for uuid_generate_v4()
-        'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
-
-        # Create table_info (restaurant tables/seating)
-        # Note: restaurant_id uses VARCHAR to match existing restaurant_config.id
-        """
-        CREATE TABLE IF NOT EXISTS table_info (
-            table_id UUID DEFAULT public.uuid_generate_v4() PRIMARY KEY,
-            restaurant_id VARCHAR(50) NOT NULL,
-            table_number INTEGER,
-            table_capacity INTEGER,
-            table_type VARCHAR(255),
-            is_active BOOLEAN DEFAULT TRUE,
-            floor_location VARCHAR(255),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            created_by UUID,
-            updated_by UUID,
-            deleted_at TIMESTAMP WITH TIME ZONE,
-            is_deleted BOOLEAN DEFAULT FALSE
-        )
-        """,
-        # Create indexes for table_info
-        "CREATE INDEX IF NOT EXISTS idx_table_info_restaurant ON table_info(restaurant_id)",
-        "CREATE INDEX IF NOT EXISTS idx_table_info_capacity ON table_info(table_capacity)",
-        "CREATE INDEX IF NOT EXISTS idx_table_info_active ON table_info(is_active)",
-
-        # Create table_special_features
-        """
-        CREATE TABLE IF NOT EXISTS table_special_features (
-            table_feature_id UUID DEFAULT public.uuid_generate_v4() PRIMARY KEY,
-            table_id UUID NOT NULL REFERENCES table_info(table_id),
-            feature_name VARCHAR(255),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            created_by UUID,
-            updated_by UUID,
-            deleted_at TIMESTAMP WITH TIME ZONE,
-            is_deleted BOOLEAN DEFAULT FALSE
-        )
-        """,
-
-        # Create table_booking_occasion_info
-        """
-        CREATE TABLE IF NOT EXISTS table_booking_occasion_info (
-            occasion_id UUID DEFAULT public.uuid_generate_v4() PRIMARY KEY,
-            occasion_name VARCHAR(255),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            created_by UUID,
-            updated_by UUID,
-            deleted_at TIMESTAMP WITH TIME ZONE,
-            is_deleted BOOLEAN DEFAULT FALSE
-        )
-        """,
-
-        # Create table_booking_info (reservations)
-        # Note: restaurant_id uses VARCHAR to match existing restaurant_config.id
-        """
-        CREATE TABLE IF NOT EXISTS table_booking_info (
-            table_booking_id UUID DEFAULT public.uuid_generate_v4() PRIMARY KEY,
-            restaurant_id VARCHAR(50) NOT NULL,
-            table_id UUID NOT NULL REFERENCES table_info(table_id),
-            meal_slot_timing_id UUID,
-            previous_slot_id UUID,
-            customer_id UUID,
-            occasion_id UUID REFERENCES table_booking_occasion_info(occasion_id),
-            party_size INTEGER,
-            booking_date DATE,
-            booking_time TIME WITHOUT TIME ZONE,
-            booking_status VARCHAR(20),
-            special_request TEXT,
-            cancellation_reason TEXT,
-            is_advance_booking BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            created_by UUID,
-            updated_by UUID,
-            deleted_at TIMESTAMP WITH TIME ZONE,
-            is_deleted BOOLEAN DEFAULT FALSE,
-            -- Extra fields for chat agent
-            device_id VARCHAR(255),
-            guest_name VARCHAR(255),
-            contact_phone VARCHAR(20),
-            confirmation_code VARCHAR(20) UNIQUE
-        )
-        """,
-        # Create indexes for table_booking_info
-        "CREATE INDEX IF NOT EXISTS idx_booking_restaurant ON table_booking_info(restaurant_id)",
-        "CREATE INDEX IF NOT EXISTS idx_booking_table ON table_booking_info(table_id)",
-        "CREATE INDEX IF NOT EXISTS idx_booking_customer ON table_booking_info(customer_id)",
+    alter_statements = [
+        # table_booking_info: add chatbot-specific columns
+        "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS device_id VARCHAR(255)",
+        "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS guest_name VARCHAR(255)",
+        "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(20)",
+        "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS confirmation_code VARCHAR(20)",
+        # Make customer_id nullable (chatbot bookings don't always have a customer record)
+        "ALTER TABLE table_booking_info ALTER COLUMN customer_id DROP NOT NULL",
+        # Indexes for chatbot queries
+        "CREATE INDEX IF NOT EXISTS idx_booking_device ON table_booking_info(device_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_booking_confirmation ON table_booking_info(confirmation_code)",
         "CREATE INDEX IF NOT EXISTS idx_booking_date ON table_booking_info(booking_date)",
         "CREATE INDEX IF NOT EXISTS idx_booking_status ON table_booking_info(booking_status)",
-        "CREATE INDEX IF NOT EXISTS idx_booking_device ON table_booking_info(device_id)",
-        "CREATE INDEX IF NOT EXISTS idx_booking_confirmation ON table_booking_info(confirmation_code)",
     ]
 
-    print("Creating booking tables (A24 schema)...")
+    print("Adding missing columns to table_booking_info...")
 
     with SyncDBConnection() as conn:
         with conn.cursor() as cursor:
-            for sql in sql_statements:
+            for sql in alter_statements:
                 try:
                     cursor.execute(sql)
                     conn.commit()
                 except Exception as e:
-                    print(f"Warning: {e}")
+                    msg = str(e).strip()
+                    if 'already exists' in msg or 'duplicate' in msg.lower():
+                        print(f"  (already done) {sql[:60]}...")
+                    else:
+                        print(f"  Warning: {msg}")
                     conn.rollback()
 
-    print("[DONE] Tables created successfully")
+    print("[DONE] Columns ready")
 
 
 def seed_tables():
-    """Seed sample table data."""
+    """Seed 200 tables into table_info."""
     from app.core.db_pool import SyncDBConnection
     from psycopg2.extras import RealDictCursor
+    import random
 
-    print("\nSeeding sample tables...")
+    print("\nSeeding tables...")
 
     with SyncDBConnection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -145,18 +71,18 @@ def seed_tables():
                 print(f"  Tables already seeded ({count} tables exist)")
                 return
 
-            # Get restaurant_id from restaurant_config
-            cursor.execute("SELECT id FROM restaurant_config LIMIT 1")
+            # Get restaurant_id from restaurant_table (UUID)
+            cursor.execute("SELECT restaurant_id FROM restaurant_table LIMIT 1")
             row = cursor.fetchone()
             if not row:
-                print("  [ERROR] No restaurant_config found")
+                print("  [ERROR] No restaurant_table found")
                 return
 
-            restaurant_id = row['id']
+            restaurant_id = row['restaurant_id']
+            print(f"  Using restaurant_id: {restaurant_id}")
 
             # Generate 200 tables programmatically
             # Distribution: 40% 2-seat, 25% 4-seat, 15% 6-seat, 12% 8-seat, 8% 10-seat
-            import random
             random.seed(42)  # Reproducible
 
             capacity_distribution = (
@@ -191,18 +117,18 @@ def seed_tables():
 
             print(f"  Inserted {len(capacity_distribution)} tables")
 
-            # Seed occasions
+            # Seed occasions (column is occasion_type in dump schema)
             occasions = ['Birthday', 'Anniversary', 'Business', 'Date Night', 'Family Gathering', 'Other']
             for occasion in occasions:
                 cursor.execute("""
-                    INSERT INTO table_booking_occasion_info (occasion_name)
+                    INSERT INTO table_booking_occasion_info (occasion_type)
                     VALUES (%s)
                     ON CONFLICT DO NOTHING
                 """, (occasion,))
 
             conn.commit()
 
-    print(f"  [DONE] Seeded {len(sample_tables)} tables and {len(occasions)} occasions")
+    print(f"  [DONE] Seeded 200 tables and occasions")
 
 
 def verify():
@@ -224,21 +150,31 @@ def verify():
             bookings_count = cursor.fetchone()['count']
             print(f"  table_booking_info: {bookings_count} rows")
 
-            # Check occasions
-            cursor.execute("SELECT COUNT(*) as count FROM table_booking_occasion_info")
-            occasions_count = cursor.fetchone()['count']
-            print(f"  table_booking_occasion_info: {occasions_count} rows")
+            # Check chatbot columns exist
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'table_booking_info'
+                AND column_name IN ('device_id', 'guest_name', 'confirmation_code')
+            """)
+            cols = [r['column_name'] for r in cursor.fetchall()]
+            print(f"  chatbot columns present: {', '.join(cols)}")
 
-            # Show sample tables
-            cursor.execute("SELECT table_number, table_capacity, floor_location FROM table_info ORDER BY table_capacity LIMIT 5")
+            # Capacity distribution
+            cursor.execute("""
+                SELECT table_capacity, COUNT(*) as cnt
+                FROM table_info
+                WHERE is_active = TRUE AND (is_deleted = FALSE OR is_deleted IS NULL)
+                GROUP BY table_capacity
+                ORDER BY table_capacity
+            """)
             rows = cursor.fetchall()
-            print("\n  Sample tables:")
+            print("\n  Capacity distribution:")
             for r in rows:
-                print(f"    T{r['table_number']}: {r['table_capacity']} seats ({r['floor_location']})")
+                print(f"    {r['table_capacity']}-seat: {r['cnt']} tables")
 
 
 if __name__ == "__main__":
-    create_tables()
+    add_missing_columns()
     seed_tables()
     verify()
-    print("\n[SUCCESS] Booking tables ready (A24 schema)!")
+    print("\n[SUCCESS] Booking tables ready!")

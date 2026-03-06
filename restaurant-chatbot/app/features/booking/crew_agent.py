@@ -290,16 +290,16 @@ def _generate_booking_id() -> str:
 
 
 def _get_restaurant_id() -> Optional[str]:
-    """Get the restaurant ID from database."""
+    """Get the restaurant ID from restaurant_table (UUID, FK target for table_info)."""
     try:
         from app.core.db_pool import SyncDBConnection
         from psycopg2.extras import RealDictCursor
 
         with SyncDBConnection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("SELECT id FROM restaurant_config LIMIT 1")
+                cursor.execute("SELECT restaurant_id FROM restaurant_table LIMIT 1")
                 row = cursor.fetchone()
-                return row['id'] if row else None
+                return str(row['restaurant_id']) if row else None
     except Exception as e:
         logger.error("get_restaurant_id_failed", error=str(e))
         return None
