@@ -334,10 +334,10 @@ function ChatInterface() {
                 <li>Browse our menu and recommendations</li>
                 <li>Add items to your cart</li>
                 <li>Place takeaway orders</li>
-                <li>Track your order status</li>
+                <li>Book a table</li>
               </ul>
               <QuickReplies
-                options={['Show menu', 'View my cart', "What's popular?"]}
+                options={['Show menu', 'Book a table', "What's popular?"]}
                 onSelect={handleQuickReply}
               />
             </div>
