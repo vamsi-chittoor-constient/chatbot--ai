@@ -67,6 +67,7 @@ COPY app/ ./app/
 COPY frontend/ ./frontend/
 COPY static/ ./static/
 COPY db/ ./db/
+COPY scripts/ ./scripts/
 COPY requirements.txt .
 
 # Pre-create CrewAI settings with tracing disabled (avoids 20s interactive prompt)
