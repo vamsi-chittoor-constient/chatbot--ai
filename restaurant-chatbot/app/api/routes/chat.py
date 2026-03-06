@@ -1471,6 +1471,7 @@ async def chat_endpoint(
 
                         from app.features.booking.crew_agent import create_booking_tool
                         _make_reservation = create_booking_tool(session_id)
+                        result = None
                         try:
                             # Use _run() directly — .run() expects a single string for multi-param tools
                             result = _make_reservation._run(
@@ -1481,11 +1482,21 @@ async def chat_endpoint(
                             logger.info("booking_intake_form_processed", session_id=session_id, result=str(result)[:100])
                         except Exception as e:
                             logger.error("booking_intake_form_failed", error=str(e), session_id=session_id, exc_info=True)
+                            result = "Sorry, something went wrong with your reservation. Please try again."
 
-                        # Flush events (make_reservation emits BOOKING_CONFIRMATION internally)
-                        from app.core.agui_events import flush_pending_events
+                        # Flush events (make_reservation emits BOOKING_CONFIRMATION internally on success)
+                        from app.core.agui_events import flush_pending_events, _PENDING_EVENTS
+                        # Check if a BOOKING_CONFIRMATION was emitted (success case)
+                        has_confirmation = any(
+                            getattr(ev, 'type', None) and ev.type.value == 'BOOKING_CONFIRMATION'
+                            for ev in _PENDING_EVENTS.get(session_id, [])
+                        )
                         flush_pending_events(session_id)
                         await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                        # If no confirmation card was emitted, send the result text as a message
+                        if not has_confirmation and result:
+                            await websocket_manager.send_message(session_id, result)
                         continue
                 # ========================================================================
 
