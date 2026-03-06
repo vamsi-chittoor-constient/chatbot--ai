@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 42  # v42: Context preservation fix - search_menu tracks last_mentioned_item + stronger ReAct prompts
+_CREW_VERSION = 43  # v43: Strip tool response text from streamed output, suppress bare tool names
 
 
 async def _translate_response(text: str, target_language: str) -> str:
@@ -650,8 +650,9 @@ Context: {semantic_context}
 History: {context}
 
 RULES:
-- Always use tools. Return tool output as-is.
+- Always use tools. Summarize tool results in friendly natural language — NEVER output raw tool names or return values verbatim.
 - BOOKING: When user wants to book/reserve a table but hasn't given full details (date + time + party size), ALWAYS call show_booking_form tool (no arguments). This shows an interactive form with available dates, times, and party sizes. Do NOT ask the user for these details manually — the form handles it. If user provides ALL details upfront (e.g. "book a table for 4 tomorrow at 7pm"), call make_reservation directly.
+- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED] or [BOOKING CONFIRMED], respond with a brief friendly message (e.g. "Here's the booking form!" or "Your table is reserved!"). Do NOT repeat the marker.
 - LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words like "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely: "cart mein add ho gaya", "menu check karo". Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"
 - LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script). Example: "Unga cart la 2 Masala Dosa add aaiduchu, total ₹250. Vera enna venum?"
 - Keep food names, prices, order IDs in English always."""
@@ -662,7 +663,7 @@ Context: {semantic_context}
 History: {context}
 
 RULES:
-- Always use tools. Return tool output as-is.
+- Always use tools. Summarize tool results in friendly natural language — NEVER output raw tool names or return values verbatim.
 - BOOKING: When user wants to book/reserve a table, call check_table_availability with their details. If they haven't specified date/time/party size, ask for them (no form on WhatsApp).
 - Keep responses concise (under 300 words). Use *bold* for emphasis.
 - Use emojis for structure (🍽️ 🛒 ✅ 💳). Format lists with emojis or numbers, not bullets.
