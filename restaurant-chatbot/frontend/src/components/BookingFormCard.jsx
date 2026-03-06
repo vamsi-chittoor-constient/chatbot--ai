@@ -9,16 +9,15 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     max_party_size = 8,
   } = data
 
-  const [selectedPartySize, setSelectedPartySize] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
+  const [selectedPartySize, setSelectedPartySize] = useState(null)
   const [selectedTime, setSelectedTime] = useState(null)
   const [submitted, setSubmitted] = useState(false)
 
-  // Build date options from availability keys (next 7 days)
-  const dateOptions = useMemo(() => {
+  // Quick-select dates from availability (next 7 days)
+  const quickDates = useMemo(() => {
     const dates = Object.keys(availability).sort()
     if (dates.length === 0) {
-      // Fallback: generate next 7 days if no availability data
       const result = []
       for (let i = 1; i <= 7; i++) {
         const d = new Date()
@@ -30,8 +29,15 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     return dates
   }, [availability])
 
-  // Has availability data from backend?
+  // Min date for date input = tomorrow
+  const minDate = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  }, [])
+
   const hasAvailability = Object.keys(availability).length > 0
+  const isDateInAvailability = selectedDate && availability[selectedDate]
 
   // For a given date + party size, get available time slots
   const getSlots = (dateStr, partySize) => {
@@ -47,19 +53,24 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     return slots
   }
 
-  // Check if a date has ANY available slot for the selected party size
-  const isDateAvailable = (dateStr, partySize) => {
-    if (!partySize) return true
-    if (!hasAvailability) return true
-    const slots = getSlots(dateStr, partySize)
-    return Object.values(slots).some(s => s.available)
-  }
+  // Available party sizes for the selected date
+  const availablePartySizes = useMemo(() => {
+    if (!selectedDate || !isDateInAvailability) return party_sizes
+    const dateData = availability[selectedDate]
+    if (!dateData || !dateData.slots) return party_sizes
+    // Max party size available across all slots on this date
+    const maxAvail = Math.max(...Object.values(dateData.slots).filter(s => s.available).map(s => s.max_party), 0)
+    return party_sizes.filter(size => size <= maxAvail)
+  }, [selectedDate, isDateInAvailability, availability, party_sizes])
 
-  // Get time slots for the selected date + party size
+  // Time slots for selected date + party size
   const timeSlots = useMemo(() => {
     if (!selectedDate || !selectedPartySize) return {}
     return getSlots(selectedDate, selectedPartySize)
   }, [selectedDate, selectedPartySize, availability])
+
+  const availableSlotCount = Object.values(timeSlots).filter(s => s.available).length
+  const totalSlotCount = Object.keys(timeSlots).length
 
   // Format helpers
   const formatDateLabel = (dateStr) => {
@@ -67,7 +78,6 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     const today = new Date()
     const tomorrow = new Date()
     tomorrow.setDate(today.getDate() + 1)
-
     if (d.toDateString() === today.toDateString()) return 'Today'
     if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow'
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
@@ -78,25 +88,22 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     return d.toLocaleDateString('en-US', { weekday: 'short' })
   }
 
-  const formatDayNum = (dateStr) => {
-    const d = new Date(dateStr + 'T00:00:00')
-    return d.getDate()
-  }
+  const formatDayNum = (dateStr) => new Date(dateStr + 'T00:00:00').getDate()
 
   const formatMonth = (dateStr) => {
     const d = new Date(dateStr + 'T00:00:00')
     return d.toLocaleDateString('en-US', { month: 'short' })
   }
 
-  // Reset downstream selections when upstream changes
-  const handlePartySizeChange = (size) => {
-    setSelectedPartySize(size)
-    setSelectedDate(null)
+  // Handlers — reset downstream when upstream changes
+  const handleDateChange = (dateStr) => {
+    setSelectedDate(dateStr)
+    setSelectedPartySize(null)
     setSelectedTime(null)
   }
 
-  const handleDateChange = (dateStr) => {
-    setSelectedDate(dateStr)
+  const handlePartySizeChange = (size) => {
+    setSelectedPartySize(size)
     setSelectedTime(null)
   }
 
@@ -126,10 +133,6 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     )
   }
 
-  // Count available slots for selected date
-  const availableSlotCount = Object.values(timeSlots).filter(s => s.available).length
-  const totalSlotCount = Object.keys(timeSlots).length
-
   return (
     <div className="mb-6 animate-fadeIn">
       {/* Header */}
@@ -139,82 +142,99 @@ export const BookingFormCard = ({ data, onSubmit }) => {
           Book a Table
           {restaurant_name && <span className="text-indigo-200 text-sm font-normal">at {restaurant_name}</span>}
         </h3>
-        {hasAvailability && (
-          <p className="text-indigo-200 text-xs mt-1">Showing real-time availability</p>
-        )}
       </div>
 
       <div className="bg-chat-assistant rounded-b-2xl p-5 border border-gray-700/50 space-y-5">
 
-        {/* Step 1: Party Size */}
+        {/* Step 1: Date */}
         <div>
           <p className="text-gray-400 text-sm mb-2 flex items-center gap-2">
-            <Users size={14} /> How many guests?
+            <Calendar size={14} /> When would you like to dine?
           </p>
-          <div className="flex flex-wrap gap-2">
-            {party_sizes.map(size => (
-              <button key={size} onClick={() => handlePartySizeChange(size)}
-                className={`px-4 py-2 rounded-xl font-medium transition-all ${
-                  selectedPartySize === size
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
-                }`}>
-                {size}
-              </button>
-            ))}
+
+          {/* Quick-select date cards */}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {quickDates.map(dateStr => {
+              const isSelected = selectedDate === dateStr
+              return (
+                <button
+                  key={dateStr}
+                  onClick={() => handleDateChange(dateStr)}
+                  className={`flex-shrink-0 w-16 py-3 rounded-xl text-center transition-all ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <div className="text-[10px] uppercase">{formatDayOfWeek(dateStr)}</div>
+                  <div className="text-lg font-bold">{formatDayNum(dateStr)}</div>
+                  <div className="text-[10px] uppercase">{formatMonth(dateStr)}</div>
+                </button>
+              )
+            })}
           </div>
+
+          {/* Custom date picker */}
+          <div className="mt-2">
+            <p className="text-gray-500 text-xs mb-1">Or pick any date:</p>
+            <input
+              type="date"
+              min={minDate}
+              value={selectedDate || ''}
+              onChange={(e) => e.target.value && handleDateChange(e.target.value)}
+              className="w-full bg-gray-700/50 text-white border border-gray-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
+
+          {selectedDate && (
+            <p className="text-indigo-400 text-xs mt-1">{formatDateLabel(selectedDate)}</p>
+          )}
         </div>
 
-        {/* Step 2: Date (shown after party size) */}
-        {selectedPartySize && (
+        {/* Step 2: Party Size (shown after date) */}
+        {selectedDate && (
           <div className="animate-fadeIn">
             <p className="text-gray-400 text-sm mb-2 flex items-center gap-2">
-              <Calendar size={14} /> Select date
+              <Users size={14} /> How many guests?
             </p>
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {dateOptions.map(dateStr => {
-                const available = isDateAvailable(dateStr, selectedPartySize)
-                const isSelected = selectedDate === dateStr
-
+            <div className="flex flex-wrap gap-2">
+              {party_sizes.map(size => {
+                const isAvailable = availablePartySizes.includes(size)
                 return (
-                  <button
-                    key={dateStr}
-                    onClick={() => available && handleDateChange(dateStr)}
-                    disabled={!available}
-                    className={`flex-shrink-0 w-16 py-3 rounded-xl text-center transition-all ${
-                      isSelected
+                  <button key={size}
+                    onClick={() => isAvailable && handlePartySizeChange(size)}
+                    disabled={!isAvailable}
+                    className={`px-4 py-2 rounded-xl font-medium transition-all ${
+                      selectedPartySize === size
                         ? 'bg-indigo-600 text-white'
-                        : available
+                        : isAvailable
                           ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
                           : 'bg-gray-800/30 text-gray-600 cursor-not-allowed'
-                    }`}
-                  >
-                    <div className="text-[10px] uppercase">{formatDayOfWeek(dateStr)}</div>
-                    <div className="text-lg font-bold">{formatDayNum(dateStr)}</div>
-                    <div className="text-[10px] uppercase">{formatMonth(dateStr)}</div>
-                    {!available && hasAvailability && (
-                      <div className="text-[8px] text-red-400 mt-0.5">Full</div>
-                    )}
+                    }`}>
+                    {size}
                   </button>
                 )
               })}
             </div>
+            {isDateInAvailability && availablePartySizes.length < party_sizes.length && (
+              <p className="text-gray-500 text-xs mt-1">Some sizes unavailable on this date</p>
+            )}
           </div>
         )}
 
-        {/* Step 3: Time Slots (shown after date) */}
+        {/* Step 3: Time Slots (shown after date + party size) */}
         {selectedDate && selectedPartySize && (
           <div className="animate-fadeIn">
             <p className="text-gray-400 text-sm mb-2 flex items-center gap-2">
               <Clock size={14} /> Select time
-              {hasAvailability && totalSlotCount > 0 && (
+              {isDateInAvailability && totalSlotCount > 0 && (
                 <span className="text-xs text-gray-500">
                   ({availableSlotCount} of {totalSlotCount} slots open)
                 </span>
               )}
             </p>
 
-            {hasAvailability && totalSlotCount > 0 ? (
+            {isDateInAvailability && totalSlotCount > 0 ? (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
                 {Object.entries(timeSlots).map(([time, info]) => {
                   const isSelected = selectedTime === time
@@ -237,11 +257,11 @@ export const BookingFormCard = ({ data, onSubmit }) => {
                 })}
               </div>
             ) : (
-              /* Fallback: time input if no availability data */
+              /* Fallback: time input for custom dates without pre-queried availability */
               <div>
                 <input
                   type="time"
-                  value={selectedTime || '19:00'}
+                  value={selectedTime ? '' : '19:00'}
                   onChange={(e) => {
                     const [h, m] = e.target.value.split(':')
                     const hour = parseInt(h)
@@ -251,13 +271,14 @@ export const BookingFormCard = ({ data, onSubmit }) => {
                   }}
                   className="w-full bg-gray-700/50 text-white border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
+                <p className="text-gray-500 text-xs mt-1">Availability will be checked when you reserve</p>
               </div>
             )}
 
-            {availableSlotCount === 0 && hasAvailability && (
+            {availableSlotCount === 0 && isDateInAvailability && (
               <div className="flex items-center gap-2 text-amber-400 text-xs mt-2">
                 <AlertCircle size={12} />
-                No available slots for {selectedPartySize} guests on this date. Try another date.
+                No slots for {selectedPartySize} guests on this date. Try another date or fewer guests.
               </div>
             )}
           </div>
@@ -268,12 +289,12 @@ export const BookingFormCard = ({ data, onSubmit }) => {
           <div className="animate-fadeIn">
             <div className="bg-gray-700/30 rounded-xl p-3 mb-3 text-sm">
               <div className="flex justify-between text-gray-300">
-                <span>Guests</span>
-                <span className="text-white font-medium">{selectedPartySize}</span>
-              </div>
-              <div className="flex justify-between text-gray-300 mt-1">
                 <span>Date</span>
                 <span className="text-white font-medium">{formatDateLabel(selectedDate)}</span>
+              </div>
+              <div className="flex justify-between text-gray-300 mt-1">
+                <span>Guests</span>
+                <span className="text-white font-medium">{selectedPartySize}</span>
               </div>
               <div className="flex justify-between text-gray-300 mt-1">
                 <span>Time</span>
