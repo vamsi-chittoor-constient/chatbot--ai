@@ -512,9 +512,9 @@ async def manage_cart_ownership(session_id: str, user_id: str):
             await db.execute(
                 text("""
                     INSERT INTO session_state (session_id, user_id, last_activity_at)
-                    VALUES (:sid, :uid::uuid, NOW())
+                    VALUES (:sid, CAST(:uid AS uuid), NOW())
                     ON CONFLICT (session_id) DO UPDATE
-                    SET user_id = :uid::uuid, last_activity_at = NOW()
+                    SET user_id = CAST(:uid AS uuid), last_activity_at = NOW()
                 """),
                 {"sid": session_id, "uid": user_id}
             )
