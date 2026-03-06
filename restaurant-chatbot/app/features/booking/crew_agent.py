@@ -52,31 +52,15 @@ def _get_table_capacities() -> List[int]:
         return []
 
 
-def _get_availability_map(days: int = 7) -> Dict[str, Any]:
+def _get_availability_map(days: int = 30) -> Dict[str, Any]:
     """
     Build an availability map for the next N days.
-
-    Returns:
-        {
-            "max_party_size": 10,
-            "party_sizes": [2, 4, 6, 8, 10],
-            "dates": {
-                "2026-03-07": {
-                    "slots": {
-                        "12:00 PM": {"available": true, "max_party": 10},
-                        "12:30 PM": {"available": true, "max_party": 10},
-                        ...
-                        "09:30 PM": {"available": false, "max_party": 0},
-                    }
-                },
-                ...
-            }
-        }
+    Optimized: 2 queries total (all tables + all bookings in range), compute in Python.
     """
     try:
         from app.core.db_pool import SyncDBConnection
         from psycopg2.extras import RealDictCursor
-        from datetime import date, time
+        from datetime import date, time as dtime
 
         capacities = _get_table_capacities()
         if not capacities:
@@ -88,55 +72,81 @@ def _get_availability_map(days: int = 7) -> Dict[str, Any]:
         time_slots = []
         for hour in range(12, 22):
             for minute in [0, 30]:
-                t = time(hour, minute)
-                time_slots.append(t)
+                time_slots.append(dtime(hour, minute))
 
         today = date.today()
-        dates_map = {}
+        start_date = today + timedelta(days=1)
+        end_date = today + timedelta(days=days)
 
         with SyncDBConnection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                for day_offset in range(1, days + 1):
-                    check_date = today + timedelta(days=day_offset)
-                    date_str = check_date.isoformat()
-                    slots_map = {}
+                # Query 1: Get all active tables (table_id + capacity)
+                cursor.execute("""
+                    SELECT table_id, table_capacity
+                    FROM table_info
+                    WHERE is_active = TRUE
+                    AND (is_deleted = FALSE OR is_deleted IS NULL)
+                """)
+                all_tables = cursor.fetchall()
 
-                    for t in time_slots:
-                        # Count available tables at this slot (tables not booked within ±1 hour)
-                        cursor.execute("""
-                            SELECT t.table_capacity
-                            FROM table_info t
-                            WHERE t.is_active = TRUE
-                            AND (t.is_deleted = FALSE OR t.is_deleted IS NULL)
-                            AND NOT EXISTS (
-                                SELECT 1 FROM table_booking_info b
-                                WHERE b.table_id = t.table_id
-                                AND b.booking_status NOT IN ('cancelled', 'completed')
-                                AND (b.is_deleted = FALSE OR b.is_deleted IS NULL)
-                                AND b.booking_date = %s
-                                AND b.booking_time BETWEEN %s - INTERVAL '1 hour' AND %s + INTERVAL '1 hour'
-                            )
-                            ORDER BY t.table_capacity ASC
-                        """, (check_date, t, t))
+                # Query 2: Get all bookings in the date range
+                cursor.execute("""
+                    SELECT table_id, booking_date, booking_time
+                    FROM table_booking_info
+                    WHERE booking_status NOT IN ('cancelled', 'completed')
+                    AND (is_deleted = FALSE OR is_deleted IS NULL)
+                    AND booking_date BETWEEN %s AND %s
+                """, (start_date, end_date))
+                all_bookings = cursor.fetchall()
 
-                        available_rows = cursor.fetchall()
-                        if available_rows:
-                            max_party = max(r['table_capacity'] for r in available_rows)
-                            slot_label = t.strftime('%I:%M %p').lstrip('0')
-                            slots_map[slot_label] = {
-                                "available": True,
-                                "max_party": max_party,
-                                "tables_free": len(available_rows),
-                            }
-                        else:
-                            slot_label = t.strftime('%I:%M %p').lstrip('0')
-                            slots_map[slot_label] = {
-                                "available": False,
-                                "max_party": 0,
-                                "tables_free": 0,
-                            }
+        # Build lookup: (date, table_id) -> [booked_times]
+        bookings_by_date_table = {}
+        for b in all_bookings:
+            key = (b['booking_date'], str(b['table_id']))
+            if key not in bookings_by_date_table:
+                bookings_by_date_table[key] = []
+            bookings_by_date_table[key].append(b['booking_time'])
 
-                    dates_map[date_str] = {"slots": slots_map}
+        # For each date + slot, compute available tables
+        dates_map = {}
+        for day_offset in range(1, days + 1):
+            check_date = today + timedelta(days=day_offset)
+            date_str = check_date.isoformat()
+            slots_map = {}
+
+            for t in time_slots:
+                # Check each table: is it booked within ±1 hour of this slot?
+                available = []
+                for tbl in all_tables:
+                    tbl_id = str(tbl['table_id'])
+                    booked_times = bookings_by_date_table.get((check_date, tbl_id), [])
+                    # Check if any booking conflicts (within 1 hour)
+                    conflicted = False
+                    for bt in booked_times:
+                        # Convert times to minutes for easy comparison
+                        slot_mins = t.hour * 60 + t.minute
+                        book_mins = bt.hour * 60 + bt.minute
+                        if abs(slot_mins - book_mins) < 60:
+                            conflicted = True
+                            break
+                    if not conflicted:
+                        available.append(tbl['table_capacity'])
+
+                slot_label = t.strftime('%I:%M %p').lstrip('0')
+                if available:
+                    slots_map[slot_label] = {
+                        "available": True,
+                        "max_party": max(available),
+                        "tables_free": len(available),
+                    }
+                else:
+                    slots_map[slot_label] = {
+                        "available": False,
+                        "max_party": 0,
+                        "tables_free": 0,
+                    }
+
+            dates_map[date_str] = {"slots": slots_map}
 
         return {
             "max_party_size": max_capacity,

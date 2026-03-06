@@ -272,7 +272,7 @@ function aguiReducer(state, action) {
     case 'BOOKING_CONFIRMATION':
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'booking_form'), {
           id: Date.now(),
           role: 'system',
           type: 'booking_confirmation',
