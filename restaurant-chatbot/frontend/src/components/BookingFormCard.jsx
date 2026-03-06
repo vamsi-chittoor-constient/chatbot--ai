@@ -1,25 +1,42 @@
 import { useState } from 'react'
-import { Calendar, Clock, Users } from 'lucide-react'
+import { Calendar, Clock, Users, Loader2 } from 'lucide-react'
 
 export const BookingFormCard = ({ data, onSubmit }) => {
-  const { time_slots = [], party_sizes = [2, 4, 6, 8], restaurant_name = '' } = data
-  const [selectedSlot, setSelectedSlot] = useState(null)
+  const { party_sizes = [1, 2, 3, 4, 5, 6, 7, 8], restaurant_name = '' } = data
+
+  // Default date = tomorrow
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const defaultDate = tomorrow.toISOString().split('T')[0]
+
+  const [selectedDate, setSelectedDate] = useState(defaultDate)
+  const [selectedTime, setSelectedTime] = useState('19:00')
   const [selectedPartySize, setSelectedPartySize] = useState(null)
   const [submitted, setSubmitted] = useState(false)
 
-  const slotsByDate = time_slots.reduce((acc, slot) => {
-    const key = slot.date_label || slot.date
-    if (!acc[key]) acc[key] = []
-    acc[key].push(slot)
-    return acc
-  }, {})
+  // Min date = today
+  const today = new Date().toISOString().split('T')[0]
+
+  // Format display
+  const formatDate = (dateStr) => {
+    const d = new Date(dateStr + 'T00:00:00')
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+  }
+
+  const formatTime = (timeStr) => {
+    const [h, m] = timeStr.split(':')
+    const hour = parseInt(h)
+    const ampm = hour >= 12 ? 'PM' : 'AM'
+    const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+    return `${h12}:${m} ${ampm}`
+  }
 
   const handleSubmit = () => {
-    if (!selectedSlot || !selectedPartySize) return
+    if (!selectedDate || !selectedTime || !selectedPartySize) return
     setSubmitted(true)
     onSubmit?.('booking_intake', {
-      date: selectedSlot.date,
-      time: selectedSlot.time,
+      date: selectedDate,
+      time: formatTime(selectedTime),
       party_size: selectedPartySize,
     })
   }
@@ -29,11 +46,11 @@ export const BookingFormCard = ({ data, onSubmit }) => {
       <div className="mb-6 animate-fadeIn">
         <div className="bg-chat-assistant rounded-2xl p-6 border border-gray-700/50 text-center">
           <div className="w-12 h-12 bg-indigo-600/20 rounded-full flex items-center justify-center mx-auto mb-3">
-            <Calendar className="w-6 h-6 text-indigo-400" />
+            <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
           </div>
-          <p className="text-white font-medium">Booking request submitted!</p>
+          <p className="text-white font-medium">Reserving your table...</p>
           <p className="text-gray-400 text-sm mt-1">
-            {selectedPartySize} guests on {selectedSlot.date} at {selectedSlot.time}
+            {selectedPartySize} guests on {formatDate(selectedDate)} at {formatTime(selectedTime)}
           </p>
         </div>
       </div>
@@ -63,47 +80,50 @@ export const BookingFormCard = ({ data, onSubmit }) => {
                     ? 'bg-indigo-600 text-white'
                     : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
                 }`}>
-                {size} {size === 1 ? 'guest' : 'guests'}
+                {size}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Time Slots grouped by date */}
+        {/* Date Picker */}
         <div>
           <p className="text-gray-400 text-sm mb-2 flex items-center gap-2">
-            <Clock size={14} /> Pick a time
+            <Calendar size={14} /> Select date
           </p>
-          {Object.entries(slotsByDate).map(([dateLabel, slots]) => (
-            <div key={dateLabel} className="mb-3">
-              <p className="text-white text-sm font-medium mb-2">{dateLabel}</p>
-              <div className="flex flex-wrap gap-2">
-                {slots.map((slot, idx) => (
-                  <button key={idx} onClick={() => setSelectedSlot(slot)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      selectedSlot === slot
-                        ? 'bg-indigo-600 text-white'
-                        : slot.available
-                          ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
-                          : 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
-                    }`}
-                    disabled={!slot.available}>
-                    {slot.time}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-          {time_slots.length === 0 && (
-            <p className="text-gray-500 text-sm">No available slots right now.</p>
+          <input
+            type="date"
+            value={selectedDate}
+            min={today}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="w-full bg-gray-700/50 text-white border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          {selectedDate && (
+            <p className="text-indigo-400 text-xs mt-1">{formatDate(selectedDate)}</p>
+          )}
+        </div>
+
+        {/* Time Picker */}
+        <div>
+          <p className="text-gray-400 text-sm mb-2 flex items-center gap-2">
+            <Clock size={14} /> Select time
+          </p>
+          <input
+            type="time"
+            value={selectedTime}
+            onChange={(e) => setSelectedTime(e.target.value)}
+            className="w-full bg-gray-700/50 text-white border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          {selectedTime && (
+            <p className="text-indigo-400 text-xs mt-1">{formatTime(selectedTime)}</p>
           )}
         </div>
 
         {/* Submit */}
         <button onClick={handleSubmit}
-          disabled={!selectedSlot || !selectedPartySize}
+          disabled={!selectedDate || !selectedTime || !selectedPartySize}
           className={`w-full py-3 rounded-xl font-medium transition-all ${
-            selectedSlot && selectedPartySize
+            selectedDate && selectedTime && selectedPartySize
               ? 'bg-indigo-600 hover:bg-indigo-700 text-white hover:scale-[1.02] active:scale-95'
               : 'bg-gray-700/50 text-gray-500 cursor-not-allowed'
           }`}>

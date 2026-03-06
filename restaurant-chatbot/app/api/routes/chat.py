@@ -1467,24 +1467,25 @@ async def chat_endpoint(
                         # Booking form submitted — call make_reservation directly
                         booking_date = form_data.get("date", "")
                         booking_time = form_data.get("time", "")
-                        booking_party_size = form_data.get("party_size", 2)
+                        booking_party_size = int(form_data.get("party_size", 2))
 
                         from app.features.booking.crew_agent import create_booking_tool
                         _make_reservation = create_booking_tool(session_id)
                         try:
-                            result = _make_reservation.run(
+                            # Use _run() directly — .run() expects a single string for multi-param tools
+                            result = _make_reservation._run(
                                 date=booking_date,
                                 time=booking_time,
-                                party_size=int(booking_party_size),
+                                party_size=booking_party_size,
                             )
                             logger.info("booking_intake_form_processed", session_id=session_id, result=str(result)[:100])
                         except Exception as e:
-                            logger.error("booking_intake_form_failed", error=str(e), session_id=session_id)
+                            logger.error("booking_intake_form_failed", error=str(e), session_id=session_id, exc_info=True)
 
                         # Flush events (make_reservation emits BOOKING_CONFIRMATION internally)
                         from app.core.agui_events import flush_pending_events
                         flush_pending_events(session_id)
-                        await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+                        await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
                         continue
                 # ========================================================================
 
