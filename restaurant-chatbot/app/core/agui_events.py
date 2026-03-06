@@ -159,6 +159,7 @@ class EventType(str, Enum):
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     RECEIPT_LINK = "RECEIPT_LINK"
     BOOKING_CONFIRMATION = "BOOKING_CONFIRMATION"
+    BOOKING_INTAKE_FORM = "BOOKING_INTAKE_FORM"
 
 
 @dataclass
@@ -428,6 +429,15 @@ class BookingConfirmationEvent(AGUIEvent):
     table_number: str = ""
     table_location: str = ""
     quick_replies: List[Dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class BookingIntakeFormEvent(AGUIEvent):
+    """Emitted to show interactive booking form with time slots."""
+    type: EventType = EventType.BOOKING_INTAKE_FORM
+    time_slots: List[Dict[str, Any]] = field(default_factory=list)
+    party_sizes: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7, 8])
+    restaurant_name: str = ""
 
 
 @dataclass
@@ -2105,6 +2115,63 @@ def emit_booking_confirmation(
         )
     except Exception as e:
         logger.error("booking_confirmation_emit_failed", error=str(e), session_id=session_id)
+
+
+def _generate_default_time_slots(days_ahead: int = 3) -> List[Dict[str, Any]]:
+    """Generate default time slots for the next N days."""
+    from datetime import date, timedelta
+
+    slots = []
+    today = date.today()
+    dining_hours = ["12:00 PM", "12:30 PM", "1:00 PM", "1:30 PM",
+                    "7:00 PM", "7:30 PM", "8:00 PM", "8:30 PM", "9:00 PM"]
+
+    for day_offset in range(days_ahead):
+        d = today + timedelta(days=day_offset)
+        if day_offset == 0:
+            date_label = "Today"
+        elif day_offset == 1:
+            date_label = "Tomorrow"
+        else:
+            date_label = d.strftime("%A, %b %d")
+
+        for t in dining_hours:
+            slots.append({
+                "date": d.isoformat(),
+                "date_label": date_label,
+                "time": t,
+                "available": True,
+            })
+
+    return slots
+
+
+def emit_booking_intake_form(
+    session_id: str,
+    time_slots: List[Dict[str, Any]] = None,
+    party_sizes: List[int] = None,
+    restaurant_name: str = "",
+):
+    """
+    Emit booking intake form card for user to pick date/time/party size.
+
+    Thread-safe: uses _put_event_threadsafe().
+    """
+    try:
+        if time_slots is None:
+            time_slots = _generate_default_time_slots()
+        if party_sizes is None:
+            party_sizes = [1, 2, 3, 4, 5, 6, 7, 8]
+
+        event = BookingIntakeFormEvent(
+            time_slots=time_slots,
+            party_sizes=party_sizes,
+            restaurant_name=restaurant_name,
+        )
+        _put_event_threadsafe(session_id, event)
+        logger.info("booking_intake_form_emitted", session_id=session_id)
+    except Exception as e:
+        logger.error("booking_intake_form_emit_failed", error=str(e), session_id=session_id)
 
 
 def _get_activity_type_for_tool(tool_name: str) -> str:

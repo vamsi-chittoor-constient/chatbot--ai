@@ -380,6 +380,35 @@ def check_table_availability(date: str, time: str = "7pm", party_size: int = 2) 
         return f"Error checking availability: {str(e)}"
 
 
+def create_show_booking_form_tool(session_id: str):
+    """Factory to create show_booking_form tool with session context."""
+
+    @tool("show_booking_form")
+    def show_booking_form() -> str:
+        """
+        Show an interactive booking form with available time slots and party sizes.
+
+        Use this when the customer wants to book a table but hasn't provided full details yet.
+        The form lets them pick date, time, and party size visually.
+
+        No parameters needed.
+
+        Returns:
+            Confirmation that the booking form was shown.
+        """
+        from app.core.agui_events import emit_booking_intake_form, emit_tool_activity
+        emit_tool_activity(session_id, "show_booking_form")
+
+        try:
+            emit_booking_intake_form(session_id=session_id)
+            return "Booking form displayed. The customer can now select their preferred date, time, and party size."
+        except Exception as e:
+            logger.error("show_booking_form_error", error=str(e), session_id=session_id)
+            return f"Error showing booking form: {str(e)}"
+
+    return show_booking_form
+
+
 def create_booking_tool(session_id: str):
     """Factory to create booking tool with session context."""
 
