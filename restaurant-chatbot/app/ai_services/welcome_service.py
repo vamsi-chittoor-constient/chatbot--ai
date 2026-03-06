@@ -217,9 +217,11 @@ Your welcome should:
 3. Be casual and welcoming, like greeting a neighbor
 
 **Good Examples:**
-- "{time_greeting}! Great to see you back at {restaurant_name}. What sounds good today?"
-- "{time_greeting}! Welcome back - ready to order another round, or want to try something new?"
+- "{time_greeting}! Great to see you back at {restaurant_name}. What sounds good today? I can also help you book a table if you'd like to dine in."
+- "{time_greeting}! Welcome back - ready to order another round, or want to try something new? I can also help with table reservations."
 - "{time_greeting}! Nice to have you back with us. Want your usual, or feeling adventurous today?"
+
+Mention that you can help with table bookings naturally in the greeting.
 
 Generate a warm welcome-back message that makes them feel like a valued regular.
 """
@@ -254,9 +256,11 @@ Your welcome should:
 4. Reference their preferences naturally in conversation
 
 **Good Examples:**
-- With favorites: "{time_greeting}, {user_name}! So good to see you. In the mood for your favorite Margherita, or shall I show you what's new?"
+- With favorites: "{time_greeting}, {user_name}! So good to see you. In the mood for your favorite Margherita, or shall I show you what's new? I can also help you book a table."
 - With history: "{time_greeting}, {user_name}! Welcome back - you loved the pasta last time, want to go with that again or try something different?"
-- Simple: "{time_greeting}, {user_name}! Always a pleasure. What looks good to you today?"
+- Simple: "{time_greeting}, {user_name}! Always a pleasure. What looks good to you today? I can also help with table reservations if you'd like to dine in."
+
+Mention that you can help with table bookings naturally in the greeting.
 
 Generate a warm, personalized greeting that makes them feel genuinely welcomed and valued.
 """
