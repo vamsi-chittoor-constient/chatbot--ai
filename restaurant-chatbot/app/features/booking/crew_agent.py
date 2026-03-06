@@ -29,6 +29,126 @@ logger = structlog.get_logger(__name__)
 # All database operations are sync - CrewAI runs tools in threads
 # ============================================================================
 
+def _get_table_capacities() -> List[int]:
+    """Get distinct table capacities from the database."""
+    try:
+        from app.core.db_pool import SyncDBConnection
+        from psycopg2.extras import RealDictCursor
+
+        with SyncDBConnection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT DISTINCT table_capacity
+                    FROM table_info
+                    WHERE is_active = TRUE
+                    AND (is_deleted = FALSE OR is_deleted IS NULL)
+                    ORDER BY table_capacity ASC
+                """)
+                rows = cursor.fetchall()
+
+        return [row['table_capacity'] for row in rows]
+    except Exception as e:
+        logger.error("get_table_capacities_failed", error=str(e))
+        return []
+
+
+def _get_availability_map(days: int = 7) -> Dict[str, Any]:
+    """
+    Build an availability map for the next N days.
+
+    Returns:
+        {
+            "max_party_size": 10,
+            "party_sizes": [2, 4, 6, 8, 10],
+            "dates": {
+                "2026-03-07": {
+                    "slots": {
+                        "12:00 PM": {"available": true, "max_party": 10},
+                        "12:30 PM": {"available": true, "max_party": 10},
+                        ...
+                        "09:30 PM": {"available": false, "max_party": 0},
+                    }
+                },
+                ...
+            }
+        }
+    """
+    try:
+        from app.core.db_pool import SyncDBConnection
+        from psycopg2.extras import RealDictCursor
+        from datetime import date, time
+
+        capacities = _get_table_capacities()
+        if not capacities:
+            return {"max_party_size": 8, "party_sizes": list(range(1, 9)), "dates": {}}
+
+        max_capacity = max(capacities)
+
+        # Define time slots (30-min intervals from 12:00 to 22:00)
+        time_slots = []
+        for hour in range(12, 22):
+            for minute in [0, 30]:
+                t = time(hour, minute)
+                time_slots.append(t)
+
+        today = date.today()
+        dates_map = {}
+
+        with SyncDBConnection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                for day_offset in range(1, days + 1):
+                    check_date = today + timedelta(days=day_offset)
+                    date_str = check_date.isoformat()
+                    slots_map = {}
+
+                    for t in time_slots:
+                        # Count available tables at this slot (tables not booked within ±1 hour)
+                        cursor.execute("""
+                            SELECT t.table_capacity
+                            FROM table_info t
+                            WHERE t.is_active = TRUE
+                            AND (t.is_deleted = FALSE OR t.is_deleted IS NULL)
+                            AND NOT EXISTS (
+                                SELECT 1 FROM table_booking_info b
+                                WHERE b.table_id = t.table_id
+                                AND b.booking_status NOT IN ('cancelled', 'completed')
+                                AND (b.is_deleted = FALSE OR b.is_deleted IS NULL)
+                                AND b.booking_date = %s
+                                AND b.booking_time BETWEEN %s - INTERVAL '1 hour' AND %s + INTERVAL '1 hour'
+                            )
+                            ORDER BY t.table_capacity ASC
+                        """, (check_date, t, t))
+
+                        available_rows = cursor.fetchall()
+                        if available_rows:
+                            max_party = max(r['table_capacity'] for r in available_rows)
+                            slot_label = t.strftime('%I:%M %p').lstrip('0')
+                            slots_map[slot_label] = {
+                                "available": True,
+                                "max_party": max_party,
+                                "tables_free": len(available_rows),
+                            }
+                        else:
+                            slot_label = t.strftime('%I:%M %p').lstrip('0')
+                            slots_map[slot_label] = {
+                                "available": False,
+                                "max_party": 0,
+                                "tables_free": 0,
+                            }
+
+                    dates_map[date_str] = {"slots": slots_map}
+
+        return {
+            "max_party_size": max_capacity,
+            "party_sizes": list(range(1, max_capacity + 1)),
+            "dates": dates_map,
+        }
+
+    except Exception as e:
+        logger.error("get_availability_map_failed", error=str(e), exc_info=True)
+        return {"max_party_size": 8, "party_sizes": list(range(1, 9)), "dates": {}}
+
+
 def _get_available_tables(booking_datetime: datetime, party_size: int) -> List[Dict]:
     """Get available tables for given datetime and party size using sync DB (A24 schema)."""
     try:
@@ -400,7 +520,14 @@ def create_show_booking_form_tool(session_id: str):
         emit_tool_activity(session_id, "show_booking_form")
 
         try:
-            emit_booking_intake_form(session_id=session_id)
+            # Query real availability from database
+            availability = _get_availability_map(days=7)
+            emit_booking_intake_form(
+                session_id=session_id,
+                party_sizes=availability.get("party_sizes", list(range(1, 9))),
+                availability=availability.get("dates", {}),
+                max_party_size=availability.get("max_party_size", 8),
+            )
             return "Booking form displayed. The customer can now select their preferred date, time, and party size."
         except Exception as e:
             logger.error("show_booking_form_error", error=str(e), session_id=session_id)

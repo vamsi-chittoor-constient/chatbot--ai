@@ -433,11 +433,13 @@ class BookingConfirmationEvent(AGUIEvent):
 
 @dataclass
 class BookingIntakeFormEvent(AGUIEvent):
-    """Emitted to show interactive booking form with time slots."""
+    """Emitted to show interactive booking form with availability data."""
     type: EventType = EventType.BOOKING_INTAKE_FORM
     time_slots: List[Dict[str, Any]] = field(default_factory=list)
     party_sizes: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7, 8])
     restaurant_name: str = ""
+    availability: Dict[str, Any] = field(default_factory=dict)
+    max_party_size: int = 8
 
 
 @dataclass
@@ -2151,9 +2153,15 @@ def emit_booking_intake_form(
     time_slots: List[Dict[str, Any]] = None,
     party_sizes: List[int] = None,
     restaurant_name: str = "",
+    availability: Dict[str, Any] = None,
+    max_party_size: int = 8,
 ):
     """
     Emit booking intake form card for user to pick date/time/party size.
+
+    Args:
+        availability: Map of date -> {slots: {time_label: {available, max_party, tables_free}}}
+        max_party_size: Largest table capacity in the restaurant
 
     Thread-safe: uses _put_event_threadsafe().
     """
@@ -2161,15 +2169,20 @@ def emit_booking_intake_form(
         if time_slots is None:
             time_slots = _generate_default_time_slots()
         if party_sizes is None:
-            party_sizes = [1, 2, 3, 4, 5, 6, 7, 8]
+            party_sizes = list(range(1, max_party_size + 1))
+        if availability is None:
+            availability = {}
 
         event = BookingIntakeFormEvent(
             time_slots=time_slots,
             party_sizes=party_sizes,
             restaurant_name=restaurant_name,
+            availability=availability,
+            max_party_size=max_party_size,
         )
         _put_event_threadsafe(session_id, event)
-        logger.info("booking_intake_form_emitted", session_id=session_id)
+        logger.info("booking_intake_form_emitted", session_id=session_id,
+                     has_availability=bool(availability), num_dates=len(availability))
     except Exception as e:
         logger.error("booking_intake_form_emit_failed", error=str(e), session_id=session_id)
 

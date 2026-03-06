@@ -301,6 +301,8 @@ function aguiReducer(state, action) {
             time_slots: action.payload.time_slots,
             party_sizes: action.payload.party_sizes,
             restaurant_name: action.payload.restaurant_name,
+            availability: action.payload.availability || {},
+            max_party_size: action.payload.max_party_size || 8,
           },
           timestamp: new Date(),
         }],

@@ -155,16 +155,33 @@ def seed_tables():
             restaurant_id = row['id']
 
             # Insert sample tables
+            # (table_number, capacity, location, type)
             sample_tables = [
+                # 2-seaters (5 tables) — couples / solo diners
                 (1, 2, 'Window', 'romantic'),
                 (2, 2, 'Window', 'romantic'),
-                (3, 4, 'Main Area', 'family'),
-                (4, 4, 'Main Area', 'family'),
-                (5, 4, 'Patio', 'outdoor'),
-                (6, 6, 'Main Area', 'group'),
-                (7, 6, 'Private Room', 'private'),
-                (8, 8, 'Private Room', 'private'),
-                (9, 10, 'Banquet Hall', 'events'),
+                (3, 2, 'Main Area', 'standard'),
+                (4, 2, 'Patio', 'outdoor'),
+                (5, 2, 'Bar Area', 'bar'),
+                # 4-seaters (6 tables) — small groups / families
+                (6, 4, 'Main Area', 'family'),
+                (7, 4, 'Main Area', 'family'),
+                (8, 4, 'Main Area', 'family'),
+                (9, 4, 'Patio', 'outdoor'),
+                (10, 4, 'Window', 'standard'),
+                (11, 4, 'Garden', 'outdoor'),
+                # 6-seaters (4 tables) — medium groups
+                (12, 6, 'Main Area', 'group'),
+                (13, 6, 'Main Area', 'group'),
+                (14, 6, 'Patio', 'outdoor'),
+                (15, 6, 'Private Room', 'private'),
+                # 8-seaters (3 tables) — large groups
+                (16, 8, 'Private Room', 'private'),
+                (17, 8, 'Main Area', 'group'),
+                (18, 8, 'Garden', 'outdoor'),
+                # 10-seaters (2 tables) — events / large parties
+                (19, 10, 'Banquet Hall', 'events'),
+                (20, 10, 'Private Room', 'private'),
             ]
 
             for tbl_num, capacity, location, tbl_type in sample_tables:
@@ -172,6 +189,23 @@ def seed_tables():
                     INSERT INTO table_info (restaurant_id, table_number, table_capacity, table_type, floor_location, is_active)
                     VALUES (%s, %s, %s, %s, %s, TRUE)
                 """, (restaurant_id, tbl_num, capacity, tbl_type, location))
+
+            # Seed table features for special tables
+            special_features = [
+                # (table_number, feature) — we'll look up table_id
+            ]
+            for tbl_num, feature in [
+                (1, 'Window View'), (2, 'Window View'), (10, 'Window View'),
+                (4, 'Outdoor Seating'), (9, 'Outdoor Seating'), (11, 'Garden View'),
+                (14, 'Outdoor Seating'), (18, 'Garden View'),
+                (15, 'Private Dining'), (16, 'Private Dining'), (20, 'Private Dining'),
+                (19, 'Stage View'), (5, 'Bar Seating'),
+            ]:
+                cursor.execute("""
+                    INSERT INTO table_special_features (table_id, feature_name)
+                    SELECT table_id, %s FROM table_info
+                    WHERE restaurant_id = %s AND table_number = %s
+                """, (feature, restaurant_id, tbl_num))
 
             # Seed occasions
             occasions = ['Birthday', 'Anniversary', 'Business', 'Date Night', 'Family Gathering', 'Other']
