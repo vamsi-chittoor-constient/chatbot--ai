@@ -1193,9 +1193,17 @@ async def process_with_agui_streaming(
             r'|CART CARD DISPLAYED|EMPTY CART|ALTERNATIVE CATEGORY MENU DISPLAYED'
             r'|INVALID QUANTITY|INVALID INSTRUCTIONS'
             r'|CHECKOUT COMPLETE|PAYMENT CONFIRMED|PAYMENT LINK SENT'
-            r'|RECEIPT DISPLAYED)[^\]]*\]\s*',
+            r'|RECEIPT DISPLAYED'
+            r'|BOOKING FORM DISPLAYED|BOOKING CONFIRMED|BOOKINGS DISPLAYED)[^\]]*\]\s*',
             '', response
         ).strip()
+
+        # Strip bare tool names that the agent sometimes outputs as its "answer"
+        # (e.g. "get_my_bookings", "show_booking_form")
+        _tool_names = {t.name for t in crew._all_food_tools}
+        response_lines = response.split('\n')
+        response_lines = [line for line in response_lines if line.strip() not in _tool_names]
+        response = '\n'.join(response_lines).strip()
 
         # Strip leaked language directive prefixes (e.g. [RESPOND IN HINGLISH ...])
         # These are injected into user messages for the LLM but must never appear in output.
@@ -1208,8 +1216,9 @@ async def process_with_agui_streaming(
         from app.core.response_sanitizer import sanitize_response as _sanitize
         response = _sanitize(response)
 
-        # Stream the response word by word
-        emitter.emit_full_text(response, chunk_size=1)
+        # Stream the response word by word (skip if empty after stripping markers)
+        if response:
+            emitter.emit_full_text(response, chunk_size=1)
 
         # Classify quick replies NOW (while GPT-4o-mini processes, we can flush events)
         # But EMIT them later — after all tool/payment events are flushed —

@@ -538,7 +538,7 @@ def create_show_booking_form_tool(session_id: str):
                 availability=availability.get("dates", {}),
                 max_party_size=availability.get("max_party_size", 8),
             )
-            return "Booking form displayed. The customer can now select their preferred date, time, and party size."
+            return "[BOOKING FORM DISPLAYED]"
         except Exception as e:
             logger.error("show_booking_form_error", error=str(e), session_id=session_id)
             return f"Error showing booking form: {str(e)}"
@@ -632,7 +632,7 @@ def create_booking_tool(session_id: str):
                 features_info = f" Features: {', '.join(best_table['features'])}."
 
             return (
-                f"Reservation confirmed! Code: {confirmation_code}. "
+                f"[BOOKING CONFIRMED] Reservation confirmed! Code: {confirmation_code}. "
                 f"Table {best_table['table_number']}{location_info} for {party_size} guests on "
                 f"{booking_dt.strftime('%A, %B %d at %I:%M %p')}. "
                 f"Name: {guest_name or 'Guest'}.{features_info}"
