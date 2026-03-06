@@ -25,7 +25,8 @@ def add_missing_columns():
         "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS guest_name VARCHAR(255)",
         "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(20)",
         "ALTER TABLE table_booking_info ADD COLUMN IF NOT EXISTS confirmation_code VARCHAR(20)",
-        # Make customer_id nullable (chatbot bookings don't always have a customer record)
+        # Make customer_id nullable and drop FK (chatbot bookings don't have a customer record)
+        "ALTER TABLE table_booking_info DROP CONSTRAINT IF EXISTS fk_table_booking_info_customer_id",
         "ALTER TABLE table_booking_info ALTER COLUMN customer_id DROP NOT NULL",
         # Indexes for chatbot queries
         "CREATE INDEX IF NOT EXISTS idx_booking_device ON table_booking_info(device_id)",
