@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 43  # v43: Strip tool response text from streamed output, suppress bare tool names
+_CREW_VERSION = 44  # v44: Dine-in/takeaway checkout flow, booking only via checkout
 
 
 async def _translate_response(text: str, target_language: str) -> str:
@@ -598,11 +598,9 @@ You're helpful and conversational:
 - When customers complain, show empathy and log the issue immediately
 
 IMPORTANT - For table reservations/bookings:
-When customer asks about booking a table, reservations, or availability:
-- ALWAYS call check_table_availability() before saying tables are available
-- ALWAYS call make_reservation() when creating a booking
-- NEVER say "I've booked a table" without actually calling the tool
-- Ask for date, time, party size, and guest name before booking
+Table booking is only available through the dine-in checkout flow.
+If a customer asks to book a table, tell them to order food first, then select "Dine In" at checkout to reserve a table.
+Do NOT call show_booking_form or make_reservation directly — the checkout flow handles it.
 
 IMPORTANT - For complaints:
 When customer complains about food quality, service, wait time, or other issues:
@@ -621,25 +619,11 @@ When customer complains about food quality, service, wait time, or other issues:
     )
 
     # ========================================================================
-    # BOOKING TOOLS (added to food ordering agent — single agent handles all)
+    # BOOKING TOOLS — removed from agent (booking is now part of checkout flow)
+    # Booking tools (show_booking_form, make_reservation, etc.) are called
+    # directly from chat.py handlers during the dine-in checkout flow,
+    # NOT by the AI agent. Agent just tells users to checkout first.
     # ========================================================================
-    from app.features.booking.crew_agent import (
-        check_table_availability,
-        create_booking_tool,
-        create_get_bookings_tool,
-        create_cancel_booking_tool,
-        create_show_booking_form_tool,
-    )
-
-    # Create session-aware booking tools and add to food ordering agent
-    show_booking_form = create_show_booking_form_tool(session_id)
-    make_reservation = create_booking_tool(session_id)
-    get_my_bookings = create_get_bookings_tool(session_id)
-    cancel_reservation = create_cancel_booking_tool(session_id)
-
-    booking_tools = [show_booking_form, check_table_availability, make_reservation, get_my_bookings, cancel_reservation]
-    all_food_tools.extend(booking_tools)
-    food_ordering_agent.tools = all_food_tools
 
     # ========================================================================
     # TASK - Single task assigned to food ordering agent (can delegate to booking)
@@ -651,8 +635,8 @@ History: {context}
 
 RULES:
 - Always use tools. Summarize tool results in friendly natural language — NEVER output raw tool names or return values verbatim.
-- BOOKING: When user wants to book/reserve a table but hasn't given full details (date + time + party size), ALWAYS call show_booking_form tool (no arguments). This shows an interactive form with available dates, times, and party sizes. Do NOT ask the user for these details manually — the form handles it. If user provides ALL details upfront (e.g. "book a table for 4 tomorrow at 7pm"), call make_reservation directly.
-- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED] or [BOOKING CONFIRMED], respond with a brief friendly message (e.g. "Here's the booking form!" or "Your table is reserved!"). Do NOT repeat the marker.
+- TABLE BOOKING: Table reservations are only available as part of the dine-in checkout flow. If a user asks to book/reserve a table without ordering food first, politely let them know they need to add items to cart and checkout first — then they can choose "Dine In" to reserve a table. Do NOT call show_booking_form or make_reservation directly.
+- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED], [BOOKING CONFIRMED], or [CHECKOUT COMPLETE], respond with a brief friendly message. Do NOT repeat the marker.
 - LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words like "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely: "cart mein add ho gaya", "menu check karo". Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"
 - LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script). Example: "Unga cart la 2 Masala Dosa add aaiduchu, total ₹250. Vera enna venum?"
 - Keep food names, prices, order IDs in English always."""
@@ -664,7 +648,7 @@ History: {context}
 
 RULES:
 - Always use tools. Summarize tool results in friendly natural language — NEVER output raw tool names or return values verbatim.
-- BOOKING: When user wants to book/reserve a table, call check_table_availability with their details. If they haven't specified date/time/party size, ask for them (no form on WhatsApp).
+- TABLE BOOKING: Table reservations are only available as part of the dine-in checkout flow. If user asks to book a table without ordering, let them know to order food first, then choose "Dine In" at checkout.
 - Keep responses concise (under 300 words). Use *bold* for emphasis.
 - Use emojis for structure (🍽️ 🛒 ✅ 💳). Format lists with emojis or numbers, not bullets.
 - Don't reference UI cards, buttons, or visual elements — the user is on WhatsApp.

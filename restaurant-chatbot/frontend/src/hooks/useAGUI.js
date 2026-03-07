@@ -166,7 +166,7 @@ function aguiReducer(state, action) {
       console.log('REDUCER: PAYMENT_LINK', action.payload)
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'order_type_selection'), {
           id: Date.now(),
           role: 'system',
           type: 'payment_link',
@@ -293,7 +293,7 @@ function aguiReducer(state, action) {
     case 'BOOKING_INTAKE_FORM':
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'order_type_selection'), {
           id: Date.now(),
           role: 'system',
           type: 'booking_form',
@@ -303,6 +303,23 @@ function aguiReducer(state, action) {
             restaurant_name: action.payload.restaurant_name,
             availability: action.payload.availability || {},
             max_party_size: action.payload.max_party_size || 8,
+          },
+          timestamp: new Date(),
+        }],
+      }
+
+    case 'ORDER_TYPE_SELECTION':
+      return {
+        ...state,
+        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'order_type_selection'), {
+          id: Date.now(),
+          role: 'system',
+          type: 'order_type_selection',
+          data: {
+            order_id: action.payload.order_id,
+            subtotal: action.payload.subtotal,
+            item_count: action.payload.item_count,
+            items_summary: action.payload.items_summary,
           },
           timestamp: new Date(),
         }],

@@ -1463,6 +1463,80 @@ async def chat_endpoint(
                             flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
+                    if form_type == "order_type_selection":
+                        # ============================================================
+                        # ORDER TYPE SELECTION — Dine-in or Takeaway
+                        # ============================================================
+                        selected_order_type = form_data.get("order_type", "take_away")
+                        order_id = form_data.get("order_id", "")
+                        logger.info("order_type_selected", session_id=session_id,
+                                    order_type=selected_order_type, order_id=order_id)
+
+                        from app.core.redis import get_sync_redis_client
+                        import json as _json
+                        _redis = get_sync_redis_client()
+                        _pending_key = f"pending_order:{session_id}"
+                        _pending_data = _redis.get(_pending_key)
+
+                        if not _pending_data:
+                            await websocket_manager.send_message(
+                                session_id, "Your order has expired. Please checkout again.")
+                            continue
+
+                        _pending = _json.loads(_pending_data)
+
+                        if selected_order_type == "take_away":
+                            # TAKEAWAY: add packaging charges and trigger payment
+                            from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM
+                            total_qty = _pending.get("total_quantity", 0)
+                            packaging_charges = total_qty * PACKAGING_CHARGE_PER_ITEM
+                            subtotal = _pending.get("subtotal", 0)
+                            total = subtotal + packaging_charges
+
+                            # Update pending order with order type + charges
+                            _pending["order_type"] = "take_away"
+                            _pending["packaging_charges"] = packaging_charges
+                            _pending["total"] = total
+                            _pending["status"] = "pending_payment"
+                            _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                            # Trigger payment workflow
+                            from app.workflows.payment_workflow import run_payment_workflow
+                            await run_payment_workflow(
+                                session_id, _pending["order_id"], total,
+                                initial_method="online",
+                                items=_pending.get("items"),
+                                order_type="take_away",
+                                subtotal=subtotal,
+                                packaging_charges=packaging_charges,
+                            )
+                            from app.core.agui_events import flush_pending_events
+                            flush_pending_events(session_id)
+                            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                        elif selected_order_type == "dine_in":
+                            # DINE-IN: update order type, then show booking form
+                            _pending["order_type"] = "dine_in"
+                            _pending["packaging_charges"] = 0
+                            _pending["total"] = _pending.get("subtotal", 0)
+                            _pending["status"] = "pending_booking"
+                            _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                            # Show booking form for table reservation
+                            from app.features.booking.crew_agent import _get_availability_map
+                            from app.core.agui_events import emit_booking_intake_form, flush_pending_events
+                            availability = _get_availability_map(days=7)
+                            emit_booking_intake_form(
+                                session_id=session_id,
+                                party_sizes=availability.get("party_sizes", list(range(1, 9))),
+                                availability=availability.get("dates", {}),
+                                max_party_size=availability.get("max_party_size", 8),
+                            )
+                            flush_pending_events(session_id)
+                            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                        continue
+
                     if form_type == "booking_intake":
                         # Booking form submitted — call make_reservation directly
                         booking_date = form_data.get("date", "")
@@ -1473,7 +1547,6 @@ async def chat_endpoint(
                         _make_reservation = create_booking_tool(session_id)
                         result = None
                         try:
-                            # Use _run() directly — .run() expects a single string for multi-param tools
                             result = _make_reservation._run(
                                 date=booking_date,
                                 time=booking_time,
@@ -1486,7 +1559,6 @@ async def chat_endpoint(
 
                         # Flush events (make_reservation emits BOOKING_CONFIRMATION internally on success)
                         from app.core.agui_events import flush_pending_events, _PENDING_EVENTS
-                        # Check if a BOOKING_CONFIRMATION was emitted (success case)
                         has_confirmation = any(
                             getattr(ev, 'type', None) and ev.type.value == 'BOOKING_CONFIRMATION'
                             for ev in _PENDING_EVENTS.get(session_id, [])
@@ -1494,9 +1566,38 @@ async def chat_endpoint(
                         flush_pending_events(session_id)
                         await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
-                        # If no confirmation card was emitted, send the result text as a message
+                        # If no confirmation card was emitted, send error text
                         if not has_confirmation and result:
                             await websocket_manager.send_message(session_id, result)
+                            continue
+
+                        # Check if this booking is part of a dine-in checkout flow
+                        # If so, trigger payment after successful booking
+                        from app.core.redis import get_sync_redis_client
+                        import json as _json
+                        _redis = get_sync_redis_client()
+                        _pending_key = f"pending_order:{session_id}"
+                        _pending_data = _redis.get(_pending_key)
+                        if _pending_data:
+                            _pending = _json.loads(_pending_data)
+                            if _pending.get("status") == "pending_booking" and _pending.get("order_type") == "dine_in":
+                                # Dine-in checkout: booking done, now trigger payment
+                                total = _pending.get("total", _pending.get("subtotal", 0))
+                                _pending["status"] = "pending_payment"
+                                _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                                from app.workflows.payment_workflow import run_payment_workflow
+                                await run_payment_workflow(
+                                    session_id, _pending["order_id"], total,
+                                    initial_method="online",
+                                    items=_pending.get("items"),
+                                    order_type="dine_in",
+                                    subtotal=_pending.get("subtotal"),
+                                    packaging_charges=0,
+                                )
+                                flush_pending_events(session_id)
+                                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
                         continue
                 # ========================================================================
 

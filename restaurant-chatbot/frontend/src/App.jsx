@@ -22,6 +22,7 @@ import {
 import { SearchResultsCard } from './components/SearchResultsCard'
 import { BookingConfirmationCard } from './components/BookingConfirmationCard'
 import { BookingFormCard } from './components/BookingFormCard'
+import { OrderTypeCard } from './components/OrderTypeCard'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
 
@@ -210,6 +211,8 @@ function ChatInterface() {
         return <BookingConfirmationCard key={message.id} data={message.data} onQuickReply={handleQuickReply} />
       case 'booking_form':
         return <BookingFormCard key={message.id} data={message.data} onSubmit={handleFormSubmit} />
+      case 'order_type_selection':
+        return <OrderTypeCard key={message.id} data={message.data} onSubmit={handleFormSubmit} />
       default:
         return <ChatMessage key={message.id} message={message} />
     }

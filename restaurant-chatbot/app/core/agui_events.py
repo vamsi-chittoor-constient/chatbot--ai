@@ -160,6 +160,7 @@ class EventType(str, Enum):
     RECEIPT_LINK = "RECEIPT_LINK"
     BOOKING_CONFIRMATION = "BOOKING_CONFIRMATION"
     BOOKING_INTAKE_FORM = "BOOKING_INTAKE_FORM"
+    ORDER_TYPE_SELECTION = "ORDER_TYPE_SELECTION"
 
 
 @dataclass
@@ -440,6 +441,16 @@ class BookingIntakeFormEvent(AGUIEvent):
     restaurant_name: str = ""
     availability: Dict[str, Any] = field(default_factory=dict)
     max_party_size: int = 8
+
+
+@dataclass
+class OrderTypeSelectionEvent(AGUIEvent):
+    """Emitted after checkout to ask Dine-in or Takeaway."""
+    type: EventType = EventType.ORDER_TYPE_SELECTION
+    order_id: str = ""
+    subtotal: float = 0.0
+    item_count: int = 0
+    items_summary: str = ""
 
 
 @dataclass
@@ -2185,6 +2196,31 @@ def emit_booking_intake_form(
                      has_availability=bool(availability), num_dates=len(availability))
     except Exception as e:
         logger.error("booking_intake_form_emit_failed", error=str(e), session_id=session_id)
+
+
+def emit_order_type_selection(
+    session_id: str,
+    order_id: str,
+    subtotal: float,
+    item_count: int,
+    items_summary: str = "",
+):
+    """
+    Emit order type selection card (Dine-in / Takeaway) after checkout.
+
+    Thread-safe: uses _put_event_threadsafe().
+    """
+    try:
+        event = OrderTypeSelectionEvent(
+            order_id=order_id,
+            subtotal=subtotal,
+            item_count=item_count,
+            items_summary=items_summary,
+        )
+        _put_event_threadsafe(session_id, event)
+        logger.info("order_type_selection_emitted", session_id=session_id, order_id=order_id)
+    except Exception as e:
+        logger.error("order_type_selection_emit_failed", error=str(e), session_id=session_id)
 
 
 def _get_activity_type_for_tool(tool_name: str) -> str:

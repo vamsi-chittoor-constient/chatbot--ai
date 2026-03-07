@@ -370,9 +370,11 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
     Note: Guest checkout is allowed - no authentication required.
     Uses session_id as customer identifier for guest orders.
 
-    DETERMINISTIC FLOW: After checkout, payment workflow is automatically triggered.
+    FLOW: Checkout stores pending order in Redis, then emits an
+    ORDER_TYPE_SELECTION card so the user can choose Dine-in or Takeaway.
+    Payment is triggered later by the order_type_selection handler in chat.py.
     """
-    from app.core.agui_events import emit_tool_activity, emit_quick_replies, emit_order_data
+    from app.core.agui_events import emit_tool_activity, emit_order_type_selection
     from app.core.session_events import get_sync_session_tracker
     import uuid
     from datetime import datetime
@@ -383,12 +385,9 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
     tracker = get_sync_session_tracker(session_id)
     cart_data = tracker.get_cart_summary()
     if not cart_data or not cart_data.get("items"):
-        return "[EMPTY CART] Your cart is looking a bit empty! 😊 Let me help you add some delicious items before we proceed to checkout. What would you like to order?"
+        return "[EMPTY CART] Your cart is looking a bit empty! Let me help you add some delicious items before we proceed to checkout. What would you like to order?"
 
-    # Always takeaway - no dine-in option
-    order_type_clean = "take_away"
-
-    # Prepare order and trigger payment workflow
+    # Prepare order
     try:
         # Normalize cart items: PostgreSQL returns item_name/item_id,
         # downstream code expects name/id
@@ -407,17 +406,12 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
                 normalized["total"] = float(normalized["total"])
             items.append(normalized)
         subtotal = sum(i.get("price", 0) * i.get("quantity", 1) for i in items)
-
-        # Packaging charge per item - single source of truth in agui_events
-        from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM
         total_quantity = sum(i.get("quantity", 1) for i in items)
-        packaging_charges = total_quantity * PACKAGING_CHARGE_PER_ITEM
-        total = subtotal + packaging_charges
 
         # Generate order display ID
         order_display_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
-        # Store order as pending_payment in Redis (temporary)
+        # Store order as pending_order_type in Redis (waiting for dine-in/takeaway selection)
         from app.core.redis import get_sync_redis_client
         import json
         redis_client = get_sync_redis_client()
@@ -427,10 +421,8 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
             "session_id": session_id,
             "items": items,
             "subtotal": subtotal,
-            "packaging_charges": packaging_charges,
-            "total": total,
-            "order_type": order_type_clean,
-            "status": "pending_payment",
+            "total_quantity": total_quantity,
+            "status": "pending_order_type",
             "created_at": datetime.now().isoformat()
         }
         redis_client.setex(pending_order_key, 3600, json.dumps(pending_order))  # Expire in 1 hour
@@ -440,7 +432,8 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         redis_client.lpush(history_key, order_display_id)
         redis_client.expire(history_key, 86400 * 7)  # 7 days
 
-        logger.info("pending_order_created", session_id=session_id, order_id=order_display_id)
+        logger.info("pending_order_created", session_id=session_id, order_id=order_display_id,
+                     status="pending_order_type")
 
         # Clear session_cart in PostgreSQL so cart shows empty after checkout
         from app.core.db_pool import SyncDBConnection
@@ -455,45 +448,22 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         except Exception as clear_err:
             logger.warning("cart_clear_after_checkout_failed", error=str(clear_err))
 
-        # =====================================================================
-        # PAYMENT WORKFLOW — Store info for after-crew trigger
-        # =====================================================================
-        # Don't call init_payment_workflow() here (worker thread).
-        # Store payment info in Redis so the after-crew block in
-        # restaurant_crew.py can call run_payment_workflow() on the
-        # main async loop where DB/HTTP connections work correctly.
-        payment_info = {
-            "order_display_id": order_display_id,
-            "total": total,
-            "session_id": session_id,
-        }
-        redis_client.setex(
-            f"checkout_payment_info:{session_id}",
-            3600,
-            json.dumps(payment_info)
-        )
-
-        logger.info(
-            "checkout_payment_info_stored",
-            session_id=session_id,
-            order_id=order_display_id,
-            amount=total
-        )
-
-        # Return confirmation — run_payment_workflow() will show the
-        # payment card after the crew finishes (on the main thread).
+        # Emit ORDER_TYPE_SELECTION card for user to choose Dine-in or Takeaway
         items_summary = ", ".join([f"{i.get('name')} x{i.get('quantity', 1)}" for i in items[:3]])
         if len(items) > 3:
             items_summary += f" and {len(items) - 3} more"
 
+        emit_order_type_selection(
+            session_id=session_id,
+            order_id=order_display_id,
+            subtotal=subtotal,
+            item_count=total_quantity,
+            items_summary=items_summary,
+        )
+
         return (
             f"[CHECKOUT COMPLETE] Order {order_display_id} created. "
-            f"Items: {items_summary}. "
-            f"Subtotal: Rs.{subtotal:.0f}, Packaging: Rs.{packaging_charges:.0f}, "
-            f"Total: Rs.{total:.0f} (Take-away). "
-            f"Online payment via Razorpay has been automatically initiated. "
-            f"The payment link is now displayed to the customer. "
-            f"Let them know their order is placed and they can complete payment using the link shown."
+            f"The customer is now choosing between Dine-in and Takeaway."
         )
 
     except Exception as e:
