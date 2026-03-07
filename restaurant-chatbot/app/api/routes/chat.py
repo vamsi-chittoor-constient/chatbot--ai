@@ -1572,7 +1572,7 @@ async def chat_endpoint(
                             continue
 
                         # Check if this booking is part of a dine-in checkout flow
-                        # If so, trigger payment after successful booking
+                        # If so, add dine-in service charge and trigger payment
                         from app.core.redis import get_sync_redis_client
                         import json as _json
                         _redis = get_sync_redis_client()
@@ -1581,8 +1581,15 @@ async def chat_endpoint(
                         if _pending_data:
                             _pending = _json.loads(_pending_data)
                             if _pending.get("status") == "pending_booking" and _pending.get("order_type") == "dine_in":
-                                # Dine-in checkout: booking done, now trigger payment
-                                total = _pending.get("total", _pending.get("subtotal", 0))
+                                # Dine-in service charge: Rs.5 per person
+                                from app.core.agui_events import DINE_IN_CHARGE_PER_PERSON
+                                dine_in_charge = booking_party_size * DINE_IN_CHARGE_PER_PERSON
+                                subtotal = _pending.get("subtotal", 0)
+                                total = subtotal + dine_in_charge
+
+                                _pending["dine_in_charge"] = dine_in_charge
+                                _pending["total"] = total
+                                _pending["party_size"] = booking_party_size
                                 _pending["status"] = "pending_payment"
                                 _redis.setex(_pending_key, 3600, _json.dumps(_pending))
 
@@ -1592,7 +1599,7 @@ async def chat_endpoint(
                                     initial_method="online",
                                     items=_pending.get("items"),
                                     order_type="dine_in",
-                                    subtotal=_pending.get("subtotal"),
+                                    subtotal=subtotal,
                                     packaging_charges=0,
                                 )
                                 flush_pending_events(session_id)

@@ -268,8 +268,9 @@ class ActivityEndEvent(AGUIEvent):
     type: EventType = EventType.ACTIVITY_END
 
 
-# Single source of truth for packaging charge - used by backend checkout and frontend CartCard
-PACKAGING_CHARGE_PER_ITEM = 30
+# Single source of truth for charges - used by backend checkout and frontend
+PACKAGING_CHARGE_PER_ITEM = 30    # Takeaway: Rs.30 per item
+DINE_IN_CHARGE_PER_PERSON = 5     # Dine-in: Rs.5 per person (service charge)
 
 
 @dataclass
