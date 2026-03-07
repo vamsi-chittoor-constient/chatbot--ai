@@ -705,14 +705,12 @@ QUICK_ACTION_SETS = {
         {"label": "🍔 Order Food", "action": "show me the menu"},
         {"label": "🛒 View Cart", "action": "view my cart"},
         {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
-        {"label": "📅 Book a Table", "action": "book a table"},
         {"label": "❓ Help & FAQs", "action": "help"},
     ],
 
     "explore_features": [
         {"label": "🍔 Order Food", "action": "show me the menu"},
         {"label": "📍 Track Order", "action": "track my order"},
-        {"label": "📅 Book Table", "action": "book a table"},
         {"label": "🔍 Check Allergens", "action": "check my allergens"},
         {"label": "🎁 Offers & Rewards", "action": "check offers and deals"},
         {"label": "❓ Get Help", "action": "help and faqs"},
@@ -734,7 +732,6 @@ QUICK_ACTION_SETS = {
         {"label": "🔍 Search Items", "action": "search for specific items"},
         {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🛒 View Cart", "action": "view cart"},
-        {"label": "📅 Book Table", "action": "book a table"},
     ],
 
     "menu_discovery": [
@@ -802,16 +799,9 @@ QUICK_ACTION_SETS = {
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # CHECKOUT & PAYMENT (3 sets)
+    # CHECKOUT & PAYMENT
+    # (order_type and payment_method removed — handled by OrderTypeCard and auto-payment)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    "order_type": [
-        {"label": "📦 Take Away", "action": "take away"},
-    ],
-
-    "payment_method": [
-        {"label": "💳 Pay Online", "action": "pay_online"},
-    ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # POST-ORDER (4 sets)
@@ -853,34 +843,19 @@ QUICK_ACTION_SETS = {
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # TABLE BOOKING (4 sets)
+    # TABLE BOOKING (redirects to ordering flow)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     "booking_inquiry": [
-        {"label": "📅 Book Table", "action": "book a table now"},
-        {"label": "🕐 Check Availability", "action": "check table availability"},
-        {"label": "📖 My Bookings", "action": "show my bookings"},
-        {"label": "❓ Booking Help", "action": "help with booking"},
-    ],
-
-    "availability_shown": [
-        {"label": "✅ Confirm Booking", "action": "book this table"},
-        {"label": "🔄 Check Other Times", "action": "show other time slots"},
-        {"label": "🏠 Back to Home", "action": "go back"},
+        {"label": "🍔 Browse Menu", "action": "show me the menu"},
+        {"label": "🛒 View Cart", "action": "view my cart"},
+        {"label": "❓ How to Book", "action": "how do I book a table"},
     ],
 
     "booking_confirmed": [
-        {"label": "📖 View Bookings", "action": "show my bookings"},
-        {"label": "🍔 Pre-Order Food", "action": "order food for booking"},
-        {"label": "✏️ Modify Booking", "action": "modify booking"},
+        {"label": "🍔 Order More", "action": "show menu"},
+        {"label": "📍 Track Order", "action": "track my order"},
         {"label": "🏠 Home", "action": "back to home"},
-    ],
-
-    "booking_management": [
-        {"label": "✏️ Modify Booking", "action": "modify my booking"},
-        {"label": "❌ Cancel Booking", "action": "cancel booking"},
-        {"label": "📅 Book Another", "action": "book another table"},
-        {"label": "🍔 Order Food", "action": "show menu"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -944,7 +919,6 @@ QUICK_ACTION_SETS = {
     "my_account": [
         {"label": "📜 Order History", "action": "show my order history"},
         {"label": "❤️ My Favorites", "action": "show my favorites"},
-        {"label": "📖 My Bookings", "action": "show my bookings"},
         {"label": "💬 My Feedback", "action": "show my feedback history"},
         {"label": "⚙️ Preferences", "action": "show my preferences"},
     ],
@@ -1026,12 +1000,12 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 📋 Available Action Sets (43 total):
 
 ━━━ ENTRY & WELCOME ━━━
-- greeting_welcome: User greets (hi/hello/hey) or response welcomes user → Show main features (Order, View Cart, Deals, Book Table, Help)
-- explore_features: User asks "what can you do" or capabilities → Show all major features (Order, Track, Book, Allergens, Offers, Help)
+- greeting_welcome: User greets (hi/hello/hey) or response welcomes user → Show main features (Order, View Cart, Deals, Help)
+- explore_features: User asks "what can you do" or capabilities → Show all major features (Order, Track, Allergens, Offers, Help)
 - first_time_user: New user with no history → Show onboarding options (Browse Menu, Search, Specials, Dietary, How It Works)
 
 ━━━ MENU DISCOVERY ━━━
-- menu_displayed: Menu shown (response says "here's our menu" or lists menu items) → Guide exploration (Search, Specials, Cart, Book Table)
+- menu_displayed: Menu shown (response says "here's our menu" or lists menu items) → Guide exploration (Search, Specials, Cart)
 - menu_discovery: User exploring menu → Show discovery options (Search, Specials, Cart)
 - cuisine_browse: Response shows cuisines or user asks about cuisine types → Show Continental cuisine option (only available cuisine)
 - item_details_shown: Showing details of specific item → Action buttons (Add to Cart, Nutrition, Check Stock, Allergens, Favorites)
@@ -1045,10 +1019,6 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - checkout_options: Before final checkout → Final options (Order Now, Schedule Later, Apply Promo, Back to Cart)
 - cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Search Items, Recent Orders, Reorder Last)
 
-━━━ CHECKOUT & PAYMENT ━━━
-- order_type: Order type confirmed → Takeaway (Take Away)
-- payment_method: Asking payment method (response: "how would you like to pay") → Payment options (Pay Online)
-
 ━━━ POST-ORDER ━━━
 - order_confirmed: Order placed (response has "Order ID" but NO payment yet) → Post-order (Track Order, View Receipt, Order More)
 - payment_completed: Payment successful (response: "payment successful" or "paid") → Full post-order (Track, Receipt, Rate, Favorites, Reorder)
@@ -1057,10 +1027,8 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - receipt_shown: Receipt displayed (response: "receipt" or "RECEIPT DISPLAYED" or "download") → Post-receipt (Order More, Track, Rate, Home)
 
 ━━━ TABLE BOOKING ━━━
-- booking_inquiry: User asks about booking or wants to book → Booking options (Book Table, Check Availability, My Bookings, Help)
-- availability_shown: Response shows available time slots → Booking action (Confirm Booking, Check Other Times, Back)
-- booking_confirmed: Booking confirmed (response: "booking confirmed") → Post-booking (View Bookings, Pre-Order Food, Modify, Home)
-- booking_management: Showing user's bookings → Manage bookings (Modify, Cancel, Book Another, Order Food)
+- booking_inquiry: User asks about booking or wants to book → Redirect to ordering (Browse Menu, View Cart, How to Book)
+- booking_confirmed: Booking confirmed via dine-in checkout → Post-booking (Order More, Track Order, Home)
 
 ━━━ DIETARY & ALLERGENS ━━━
 - dietary_inquiry: User mentions diet/allergens/health concerns → Dietary options (Check Allergens, Add Allergen, Dietary Prefs, Veg, Nutrition)
@@ -1073,7 +1041,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - policy_shown: Showing policies → Policy types (Delivery Policy, Refund Policy, Terms, Back)
 
 ━━━ ACCOUNT & FAVORITES ━━━
-- my_account: User asks about account/profile → Account options (Order History, Favorites, Bookings, Feedback, Preferences)
+- my_account: User asks about account/profile → Account options (Order History, Favorites, Feedback, Preferences)
 - my_favorites: Showing favorites → Favorites actions (View, Reorder Favorite, Add New, Back)
 - order_history_shown: Showing past orders → History actions (Reorder, View Receipt, Rate Past Order, Home)
 
@@ -1088,25 +1056,23 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - none: ONLY for purely informational responses with NO next action (rare - default to helpful actions!)
 
 🎯 CRITICAL DECISION RULES:
-1. Payment question → ALWAYS "payment_method"
-2. Welcome/greeting → "greeting_welcome"
-3. Menu shown → "menu_displayed"
-4. Item added → "added_to_cart" OR "added_to_cart_with_upsell" (if burger/pizza/main dish)
-5. Cart shown + total > Rs.500 → "view_cart_high_value" (highlight promo!)
-6. Cart shown + total < Rs.500 → "view_cart"
-7. User asks capabilities → "explore_features"
-8. Payment successful → "payment_completed" (NOT order_confirmed)
-9. Order placed but NOT paid → "order_confirmed"
-10. Receipt shown/displayed → "receipt_shown" (NOT view_cart!)
+1. Welcome/greeting → "greeting_welcome"
+2. Menu shown → "menu_displayed"
+3. Item added → "added_to_cart" OR "added_to_cart_with_upsell" (if burger/pizza/main dish)
+4. Cart shown + total > Rs.500 → "view_cart_high_value" (highlight promo!)
+5. Cart shown + total < Rs.500 → "view_cart"
+6. User asks capabilities → "explore_features"
+7. Payment successful → "payment_completed" (NOT order_confirmed)
+8. Order placed but NOT paid → "order_confirmed"
+9. Receipt shown/displayed → "receipt_shown" (NOT view_cart!)
+10. Search results displayed (response lists menu items with prices) → "menu_displayed"
+11. AI asking "which one" / disambiguating between items → "menu_displayed"
 
 🚗 GUIDE PRINCIPLE:
 - Default to showing helpful actions rather than "none"
 - Think: "What would the user logically want to do next?"
 - Proactively expose features users don't know exist
 - Use context to show 5-6 relevant buttons per response
-
-11. Search results displayed (response lists menu items with prices) → "menu_displayed"
-12. AI asking "which one" / disambiguating between items → "menu_displayed"
 
 Response to analyze:
 "{response}"

@@ -1118,6 +1118,16 @@ async def chat_endpoint(
                 message=preserved_welcome_msg,
                 message_type="ai_response"
             )
+            # Re-emit welcome quick replies on reconnect
+            from app.core.agui_events import emit_quick_replies as _emit_reconn_qr, flush_pending_events as _flush_reconn
+            _emit_reconn_qr(session_id, [
+                {"label": "🍔 Order Food", "action": "show me the menu"},
+                {"label": "🛒 View Cart", "action": "view my cart"},
+                {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
+                {"label": "❓ Help & FAQs", "action": "help"},
+            ])
+            _flush_reconn(session_id)
+            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
         elif welcome_already_sent:
             logger.info("welcome_skipped_already_sent", session_id=session_id)
         else:
@@ -1200,6 +1210,17 @@ async def chat_endpoint(
                     message_type="ai_response"
                 )
 
+                # Emit welcome quick replies so user has actionable buttons
+                from app.core.agui_events import emit_quick_replies as _emit_welcome_qr, flush_pending_events as _flush_welcome
+                _emit_welcome_qr(session_id, [
+                    {"label": "🍔 Order Food", "action": "show me the menu"},
+                    {"label": "🛒 View Cart", "action": "view my cart"},
+                    {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
+                    {"label": "❓ Help & FAQs", "action": "help"},
+                ])
+                _flush_welcome(session_id)
+                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+
                 # Store welcome message for adding to conversation history
                 if session_id in websocket_manager.connection_metadata:
                     websocket_manager.connection_metadata[session_id]["welcome_msg"] = welcome_msg
@@ -1219,13 +1240,13 @@ async def chat_endpoint(
                 if is_authenticated and authenticated_user_name:
                     fallback_msg = (
                         f"Hello {authenticated_user_name}! Welcome back to our restaurant. I'm your AI assistant, "
-                        "and I can help you browse our menu, place a takeaway order, make a reservation, "
+                        "and I can help you browse our menu, place an order (dine-in or takeaway), "
                         "or answer any questions. What would you like to do?"
                     )
                 else:
                     fallback_msg = (
                         "Hello! Welcome to our restaurant. I'm your AI assistant, and I can help you "
-                        "browse our menu, place a takeaway order, make a reservation, "
+                        "browse our menu, place an order (dine-in or takeaway), "
                         "or answer any questions about our restaurant. What would you like to do?"
                     )
                 await websocket_manager.send_message(
@@ -1233,6 +1254,17 @@ async def chat_endpoint(
                     message=fallback_msg,
                     message_type="ai_response"
                 )
+
+                # Emit welcome quick replies for fallback too
+                from app.core.agui_events import emit_quick_replies as _emit_fb_qr, flush_pending_events as _flush_fb
+                _emit_fb_qr(session_id, [
+                    {"label": "🍔 Order Food", "action": "show me the menu"},
+                    {"label": "🛒 View Cart", "action": "view my cart"},
+                    {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
+                    {"label": "❓ Help & FAQs", "action": "help"},
+                ])
+                _flush_fb(session_id)
+                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
 
                 # Store fallback welcome message for adding to conversation history
                 if session_id in websocket_manager.connection_metadata:

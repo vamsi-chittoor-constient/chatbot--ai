@@ -5,8 +5,7 @@ export function OrderTypeCard({ data, onSubmit }) {
   const { order_id, subtotal, item_count, items_summary } = data
 
   const handleSelect = (orderType) => {
-    onSubmit({
-      form_type: 'order_type_selection',
+    onSubmit('order_type_selection', {
       order_type: orderType,
       order_id,
     })

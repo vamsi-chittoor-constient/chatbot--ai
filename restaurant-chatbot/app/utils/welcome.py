@@ -162,8 +162,8 @@ async def generate_welcome_message() -> str:
         f"{meal_context}{suggestion_text}\n\n"
         "I'm your AI assistant and I can help you:\n"
         "- Browse our menu and get personalized recommendations\n"
-        "- Place a takeaway order\n"
-        "- Make a table reservation\n\n"
+        "- Place an order (dine-in or takeaway)\n"
+        "- Check out today's specials and deals\n\n"
         "What would you like to do today?"
     )
 

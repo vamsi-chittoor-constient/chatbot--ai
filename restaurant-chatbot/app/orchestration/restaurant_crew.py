@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 44  # v44: Dine-in/takeaway checkout flow, booking only via checkout
+_CREW_VERSION = 45  # v45: Remove standalone booking refs from prompts/quick-replies, fix checkout flow
 
 
 async def _translate_response(text: str, target_language: str) -> str:
