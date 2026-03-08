@@ -1331,8 +1331,20 @@ async def chat_endpoint(
             logger.warning("pending_payment_check_failed", session_id=session_id, error=str(e))
         # ========================================================================
 
+        # Track background AGUI stream tasks so we can cancel lingering ones
+        _active_agui_task: Optional[asyncio.Task] = None
+
         # Main message loop
         while True:
+            # Cancel any lingering stream_agui_events_to_websocket from previous cycle
+            if _active_agui_task and not _active_agui_task.done():
+                _active_agui_task.cancel()
+                try:
+                    await _active_agui_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                _active_agui_task = None
+
             # Clear stale AGUI events at the START of every message cycle.
             # This prevents leftover events (RECEIPT_LINK, MENU_DATA, etc.)
             # from previous crew runs leaking into interceptor-handled messages
@@ -2304,9 +2316,11 @@ async def process_message_with_ai(
         emitter = AGUIEventEmitter(session_id)
 
         # Start background task to forward AG-UI events to WebSocket
+        # Also store in _active_agui_task so the top-of-loop cleanup can cancel it
         agui_task = asyncio.create_task(
             stream_agui_events_to_websocket(session_id, websocket_manager, timeout=60.0)
         )
+        _active_agui_task = agui_task
 
         # Build conversation history from Redis session storage
         # Only include recent messages (last 30 minutes) to prevent stale context

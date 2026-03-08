@@ -346,9 +346,15 @@ function ChatInterface() {
             </div>
           )}
 
-          {/* Messages */}
-          {console.log('Rendering messages array, length:', messages.length, 'types:', messages.map(m => m.type))}
-          {messages.map(renderMessage)}
+          {/* Messages — deduplicate singleton card types (keep only last of each) */}
+          {(() => {
+            const SINGLETON_TYPES = ['receipt_link', 'payment_link', 'payment_success', 'menu', 'cart', 'order', 'order_type_selection', 'booking_form', 'booking_confirmation']
+            const lastIndex = {}
+            messages.forEach((m, i) => {
+              if (SINGLETON_TYPES.includes(m.type)) lastIndex[m.type] = i
+            })
+            return messages.filter((m, i) => !SINGLETON_TYPES.includes(m.type) || lastIndex[m.type] === i).map(renderMessage)
+          })()}
 
           {/* Activity Indicator */}
           {activity && <ActivityIndicator message={activity} />}
