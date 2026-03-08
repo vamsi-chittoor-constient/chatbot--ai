@@ -704,7 +704,7 @@ QUICK_ACTION_SETS = {
     "greeting_welcome": [
         {"label": "🍔 Order Food", "action": "show me the menu"},
         {"label": "🛒 View Cart", "action": "view my cart"},
-        {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
+        {"label": "📋 Browse Menu", "action": "show me the full menu"},
         {"label": "❓ Help & FAQs", "action": "help"},
     ],
 
@@ -719,7 +719,6 @@ QUICK_ACTION_SETS = {
     "first_time_user": [
         {"label": "🍔 Browse Menu", "action": "show me the menu"},
         {"label": "🔍 Search Items", "action": "search for items"},
-        {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🔍 Dietary Options", "action": "dietary and allergen options"},
         {"label": "❓ How It Works", "action": "how to order"},
     ],
@@ -730,13 +729,11 @@ QUICK_ACTION_SETS = {
 
     "menu_displayed": [
         {"label": "🔍 Search Items", "action": "search for specific items"},
-        {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
     "menu_discovery": [
         {"label": "🔍 Search Items", "action": "search for items"},
-        {"label": "🎁 Today's Specials", "action": "today's specials"},
         {"label": "🛒 View Cart", "action": "view cart"},
     ],
 

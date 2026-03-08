@@ -1532,6 +1532,16 @@ async def chat_endpoint(
                             _pending["status"] = "pending_payment"
                             _redis.setex(_pending_key, 3600, _json.dumps(_pending))
 
+                            # Send charges breakdown message
+                            charges_msg = (
+                                f"📦 **Takeaway Order**\n"
+                                f"Subtotal: Rs.{subtotal:.0f}\n"
+                                f"Packaging charges ({total_qty} items × Rs.{PACKAGING_CHARGE_PER_ITEM}): Rs.{packaging_charges:.0f}\n"
+                                f"**Total: Rs.{total:.0f}**\n\n"
+                                f"Please complete the payment to confirm your order!"
+                            )
+                            await websocket_manager.send_message(session_id, charges_msg)
+
                             # Trigger payment workflow
                             from app.workflows.payment_workflow import run_payment_workflow
                             await run_payment_workflow(
@@ -1624,6 +1634,16 @@ async def chat_endpoint(
                                 _pending["party_size"] = booking_party_size
                                 _pending["status"] = "pending_payment"
                                 _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                                # Send charges breakdown message
+                                charges_msg = (
+                                    f"🍽️ **Dine-in Order**\n"
+                                    f"Subtotal: Rs.{subtotal:.0f}\n"
+                                    f"Service charge ({booking_party_size} guests × Rs.{DINE_IN_CHARGE_PER_PERSON}): Rs.{dine_in_charge:.0f}\n"
+                                    f"**Total: Rs.{total:.0f}**\n\n"
+                                    f"Please complete the payment to confirm your order!"
+                                )
+                                await websocket_manager.send_message(session_id, charges_msg)
 
                                 from app.workflows.payment_workflow import run_payment_workflow
                                 await run_payment_workflow(

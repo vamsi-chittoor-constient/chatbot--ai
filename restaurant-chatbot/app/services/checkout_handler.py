@@ -57,20 +57,18 @@ async def handle_checkout_message(
     if not cart_data or not cart_data.get("items"):
         return "🛒 Your cart is empty! Please add some items before checkout.\n\nWould you like to see our menu?"
 
-    # Default to takeaway - no dine-in option
+    # Checkout creates pending order and emits ORDER_TYPE_SELECTION card.
+    # Payment is triggered LATER by order_type_selection handler in chat.py.
     from app.features.food_ordering.crew_agent import _checkout_impl
 
     try:
-        result = _checkout_impl("take away", session_id)
+        result = _checkout_impl("", session_id)
 
         logger.info(
             "checkout_completed_deterministic",
             session_id=session_id,
-            order_type="take_away"
+            status="pending_order_type"
         )
-
-        # Trigger payment workflow inline for immediate event delivery
-        await _trigger_payment_workflow(session_id)
 
         return result
     except Exception as e:

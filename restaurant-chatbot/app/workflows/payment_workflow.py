@@ -219,8 +219,14 @@ async def generate_payment_link_node(state: PaymentWorkflowState) -> PaymentWork
                 payment_link=payment_link
             )
 
-            # Emit payment link via AG-UI event
-            emit_payment_link(session_id, payment_link, amount, expires_at or "")
+            # Emit payment link via AG-UI event (with charges breakdown)
+            emit_payment_link(
+                session_id, payment_link, amount, expires_at or "",
+                subtotal=float(pending_order.get("subtotal", 0)),
+                packaging_charges=float(pending_order.get("packaging_charges", 0)),
+                dine_in_charge=float(pending_order.get("dine_in_charge", 0)),
+                order_type=pending_order.get("order_type", ""),
+            )
 
             # Clean up pending order from Redis
             redis_client.delete(pending_order_key)

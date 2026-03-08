@@ -342,13 +342,21 @@ class PaymentLinkEvent(AGUIEvent):
 
     Contains:
     - payment_link: Razorpay payment link URL
-    - amount: Payment amount in rupees
+    - amount: Payment amount in rupees (total including charges)
     - expires_at: Payment link expiry timestamp
+    - subtotal: Item subtotal before charges
+    - packaging_charges: Takeaway packaging charges
+    - dine_in_charge: Dine-in service charge
+    - order_type: "take_away" or "dine_in"
     """
     type: EventType = EventType.PAYMENT_LINK
     payment_link: str = ""
     amount: float = 0.0
     expires_at: str = ""
+    subtotal: float = 0.0
+    packaging_charges: float = 0.0
+    dine_in_charge: float = 0.0
+    order_type: str = ""
 
 
 @dataclass
@@ -1905,29 +1913,35 @@ def emit_quick_replies(session_id: str, replies: List[Dict[str, str]]):
         logger.debug("quick_replies_emit_failed", error=str(e))
 
 
-def emit_payment_link(session_id: str, payment_link: str, amount: float, expires_at: str = ""):
+def emit_payment_link(
+    session_id: str, payment_link: str, amount: float, expires_at: str = "",
+    subtotal: float = 0.0, packaging_charges: float = 0.0,
+    dine_in_charge: float = 0.0, order_type: str = ""
+):
     """
     Emit Razorpay payment link for online payment.
-
-    This provides a secure payment link from Razorpay that supports
-    multiple payment methods (cards, UPI, net banking, wallets, etc.)
 
     Thread-safe: uses _put_event_threadsafe() for cross-thread queue operations.
 
     Args:
         session_id: The session ID
         payment_link: Razorpay payment link URL
-        amount: Payment amount in rupees
+        amount: Payment amount in rupees (total including charges)
         expires_at: Payment link expiry timestamp (ISO format)
-
-    Example:
-        emit_payment_link(session_id, "https://rzp.io/l/abc123", 450.0, "2025-01-01T12:00:00Z")
+        subtotal: Item subtotal before charges
+        packaging_charges: Takeaway packaging charges
+        dine_in_charge: Dine-in service charge
+        order_type: "take_away" or "dine_in"
     """
     try:
         event = PaymentLinkEvent(
             payment_link=payment_link,
             amount=amount,
-            expires_at=expires_at
+            expires_at=expires_at,
+            subtotal=subtotal,
+            packaging_charges=packaging_charges,
+            dine_in_charge=dine_in_charge,
+            order_type=order_type,
         )
 
         # Use thread-safe put for cross-thread operation
