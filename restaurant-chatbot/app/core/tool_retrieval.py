@@ -149,6 +149,17 @@ FOOD_ORDERING_TOOLS = {
         "category": "order_processing",
         "priority": 10
     },
+    "select_order_type": {
+        "name": "select_order_type",
+        "description": "Select dine-in or takeaway for a pending order after checkout",
+        "usage": "When customer chooses dine-in or takeaway for their order",
+        "examples": [
+            "dine in", "take away", "takeaway", "dine-in", "eat here",
+            "pack it", "to go", "eat in", "parcel"
+        ],
+        "category": "order_processing",
+        "priority": 10
+    },
     "get_order_status": {
         "name": "get_order_status",
         "description": "Check the current status of customer's order",
@@ -526,6 +537,10 @@ def get_relevant_tools_for_agent(
         # Clear cart intent
         if any(kw in msg_lower for kw in ["clear cart", "empty cart", "clear my cart", "empty my cart", "remove everything", "start over"]):
             _must_include.append("clear_cart")
+
+        # Order type selection intent
+        if any(kw in msg_lower for kw in ["take away", "takeaway", "take-away", "dine in", "dine-in", "dinein", "eat here", "pack it", "to go"]):
+            _must_include.append("select_order_type")
 
         # Payment intent (natural language like "I want to pay online")
         if any(kw in msg_lower for kw in ["pay online", "pay cash", "pay by card", "payment", "pay now", "i want to pay"]):

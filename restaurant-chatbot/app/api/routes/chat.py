@@ -1661,12 +1661,16 @@ async def chat_endpoint(
                 # ========================================================================
 
                 # ========================================================================
-                # PENDING ORDER CONTEXT
-                # When a pending order exists waiting for order type selection,
-                # append context so the crew agent can call select_order_type tool.
-                # This handles ANY text: "takeaway", "2nd one", "cancel", "add more", etc.
+                # TEXT-BASED ORDER TYPE DETECTION
+                # If user types "take away" / "dine in" when pending_order_type exists,
+                # treat it as if they clicked the OrderTypeCard button.
+                # Falls back to appending context for crew agent if not a clear match.
                 # ========================================================================
                 if user_message:
+                    _msg_lower = user_message.lower().strip()
+                    _is_takeaway_text = any(kw in _msg_lower for kw in ["take away", "takeaway", "take-away", "pack it", "to go"])
+                    _is_dinein_text = any(kw in _msg_lower for kw in ["dine in", "dine-in", "dinein", "eat here", "eat in"])
+
                     from app.core.redis import get_sync_redis_client
                     import json as _json
                     _redis = get_sync_redis_client()
@@ -1675,17 +1679,81 @@ async def chat_endpoint(
                     if _pending_data:
                         _pending = _json.loads(_pending_data)
                         if _pending.get("status") == "pending_order_type":
-                            _order_id = _pending.get("order_id", "")
-                            _subtotal = _pending.get("subtotal", 0)
-                            _item_count = _pending.get("total_quantity", 0)
-                            user_message += (
-                                f"\n\n[SYSTEM CONTEXT: Customer has a pending order {_order_id} "
-                                f"(Rs.{_subtotal:.0f}, {_item_count} items) waiting for order type selection. "
-                                f"A UI card with two buttons was shown: 1) Dine In, 2) Takeaway. "
-                                f"If the customer is choosing one of these options, call the select_order_type tool "
-                                f"with order_type='dine_in' or 'take_away'. "
-                                f"If they want something else (cancel, add more, help, etc.), handle normally.]"
-                            )
+                            if _is_takeaway_text or _is_dinein_text:
+                                # Deterministic handling — bypass crew agent entirely
+                                selected_order_type = "take_away" if _is_takeaway_text else "dine_in"
+                                logger.info("order_type_from_text", session_id=session_id,
+                                            order_type=selected_order_type, text=_msg_lower)
+
+                                if selected_order_type == "take_away":
+                                    from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM, flush_pending_events
+                                    total_qty = _pending.get("total_quantity", 0)
+                                    packaging_charges = total_qty * PACKAGING_CHARGE_PER_ITEM
+                                    subtotal = _pending.get("subtotal", 0)
+                                    total = subtotal + packaging_charges
+
+                                    _pending["order_type"] = "take_away"
+                                    _pending["packaging_charges"] = packaging_charges
+                                    _pending["total"] = total
+                                    _pending["status"] = "pending_payment"
+                                    _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                                    charges_msg = (
+                                        f"📦 **Takeaway Order**\n"
+                                        f"Subtotal: Rs.{subtotal:.0f}\n"
+                                        f"Packaging charges ({total_qty} items × Rs.{PACKAGING_CHARGE_PER_ITEM}): Rs.{packaging_charges:.0f}\n"
+                                        f"**Total: Rs.{total:.0f}**\n\n"
+                                        f"Please complete the payment to confirm your order!"
+                                    )
+                                    await websocket_manager.send_message(session_id, charges_msg)
+
+                                    from app.workflows.payment_workflow import run_payment_workflow
+                                    await run_payment_workflow(
+                                        session_id, _pending["order_id"], total,
+                                        initial_method="online",
+                                        items=_pending.get("items"),
+                                        order_type="take_away",
+                                        subtotal=subtotal,
+                                        packaging_charges=packaging_charges,
+                                    )
+                                    flush_pending_events(session_id)
+                                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                                elif selected_order_type == "dine_in":
+                                    from app.core.agui_events import flush_pending_events
+                                    _pending["order_type"] = "dine_in"
+                                    _pending["packaging_charges"] = 0
+                                    _pending["total"] = _pending.get("subtotal", 0)
+                                    _pending["status"] = "pending_booking"
+                                    _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                                    from app.features.booking.crew_agent import _get_availability_map
+                                    from app.core.agui_events import emit_booking_intake_form
+                                    availability = _get_availability_map(days=7)
+                                    emit_booking_intake_form(
+                                        session_id=session_id,
+                                        party_sizes=availability.get("party_sizes", list(range(1, 9))),
+                                        availability=availability.get("dates", {}),
+                                        max_party_size=availability.get("max_party_size", 8),
+                                    )
+                                    flush_pending_events(session_id)
+                                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
+
+                                continue
+
+                            else:
+                                # Not a clear order type choice — append context for crew agent
+                                _order_id = _pending.get("order_id", "")
+                                _subtotal = _pending.get("subtotal", 0)
+                                _item_count = _pending.get("total_quantity", 0)
+                                user_message += (
+                                    f"\n\n[SYSTEM CONTEXT: Customer has a pending order {_order_id} "
+                                    f"(Rs.{_subtotal:.0f}, {_item_count} items) waiting for order type selection. "
+                                    f"A UI card with two buttons was shown: 1) Dine In, 2) Takeaway. "
+                                    f"If the customer is choosing one of these options, call the select_order_type tool "
+                                    f"with order_type='dine_in' or 'take_away'. "
+                                    f"If they want something else (cancel, add more, help, etc.), handle normally.]"
+                                )
 
                 # Check rate limit before processing
                 is_allowed, messages_remaining = websocket_manager.check_rate_limit(session_id)
@@ -1843,8 +1911,13 @@ async def chat_endpoint(
                         if _ps2.get("order_id") and _ps2.get("step") in ("payment_success", "cash_selected"):
                             if not _is_receipt:
                                 _is_receipt = (
-                                    _msg_low in ("view receipt", "show receipt", "receipt", "download receipt")
-                                    or ("receipt" in _msg_low and any(kw in _msg_low for kw in ["view", "show", "see", "get", "download"]))
+                                    _msg_low in ("view receipt", "show receipt", "receipt", "download receipt",
+                                                 "view invoice", "show invoice", "invoice",
+                                                 "show bill", "view bill", "bill",
+                                                 "show my bill", "show my invoice", "show my receipt",
+                                                 "my receipt", "my invoice", "my bill")
+                                    or (any(kw in _msg_low for kw in ["receipt", "invoice", "bill"])
+                                        and any(kw in _msg_low for kw in ["view", "show", "see", "get", "download", "my"]))
                                 )
                             if not _is_order_more:
                                 _is_order_more = _msg_low in ("order more", "order again", "order something else")
@@ -1854,25 +1927,37 @@ async def chat_endpoint(
                         _pstate2 = _gps3(session_id)
                         _display_id = _pstate2.get("order_id", "")
                         _order_num = _pstate2.get("order_number") or _display_id or "N/A"
-                        _pay_id = _pstate2.get("payment_id", "")
                         _amt = _pstate2.get("amount", 0)
-                        _method = _pstate2.get("method", "")
-                        _method_lbl = {"online": "Online (Razorpay)", "cash": "Cash", "card_at_counter": "Card at Counter", "card": "Card at Counter"}.get(_method, _method or "Online")
+                        _items = _pstate2.get("items", [])
 
                         if _display_id:
+                            # Emit RECEIPT_LINK card via AGUI (same as get_order_receipt tool)
+                            import json as _rjson
+                            from app.core.agui_events import ReceiptLinkEvent
                             _pdf_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
-                            _lines = [
-                                "📄 **Order Receipt**\n",
-                                f"**Order:** {_order_num}",
-                                f"**Amount:** ₹{_amt:.2f}",
-                                f"**Payment:** {_method_lbl}",
-                            ]
-                            if _pay_id:
-                                _lines.append(f"**Payment ID:** {_pay_id}")
-                            _lines.append("**Status:** Paid ✅\n")
-                            _lines.append(f"📥 [Download PDF Receipt]({_pdf_url})\n")
-                            _lines.append("Anything else I can help you with?")
-                            await websocket_manager.send_message(session_id, "\n".join(_lines))
+                            _receipt_items = []
+                            for _ri in _items:
+                                _receipt_items.append({
+                                    "name": _ri.get("name") or _ri.get("item_name", "Item"),
+                                    "quantity": int(_ri.get("quantity", 1)),
+                                    "price": float(_ri.get("price", 0)),
+                                })
+                            _receipt_event = ReceiptLinkEvent(
+                                order_number=_order_num,
+                                amount=float(_amt),
+                                download_url=_pdf_url,
+                                items=_receipt_items,
+                            )
+                            await websocket_manager.send_message_with_metadata(
+                                session_id=session_id,
+                                message="",
+                                message_type="agui_event",
+                                metadata={"agui": _rjson.loads(_receipt_event.to_json())}
+                            )
+                            await websocket_manager.send_message(
+                                session_id,
+                                f"Here's your receipt for order {_order_num}! You can download the PDF using the button below."
+                            )
                         else:
                             await websocket_manager.send_message(session_id, "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?")
                         logger.info("view_receipt_handled", session_id=session_id)
