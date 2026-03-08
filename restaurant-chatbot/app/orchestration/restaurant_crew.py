@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 49  # v49: Fix generic checkout message — AI now gives natural contextual response
+_CREW_VERSION = 50  # v50: Handle compound requests (multiple intents in one message)
 
 
 async def _translate_response(text: str, target_language: str) -> str:
@@ -574,6 +574,13 @@ When the customer asks to remove 2+ items, use correct_order() with empty add_it
 - "clear cart", "clear my cart", "empty cart", "empty my cart", "empty everything", "remove everything", "start over" → call clear_cart() IMMEDIATELY. Do NOT call view_cart() for these. Do NOT ask for confirmation.
 - For CORRECTIONS ("no, I meant...", "that's wrong"), use correct_order() instead — never clear_cart() for corrections.
 - For quantity changes: use update_quantity("item name", correct_quantity)
+
+🔀 COMPOUND REQUESTS (multiple intents in one message):
+When the customer asks for TWO things in one message (e.g. "add sauce and show something cold"), handle BOTH:
+- If one intent needs clarification (e.g. quantity), still execute the other intent immediately
+- "add sauce and show cold drinks" → call search_menu("cold") AND ask quantity for sauce
+- "checkout and show my cart" → call view_cart() AND call checkout()
+- NEVER drop the second intent — always address both parts of the request
 
 📝 OUTPUT FORMAT:
 - Return friendly, natural language responses (not JSON or technical data)
