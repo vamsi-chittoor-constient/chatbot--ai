@@ -572,11 +572,26 @@ def get_event_queue(session_id: str) -> asyncio.Queue:
 
 
 def clear_event_queue(session_id: str):
-    """Clear event queue for session."""
+    """Clear event queue AND pending staged events for session.
+
+    Must clear both _EVENT_QUEUES (asyncio queue consumed by
+    stream_agui_events_to_websocket) AND _PENDING_EVENTS (staging
+    area used by _put_event_threadsafe from sync crew tool contexts).
+    Without clearing _PENDING_EVENTS, stale events from previous crew
+    runs (e.g. RECEIPT_LINK) leak into future flush_pending_events calls.
+    """
     if session_id in _EVENT_QUEUES:
         del _EVENT_QUEUES[session_id]
     if session_id in _EVENT_LOOPS:
         del _EVENT_LOOPS[session_id]
+    with _PENDING_LOCK:
+        if session_id in _PENDING_EVENTS:
+            stale = _PENDING_EVENTS.pop(session_id)
+            if stale:
+                logger.info("stale_pending_events_cleared",
+                            session_id=session_id,
+                            count=len(stale),
+                            types=[e.type.value for e in stale])
 
 
 def _put_event_threadsafe(session_id: str, event: "AGUIEvent"):
