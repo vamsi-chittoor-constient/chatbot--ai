@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 45  # v45: Remove standalone booking refs from prompts/quick-replies, fix checkout flow
+_CREW_VERSION = 46  # v46: Suppress dine-in/takeaway mention in checkout response, add none rule for OrderTypeCard
 
 
 async def _translate_response(text: str, target_language: str) -> str:
@@ -636,7 +636,7 @@ History: {context}
 RULES:
 - Always use tools. Summarize tool results in friendly natural language — NEVER output raw tool names or return values verbatim.
 - TABLE BOOKING: Table reservations are only available as part of the dine-in checkout flow. If a user asks to book/reserve a table without ordering food first, politely let them know they need to add items to cart and checkout first — then they can choose "Dine In" to reserve a table. Do NOT call show_booking_form or make_reservation directly.
-- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED], [BOOKING CONFIRMED], or [CHECKOUT COMPLETE], respond with a brief friendly message. Do NOT repeat the marker.
+- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED], [BOOKING CONFIRMED], or [CHECKOUT COMPLETE], respond with a brief friendly message. Do NOT repeat the marker. For [CHECKOUT COMPLETE], just say something like "Your order has been successfully created!" — do NOT mention dine-in, takeaway, or order type choices (a UI card handles that automatically).
 - LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words like "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely: "cart mein add ho gaya", "menu check karo". Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"
 - LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script). Example: "Unga cart la 2 Masala Dosa add aaiduchu, total ₹250. Vera enna venum?"
 - Keep food names, prices, order IDs in English always."""

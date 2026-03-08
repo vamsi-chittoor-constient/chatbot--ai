@@ -89,7 +89,6 @@ function aguiReducer(state, action) {
       const newCartData = {
         items: action.payload.items,
         total: action.payload.total,
-        packaging_charge_per_item: action.payload.packaging_charge_per_item || 30,
       }
       // Always place cart at the bottom — remove old cart and append fresh
       return {

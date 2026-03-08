@@ -2,13 +2,9 @@ import React from 'react'
 import { ShoppingCart, Plus, Minus, Trash2 } from 'lucide-react'
 
 export const CartCard = ({ data, onUpdateQuantity, onRemoveItem, onCheckout }) => {
-  const { items = [], total = 0, packaging_charge_per_item: PACKAGING_CHARGE_PER_ITEM = 30 } = data
+  const { items = [], total = 0 } = data
 
   if (!items.length) return null
-
-  const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 1), 0)
-  const packagingCharges = totalQuantity * PACKAGING_CHARGE_PER_ITEM
-  const grandTotal = total + packagingCharges
 
   return (
     <div className="w-full max-w-sm bg-chat-secondary border border-chat-border rounded-2xl overflow-hidden shadow-lg my-2 animate-fade-in-up">
@@ -76,17 +72,9 @@ export const CartCard = ({ data, onUpdateQuantity, onRemoveItem, onCheckout }) =
 
       {/* Totals */}
       <div className="border-t border-chat-border px-5 py-3 space-y-1.5 bg-chat-tertiary/50">
-        <div className="flex justify-between text-sm text-gray-400">
-          <span>Subtotal</span>
-          <span>Rs.{total.toFixed(0)}</span>
-        </div>
-        <div className="flex justify-between text-sm text-gray-400">
-          <span>Packaging ({totalQuantity} x Rs.{PACKAGING_CHARGE_PER_ITEM})</span>
-          <span>Rs.{packagingCharges}</span>
-        </div>
-        <div className="flex justify-between font-semibold text-base pt-1 border-t border-chat-border/50">
+        <div className="flex justify-between font-semibold text-base">
           <span className="text-white">Total</span>
-          <span className="text-accent">Rs.{grandTotal.toFixed(0)}</span>
+          <span className="text-accent">Rs.{total.toFixed(0)}</span>
         </div>
       </div>
 
@@ -98,7 +86,7 @@ export const CartCard = ({ data, onUpdateQuantity, onRemoveItem, onCheckout }) =
             className="w-full py-2.5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
           >
             <ShoppingCart size={18} />
-            Checkout - Rs.{grandTotal.toFixed(0)}
+            Checkout - Rs.{total.toFixed(0)}
           </button>
         </div>
       )}

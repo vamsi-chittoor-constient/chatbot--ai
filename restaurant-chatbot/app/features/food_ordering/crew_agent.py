@@ -1067,6 +1067,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 9. Receipt shown/displayed → "receipt_shown" (NOT view_cart!)
 10. Search results displayed (response lists menu items with prices) → "menu_displayed"
 11. AI asking "which one" / disambiguating between items → "menu_displayed"
+12. Checkout complete / choosing dine-in or takeaway → "none" (OrderTypeCard handles this)
 
 🚗 GUIDE PRINCIPLE:
 - Default to showing helpful actions rather than "none"
