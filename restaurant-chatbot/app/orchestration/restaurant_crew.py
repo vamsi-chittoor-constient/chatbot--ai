@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 47  # v47: Remove premature payment trigger, add charges breakdown to PaymentLinkCard
+_CREW_VERSION = 48  # v48: Add select_order_type tool, handle typed order type via crew agent
 
 
 async def _translate_response(text: str, target_language: str) -> str:
@@ -466,6 +466,7 @@ def create_restaurant_crew_fixed(session_id: str, customer_id: Optional[str] = N
     # Import remaining legacy tools (not yet migrated to event-sourced pattern)
     from app.features.food_ordering.crew_agent import (
         create_checkout_tool,
+        create_select_order_type_tool,
         create_cancel_order_tool,
         create_update_quantity_tool,
         create_set_special_instructions_tool,
@@ -498,6 +499,7 @@ def create_restaurant_crew_fixed(session_id: str, customer_id: Optional[str] = N
         *event_sourced_tools,  # Event-sourced: search_menu, add_to_cart, view_cart, remove_from_cart
         # Legacy tools (not yet migrated):
         create_checkout_tool(session_id),
+        create_select_order_type_tool(session_id),
         create_cancel_order_tool(session_id),
         create_update_quantity_tool(session_id),
         create_set_special_instructions_tool(session_id),
@@ -1237,8 +1239,68 @@ async def process_with_agui_streaming(
         if flushed > 0:
             logger.debug("tool_events_flushed_before_run_finished", session_id=session_id, count=flushed)
 
-        # NOTE: Payment workflow is triggered by order_type_selection handler
-        # in chat.py AFTER the user picks dine-in or takeaway. Not here.
+        # =====================================================================
+        # ORDER TYPE SELECTION — triggered when crew calls select_order_type
+        # =====================================================================
+        try:
+            from app.core.redis import get_sync_redis_client
+            import json as _json
+            _redis = get_sync_redis_client()
+            _pending_key = f"pending_order:{session_id}"
+            _pending_data = _redis.get(_pending_key)
+            if _pending_data:
+                _pending = _json.loads(_pending_data)
+                _selected = _pending.get("selected_order_type")
+                if _selected and _pending.get("status") == "pending_order_type":
+                    # Remove the flag so it's not processed twice
+                    del _pending["selected_order_type"]
+
+                    if _selected == "take_away":
+                        from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM
+                        total_qty = _pending.get("total_quantity", 0)
+                        packaging_charges = total_qty * PACKAGING_CHARGE_PER_ITEM
+                        subtotal = _pending.get("subtotal", 0)
+                        total = subtotal + packaging_charges
+
+                        _pending["order_type"] = "take_away"
+                        _pending["packaging_charges"] = packaging_charges
+                        _pending["total"] = total
+                        _pending["status"] = "pending_payment"
+                        _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                        from app.workflows.payment_workflow import run_payment_workflow
+                        await run_payment_workflow(
+                            session_id, _pending["order_id"], total,
+                            initial_method="online",
+                            items=_pending.get("items"),
+                            order_type="take_away",
+                            subtotal=subtotal,
+                            packaging_charges=packaging_charges,
+                        )
+                        flushed_pay = flush_pending_events(session_id)
+                        if flushed_pay > 0:
+                            logger.debug("order_type_payment_flushed", count=flushed_pay)
+
+                    elif _selected == "dine_in":
+                        _pending["order_type"] = "dine_in"
+                        _pending["packaging_charges"] = 0
+                        _pending["total"] = _pending.get("subtotal", 0)
+                        _pending["status"] = "pending_booking"
+                        _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+
+                        from app.features.booking.crew_agent import _get_availability_map
+                        from app.core.agui_events import emit_booking_intake_form
+                        availability = _get_availability_map(days=7)
+                        emit_booking_intake_form(
+                            session_id=session_id,
+                            party_sizes=availability.get("party_sizes", list(range(1, 9))),
+                            availability=availability.get("dates", {}),
+                            max_party_size=availability.get("max_party_size", 8),
+                        )
+                        flush_pending_events(session_id)
+
+        except Exception as _ot_err:
+            logger.warning("order_type_post_crew_failed", error=str(_ot_err), session_id=session_id)
 
         # NOW emit quick replies — AFTER all tool events are flushed.
         # This guarantees quick replies are the last message before RUN_FINISHED

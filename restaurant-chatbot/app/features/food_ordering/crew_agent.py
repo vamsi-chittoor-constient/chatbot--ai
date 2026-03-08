@@ -471,6 +471,52 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         return "Sorry, there was an issue placing your order. Please try again."
 
 
+def _select_order_type_impl(order_type: str, session_id: str) -> str:
+    """Select dine-in or takeaway for a pending order.
+
+    Called by the crew agent when user types their order type preference
+    instead of clicking the OrderTypeCard button.
+
+    This stores the selection in Redis and returns a marker.
+    The actual charges calculation and payment workflow are triggered
+    by the order_type_selection handler in chat.py after the crew finishes.
+    """
+    from app.core.agui_events import emit_tool_activity
+    from app.core.redis import get_sync_redis_client
+    import json
+
+    emit_tool_activity(session_id, "select_order_type")
+
+    redis_client = get_sync_redis_client()
+    pending_key = f"pending_order:{session_id}"
+    pending_data = redis_client.get(pending_key)
+
+    if not pending_data:
+        return "No pending order found. Please checkout first."
+
+    pending = json.loads(pending_data)
+    if pending.get("status") != "pending_order_type":
+        return f"Order is already in status: {pending.get('status')}. No action needed."
+
+    # Normalize order type
+    order_type_lower = order_type.lower().strip()
+    if any(kw in order_type_lower for kw in ["take", "away", "takeaway", "parcel", "pack", "to go"]):
+        selected = "take_away"
+    elif any(kw in order_type_lower for kw in ["dine", "in", "eat", "here", "sit", "table"]):
+        selected = "dine_in"
+    else:
+        return f"Please specify 'dine_in' or 'take_away'. Got: {order_type}"
+
+    # Store selection — the post-crew handler in chat.py will process it
+    pending["selected_order_type"] = selected
+    redis_client.setex(pending_key, 3600, json.dumps(pending))
+
+    if selected == "take_away":
+        return "[ORDER TYPE SELECTED: TAKEAWAY] Customer chose takeaway. Packaging charges will be calculated."
+    else:
+        return "[ORDER TYPE SELECTED: DINE-IN] Customer chose dine-in. A table booking form will be shown."
+
+
 def _cancel_order_impl(session_id: str) -> str:
     """Sync implementation of cancel_order for crew pool."""
     from app.core.agui_events import emit_tool_activity
@@ -2041,6 +2087,33 @@ def create_checkout_tool(session_id: str):
         return _checkout_impl(order_type or "", session_id)
 
     return checkout
+
+
+def create_select_order_type_tool(session_id: str):
+    """Factory to create select_order_type tool with session context."""
+
+    @tool("select_order_type")
+    def select_order_type(order_type: str) -> str:
+        """
+        Select dine-in or takeaway for a pending order.
+
+        Use this ONLY when the customer has already checked out and a UI card
+        is showing "Dine In" and "Takeaway" options, and the customer types
+        their preference instead of clicking the button.
+
+        Args:
+            order_type: "dine_in" or "take_away"
+
+        Examples:
+            - Customer: "takeaway" → select_order_type("take_away")
+            - Customer: "I'll dine in" → select_order_type("dine_in")
+            - Customer: "2nd one" (takeaway is 2nd) → select_order_type("take_away")
+            - Customer: "pack it up" → select_order_type("take_away")
+            - Customer: "eat here" → select_order_type("dine_in")
+        """
+        return _select_order_type_impl(order_type, session_id)
+
+    return select_order_type
 
 
 def _create_checkout_tool_async_DISABLED(session_id: str):

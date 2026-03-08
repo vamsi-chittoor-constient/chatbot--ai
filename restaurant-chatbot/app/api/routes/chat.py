@@ -1661,85 +1661,31 @@ async def chat_endpoint(
                 # ========================================================================
 
                 # ========================================================================
-                # TEXT-BASED ORDER TYPE DETECTION
-                # If user types "take away" / "dine in" when pending_order_type exists,
-                # treat it as if they clicked the OrderTypeCard button.
+                # PENDING ORDER CONTEXT
+                # When a pending order exists waiting for order type selection,
+                # append context so the crew agent can call select_order_type tool.
+                # This handles ANY text: "takeaway", "2nd one", "cancel", "add more", etc.
                 # ========================================================================
                 if user_message:
-                    _msg_lower = user_message.lower().strip()
-                    _is_takeaway_text = any(kw in _msg_lower for kw in ["take away", "takeaway", "take-away", "pack it", "to go"])
-                    _is_dinein_text = any(kw in _msg_lower for kw in ["dine in", "dine-in", "dinein", "eat here", "eat in"])
-
-                    if _is_takeaway_text or _is_dinein_text:
-                        from app.core.redis import get_sync_redis_client
-                        import json as _json
-                        _redis = get_sync_redis_client()
-                        _pending_key = f"pending_order:{session_id}"
-                        _pending_data = _redis.get(_pending_key)
-                        if _pending_data:
-                            _pending = _json.loads(_pending_data)
-                            if _pending.get("status") == "pending_order_type":
-                                # Simulate form submission
-                                selected_order_type = "take_away" if _is_takeaway_text else "dine_in"
-                                order_id = _pending.get("order_id", "")
-                                logger.info("order_type_from_text", session_id=session_id,
-                                            order_type=selected_order_type, text=_msg_lower)
-
-                                if selected_order_type == "take_away":
-                                    from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM, flush_pending_events
-                                    total_qty = _pending.get("total_quantity", 0)
-                                    packaging_charges = total_qty * PACKAGING_CHARGE_PER_ITEM
-                                    subtotal = _pending.get("subtotal", 0)
-                                    total = subtotal + packaging_charges
-
-                                    _pending["order_type"] = "take_away"
-                                    _pending["packaging_charges"] = packaging_charges
-                                    _pending["total"] = total
-                                    _pending["status"] = "pending_payment"
-                                    _redis.setex(_pending_key, 3600, _json.dumps(_pending))
-
-                                    charges_msg = (
-                                        f"📦 **Takeaway Order**\n"
-                                        f"Subtotal: Rs.{subtotal:.0f}\n"
-                                        f"Packaging charges ({total_qty} items × Rs.{PACKAGING_CHARGE_PER_ITEM}): Rs.{packaging_charges:.0f}\n"
-                                        f"**Total: Rs.{total:.0f}**\n\n"
-                                        f"Please complete the payment to confirm your order!"
-                                    )
-                                    await websocket_manager.send_message(session_id, charges_msg)
-
-                                    from app.workflows.payment_workflow import run_payment_workflow
-                                    await run_payment_workflow(
-                                        session_id, _pending["order_id"], total,
-                                        initial_method="online",
-                                        items=_pending.get("items"),
-                                        order_type="take_away",
-                                        subtotal=subtotal,
-                                        packaging_charges=packaging_charges,
-                                    )
-                                    flush_pending_events(session_id)
-                                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
-
-                                elif selected_order_type == "dine_in":
-                                    from app.core.agui_events import flush_pending_events
-                                    _pending["order_type"] = "dine_in"
-                                    _pending["packaging_charges"] = 0
-                                    _pending["total"] = _pending.get("subtotal", 0)
-                                    _pending["status"] = "pending_booking"
-                                    _redis.setex(_pending_key, 3600, _json.dumps(_pending))
-
-                                    from app.features.booking.crew_agent import _get_availability_map
-                                    from app.core.agui_events import emit_booking_intake_form
-                                    availability = _get_availability_map(days=7)
-                                    emit_booking_intake_form(
-                                        session_id=session_id,
-                                        party_sizes=availability.get("party_sizes", list(range(1, 9))),
-                                        availability=availability.get("dates", {}),
-                                        max_party_size=availability.get("max_party_size", 8),
-                                    )
-                                    flush_pending_events(session_id)
-                                    await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
-
-                                continue
+                    from app.core.redis import get_sync_redis_client
+                    import json as _json
+                    _redis = get_sync_redis_client()
+                    _pending_key = f"pending_order:{session_id}"
+                    _pending_data = _redis.get(_pending_key)
+                    if _pending_data:
+                        _pending = _json.loads(_pending_data)
+                        if _pending.get("status") == "pending_order_type":
+                            _order_id = _pending.get("order_id", "")
+                            _subtotal = _pending.get("subtotal", 0)
+                            _item_count = _pending.get("total_quantity", 0)
+                            user_message += (
+                                f"\n\n[SYSTEM CONTEXT: Customer has a pending order {_order_id} "
+                                f"(Rs.{_subtotal:.0f}, {_item_count} items) waiting for order type selection. "
+                                f"A UI card with two buttons was shown: 1) Dine In, 2) Takeaway. "
+                                f"If the customer is choosing one of these options, call the select_order_type tool "
+                                f"with order_type='dine_in' or 'take_away'. "
+                                f"If they want something else (cancel, add more, help, etc.), handle normally.]"
+                            )
 
                 # Check rate limit before processing
                 is_allowed, messages_remaining = websocket_manager.check_rate_limit(session_id)
