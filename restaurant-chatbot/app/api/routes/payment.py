@@ -375,13 +375,25 @@ async def payment_callback(
                             order_number = str(order.order_invoice_number) if order and order.order_invoice_number else str(payment_order.order_id)
                             amount = float(payment_order.order_amount) if payment_order.order_amount else 0
 
+                            # Read actual order type from pending order in Redis
+                            _actual_order_type = "takeaway"
+                            try:
+                                from app.core.redis import get_sync_redis_client as _get_redis
+                                _r = _get_redis()
+                                _po_data = _r.get(f"pending_order:{session_id}")
+                                if _po_data:
+                                    _po = _json.loads(_po_data)
+                                    _actual_order_type = _po.get("order_type", "takeaway")
+                            except Exception:
+                                pass
+
                             # Build the AGUI event directly
                             event = PaymentSuccessEvent(
                                 order_id=str(payment_order.order_id),
                                 order_number=order_number,
                                 amount=amount,
                                 payment_id=razorpay_payment_id or "",
-                                order_type="takeaway",
+                                order_type=_actual_order_type,
                                 quick_replies=[
                                     {"label": "📄 View Receipt", "action": "view_receipt"},
                                     {"label": "🍽️ Order More", "action": "order_more"}

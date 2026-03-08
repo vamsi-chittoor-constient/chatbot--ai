@@ -386,7 +386,7 @@ class PaymentSuccessEvent(AGUIEvent):
     - amount: Payment amount
     - payment_id: Razorpay payment ID
     - order_type: dine_in or takeaway
-    - quick_replies: Next action buttons (View Receipt, Track Order, etc.)
+    - quick_replies: Next action buttons (View Receipt, Order More, etc.)
     """
     type: EventType = EventType.PAYMENT_SUCCESS
     order_id: str = ""
@@ -2037,7 +2037,7 @@ def emit_payment_success(
         amount: Payment amount
         payment_id: Razorpay payment ID
         order_type: dine_in or takeaway
-        quick_replies: Next action buttons (View Receipt, Track Order, etc.)
+        quick_replies: Next action buttons (View Receipt, Order More, etc.)
 
     Example:
         emit_payment_success(
@@ -2049,7 +2049,6 @@ def emit_payment_success(
             order_type="takeaway",
             quick_replies=[
                 {"label": "📄 View Receipt", "action": "view_receipt"},
-                {"label": "📦 Track Order", "action": "track_order"},
                 {"label": "🍽️ Order More", "action": "order_more"}
             ]
         )

@@ -1828,6 +1828,67 @@ async def chat_endpoint(
                     logger.warning("payment_pending_handler_error", error=str(_ptf_err))
                 # ========================================================================
 
+                # ========================================================================
+                # POST-PAYMENT ACTIONS — view_receipt, order_more quick reply buttons
+                # ========================================================================
+                try:
+                    _msg_low = user_message.lower().strip()
+                    _is_receipt = _msg_low == "view_receipt"
+                    _is_order_more = _msg_low == "order_more"
+
+                    # Also match natural language when payment is completed
+                    if not _is_receipt and not _is_order_more:
+                        from app.services.payment_state_service import get_payment_state as _gps2
+                        _ps2 = _gps2(session_id)
+                        if _ps2.get("order_id") and _ps2.get("step") in ("payment_success", "cash_selected"):
+                            if not _is_receipt:
+                                _is_receipt = (
+                                    _msg_low in ("view receipt", "show receipt", "receipt", "download receipt")
+                                    or ("receipt" in _msg_low and any(kw in _msg_low for kw in ["view", "show", "see", "get", "download"]))
+                                )
+                            if not _is_order_more:
+                                _is_order_more = _msg_low in ("order more", "order again", "order something else")
+
+                    if _is_receipt:
+                        from app.services.payment_state_service import get_payment_state as _gps3
+                        _pstate2 = _gps3(session_id)
+                        _display_id = _pstate2.get("order_id", "")
+                        _order_num = _pstate2.get("order_number") or _display_id or "N/A"
+                        _pay_id = _pstate2.get("payment_id", "")
+                        _amt = _pstate2.get("amount", 0)
+                        _method = _pstate2.get("method", "")
+                        _method_lbl = {"online": "Online (Razorpay)", "cash": "Cash", "card_at_counter": "Card at Counter", "card": "Card at Counter"}.get(_method, _method or "Online")
+
+                        if _display_id:
+                            _pdf_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
+                            _lines = [
+                                "📄 **Order Receipt**\n",
+                                f"**Order:** {_order_num}",
+                                f"**Amount:** ₹{_amt:.2f}",
+                                f"**Payment:** {_method_lbl}",
+                            ]
+                            if _pay_id:
+                                _lines.append(f"**Payment ID:** {_pay_id}")
+                            _lines.append("**Status:** Paid ✅\n")
+                            _lines.append(f"📥 [Download PDF Receipt]({_pdf_url})\n")
+                            _lines.append("Anything else I can help you with?")
+                            await websocket_manager.send_message(session_id, "\n".join(_lines))
+                        else:
+                            await websocket_manager.send_message(session_id, "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?")
+                        logger.info("view_receipt_handled", session_id=session_id)
+                        continue
+
+                    if _is_order_more:
+                        from app.services.payment_state_service import clear_payment_state as _clear_ps
+                        _clear_ps(session_id)
+                        await websocket_manager.send_message(session_id, "🍽️ Great! What else would you like to order? I can show you our menu or you can tell me what you're craving!")
+                        logger.info("order_more_handled", session_id=session_id)
+                        continue
+
+                except Exception as _pm_err:
+                    logger.warning("post_payment_action_error", error=str(_pm_err))
+                # ========================================================================
+
                 # Clear stale events from previous processing cycles so they
                 # don't leak into the new response stream.
                 try:

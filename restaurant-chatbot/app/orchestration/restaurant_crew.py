@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 48  # v48: Add select_order_type tool, handle typed order type via crew agent
+_CREW_VERSION = 49  # v49: Fix generic checkout message — AI now gives natural contextual response
 
 
 async def _translate_response(text: str, target_language: str) -> str:
@@ -638,7 +638,7 @@ History: {context}
 RULES:
 - Always use tools. Summarize tool results in friendly natural language — NEVER output raw tool names or return values verbatim.
 - TABLE BOOKING: Table reservations are only available as part of the dine-in checkout flow. If a user asks to book/reserve a table without ordering food first, politely let them know they need to add items to cart and checkout first — then they can choose "Dine In" to reserve a table. Do NOT call show_booking_form or make_reservation directly.
-- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED], [BOOKING CONFIRMED], or [CHECKOUT COMPLETE], respond with a brief friendly message. Do NOT repeat the marker. For [CHECKOUT COMPLETE], just say something like "Your order has been successfully created!" — do NOT mention dine-in, takeaway, or order type choices (a UI card handles that automatically).
+- When a tool returns a bracket marker like [BOOKING FORM DISPLAYED], [BOOKING CONFIRMED], or [CHECKOUT COMPLETE], respond with a brief friendly message. Do NOT repeat the marker or raw tool output. For [CHECKOUT COMPLETE], acknowledge the order naturally — e.g. "Great, your order is ready! Please select Dine-in or Takeaway below to continue." — vary your wording each time, don't repeat the same sentence.
 - LANGUAGE: If the user message starts with [RESPOND IN HINGLISH...], respond in casual Hinglish (Roman script ONLY, NO Devanagari). Use simple words like "chahiye", "karo", "dekh lo" — NOT formal "chahenge", "karenge", "dekhenge". Mix English freely: "cart mein add ho gaya", "menu check karo". Example: "Aapke cart mein 2 Masala Dosa add ho gaye, total ₹250. Aur kuch chahiye?"
 - LANGUAGE: If the user message starts with [RESPOND IN TANGLISH...], respond in casual Tanglish (Roman script ONLY, NO Tamil script). Example: "Unga cart la 2 Masala Dosa add aaiduchu, total ₹250. Vera enna venum?"
 - Keep food names, prices, order IDs in English always."""
