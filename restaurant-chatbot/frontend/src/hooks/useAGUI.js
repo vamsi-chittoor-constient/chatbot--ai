@@ -106,7 +106,7 @@ function aguiReducer(state, action) {
     case 'MENU_DATA':
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'menu' && msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'menu',
@@ -139,7 +139,7 @@ function aguiReducer(state, action) {
     case 'ORDER_DATA':
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'order' && msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'order',
@@ -165,7 +165,7 @@ function aguiReducer(state, action) {
       console.log('REDUCER: PAYMENT_LINK', action.payload)
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies' && msg.type !== 'order_type_selection'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'payment_link' && msg.type !== 'quick_replies' && msg.type !== 'order_type_selection'), {
           id: Date.now(),
           role: 'system',
           type: 'payment_link',
@@ -186,7 +186,7 @@ function aguiReducer(state, action) {
       console.log('REDUCER: PAYMENT_SUCCESS', action.payload)
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'payment_success' && msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'payment_success',
@@ -206,7 +206,7 @@ function aguiReducer(state, action) {
       console.log('REDUCER: RECEIPT_LINK', action.payload)
       return {
         ...state,
-        messages: [...state.messages.filter(msg => msg.type !== 'quick_replies'), {
+        messages: [...state.messages.filter(msg => msg.type !== 'receipt_link' && msg.type !== 'quick_replies'), {
           id: Date.now(),
           role: 'system',
           type: 'receipt_link',

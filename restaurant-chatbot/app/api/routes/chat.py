@@ -1960,6 +1960,20 @@ async def chat_endpoint(
                             )
                         else:
                             await websocket_manager.send_message(session_id, "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?")
+                        # Emit quick replies after receipt
+                        import json as _qr_json
+                        from app.core.agui_events import QuickRepliesEvent
+                        _receipt_qr = QuickRepliesEvent(replies=[
+                            {"label": "🍔 Order More", "action": "show menu"},
+                            {"label": "⭐ Rate Order", "action": "rate this order"},
+                            {"label": "❓ Help", "action": "help"},
+                        ])
+                        await websocket_manager.send_message_with_metadata(
+                            session_id=session_id,
+                            message="",
+                            message_type="agui_event",
+                            metadata={"agui": _qr_json.loads(_receipt_qr.to_json())}
+                        )
                         logger.info("view_receipt_handled", session_id=session_id)
                         continue
 
@@ -1967,6 +1981,20 @@ async def chat_endpoint(
                         from app.services.payment_state_service import clear_payment_state as _clear_ps
                         _clear_ps(session_id)
                         await websocket_manager.send_message(session_id, "🍽️ Great! What else would you like to order? I can show you our menu or you can tell me what you're craving!")
+                        # Emit quick replies after order more
+                        import json as _qr_json2
+                        from app.core.agui_events import QuickRepliesEvent as _QR2
+                        _more_qr = _QR2(replies=[
+                            {"label": "🍔 Show Menu", "action": "show menu"},
+                            {"label": "🔍 Search", "action": "search menu"},
+                            {"label": "🛒 View Cart", "action": "view cart"},
+                        ])
+                        await websocket_manager.send_message_with_metadata(
+                            session_id=session_id,
+                            message="",
+                            message_type="agui_event",
+                            metadata={"agui": _qr_json2.loads(_more_qr.to_json())}
+                        )
                         logger.info("order_more_handled", session_id=session_id)
                         continue
 
