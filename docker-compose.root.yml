@@ -210,6 +210,8 @@ services:
     build:
       context: ./restaurant-chatbot
       dockerfile: docker/Dockerfile.nginx
+      args:
+        CACHEBUST: "${CACHEBUST:-1}"
     container_name: a24-nginx
     restart: unless-stopped
     ports:

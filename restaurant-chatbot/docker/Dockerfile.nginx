@@ -15,6 +15,9 @@ COPY frontend/package*.json ./
 # Install dependencies
 RUN npm ci --silent
 
+# Cache-bust: changing this ARG forces Docker to re-COPY and rebuild frontend
+ARG CACHEBUST=1
+
 # Copy frontend source
 COPY frontend/ .
 
