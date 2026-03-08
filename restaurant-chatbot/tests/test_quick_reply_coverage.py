@@ -169,7 +169,6 @@ class TestQuickReplyActionValidity:
             "view cart",
             "checkout",
             "help",
-            "track my order",
             "show receipt",
         ]
         for ca in core_actions:
@@ -424,9 +423,9 @@ class TestQuickReplyScenarios:
         assert any("menu" in a or "more" in a for a in actions)
 
     # After checkout (order confirmed)
-    def test_order_confirmed_has_track(self):
+    def test_order_confirmed_has_receipt(self):
         actions = self._get_set_actions("order_confirmed")
-        assert any("track" in a for a in actions)
+        assert any("receipt" in a for a in actions)
 
     # After payment
     def test_payment_completed_has_receipt(self):

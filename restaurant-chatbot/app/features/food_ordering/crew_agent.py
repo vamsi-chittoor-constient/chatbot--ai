@@ -756,9 +756,8 @@ QUICK_ACTION_SETS = {
 
     "explore_features": [
         {"label": "🍔 Order Food", "action": "show me the menu"},
-        {"label": "📍 Track Order", "action": "track my order"},
         {"label": "🔍 Check Allergens", "action": "check my allergens"},
-        {"label": "🎁 Offers & Rewards", "action": "check offers and deals"},
+        {"label": "📜 Order History", "action": "show my order history"},
         {"label": "❓ Get Help", "action": "help and faqs"},
     ],
 
@@ -807,7 +806,6 @@ QUICK_ACTION_SETS = {
         {"label": "🛒 View Cart", "action": "view cart"},
         {"label": "✅ Checkout", "action": "checkout"},
         {"label": "➕ Add More", "action": "add more items"},
-        {"label": "❤️ Add to Favorites", "action": "add to favorites"},
     ],
 
     "added_to_cart_with_upsell": [
@@ -837,8 +835,8 @@ QUICK_ACTION_SETS = {
 
     "cart_empty_reminder": [
         {"label": "🍔 Browse Menu", "action": "show menu"},
-        {"label": "📜 Recent Orders", "action": "show my order history"},
         {"label": "🔄 Reorder Last", "action": "reorder my last order"},
+        {"label": "❓ Help", "action": "help"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -856,38 +854,33 @@ QUICK_ACTION_SETS = {
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     "order_confirmed": [
-        {"label": "📍 Track Order", "action": "track my order"},
         {"label": "🧾 View Receipt", "action": "show receipt"},
         {"label": "🍔 Order More", "action": "show menu"},
+        {"label": "❓ Help", "action": "help"},
     ],
 
     "payment_completed": [
-        {"label": "📍 Track Order", "action": "track my order"},
         {"label": "🧾 View Receipt", "action": "show receipt"},
         {"label": "⭐ Rate Order", "action": "rate this order"},
-        {"label": "❤️ Add to Favorites", "action": "add items to favorites"},
-        {"label": "🔄 Reorder", "action": "reorder this"},
+        {"label": "🍔 Order More", "action": "show menu"},
     ],
 
     "post_delivery": [
-        {"label": "⭐⭐⭐⭐⭐ Rate 5 Stars", "action": "rate 5 stars"},
+        {"label": "⭐ Rate Order", "action": "rate this order"},
         {"label": "💬 Leave Feedback", "action": "submit feedback"},
-        {"label": "🔄 Reorder Same", "action": "reorder last order"},
-        {"label": "❤️ Save Favorites", "action": "add to favorites"},
+        {"label": "🔄 Reorder", "action": "reorder last order"},
     ],
 
     "order_tracking": [
-        {"label": "🔄 Refresh Status", "action": "refresh order status"},
-        {"label": "❌ Cancel Order", "action": "cancel this order"},
-        {"label": "📞 Contact Support", "action": "contact support"},
         {"label": "🧾 View Receipt", "action": "show receipt"},
+        {"label": "🍔 Order More", "action": "show menu"},
+        {"label": "❓ Help", "action": "help"},
     ],
 
     "receipt_shown": [
         {"label": "🍔 Order More", "action": "show menu"},
-        {"label": "📍 Track Order", "action": "track my order"},
         {"label": "⭐ Rate Order", "action": "rate this order"},
-        {"label": "🏠 Home", "action": "back to home"},
+        {"label": "❓ Help", "action": "help"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -901,9 +894,9 @@ QUICK_ACTION_SETS = {
     ],
 
     "booking_confirmed": [
-        {"label": "🍔 Order More", "action": "show menu"},
-        {"label": "📍 Track Order", "action": "track my order"},
-        {"label": "🏠 Home", "action": "back to home"},
+        {"label": "🍔 Order Food", "action": "show menu"},
+        {"label": "🛒 View Cart", "action": "view cart"},
+        {"label": "❓ Help", "action": "help"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -913,24 +906,21 @@ QUICK_ACTION_SETS = {
     "dietary_inquiry": [
         {"label": "🔍 Check My Allergens", "action": "show my allergens"},
         {"label": "➕ Add Allergen", "action": "add allergen"},
-        {"label": "💚 Dietary Preferences", "action": "show dietary preferences"},
         {"label": "🥗 Veg Options", "action": "show vegetarian items"},
-        {"label": "📊 Nutrition Info", "action": "nutrition information"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     "allergen_management": [
         {"label": "➕ Add Allergen", "action": "add new allergen"},
         {"label": "➖ Remove Allergen", "action": "remove allergen"},
         {"label": "🔍 Filter Menu", "action": "filter menu by my allergens"},
-        {"label": "🏠 Back", "action": "go back"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     "health_conscious": [
         {"label": "🥗 Veg Options", "action": "show vegetarian options"},
-        {"label": "📊 Nutrition Info", "action": "show nutrition info"},
-        {"label": "💪 High Protein", "action": "show high protein items"},
-        {"label": "🌿 Vegan Options", "action": "show vegan items"},
-        {"label": "🍔 All Menu", "action": "show full menu"},
+        {"label": "🔍 Check Allergens", "action": "show my allergens"},
+        {"label": "🍔 Browse Menu", "action": "show full menu"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -941,23 +931,20 @@ QUICK_ACTION_SETS = {
         {"label": "❓ View FAQs", "action": "show faqs"},
         {"label": "🕐 Operating Hours", "action": "what are your hours"},
         {"label": "📜 Policies", "action": "show restaurant policies"},
-        {"label": "🚚 Delivery Info", "action": "delivery information"},
-        {"label": "📞 Contact Support", "action": "contact support"},
+        {"label": "📞 Contact Info", "action": "contact information"},
     ],
 
     "faq_categories": [
         {"label": "📦 Order & Delivery", "action": "order and delivery faqs"},
         {"label": "💳 Payment", "action": "payment faqs"},
         {"label": "📅 Booking", "action": "booking faqs"},
-        {"label": "🔄 Returns", "action": "return and refund faqs"},
-        {"label": "🔙 Back", "action": "back to help"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     "policy_shown": [
-        {"label": "🚚 Delivery Policy", "action": "delivery policy"},
-        {"label": "🔄 Refund Policy", "action": "refund policy"},
-        {"label": "📜 Terms of Service", "action": "terms of service"},
-        {"label": "🏠 Back", "action": "go back"},
+        {"label": "📜 Policies", "action": "show restaurant policies"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
+        {"label": "❓ Help", "action": "help"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -968,21 +955,19 @@ QUICK_ACTION_SETS = {
         {"label": "📜 Order History", "action": "show my order history"},
         {"label": "❤️ My Favorites", "action": "show my favorites"},
         {"label": "💬 My Feedback", "action": "show my feedback history"},
-        {"label": "⚙️ Preferences", "action": "show my preferences"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     "my_favorites": [
         {"label": "❤️ View Favorites", "action": "show my favorites"},
-        {"label": "🔄 Reorder Favorite", "action": "reorder from favorites"},
-        {"label": "➕ Add New Favorite", "action": "add to favorites"},
-        {"label": "🏠 Back", "action": "go back"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
+        {"label": "🛒 View Cart", "action": "view cart"},
     ],
 
     "order_history_shown": [
-        {"label": "🔄 Reorder", "action": "reorder from history"},
+        {"label": "🔄 Reorder", "action": "reorder last order"},
         {"label": "🧾 View Receipt", "action": "show receipt"},
-        {"label": "⭐ Rate Past Order", "action": "rate past order"},
-        {"label": "🏠 Home", "action": "back to home"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -992,15 +977,13 @@ QUICK_ACTION_SETS = {
     "feedback_prompt": [
         {"label": "⭐ Rate Order", "action": "rate my order"},
         {"label": "💬 Leave Feedback", "action": "submit feedback"},
-        {"label": "👍 Everything Great!", "action": "rate 5 stars"},
-        {"label": "Later", "action": "maybe later"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     "rating_submitted": [
         {"label": "💬 Add Comments", "action": "add feedback comments"},
-        {"label": "🔄 Reorder Same", "action": "reorder this"},
-        {"label": "❤️ Add to Favorites", "action": "add to favorites"},
-        {"label": "🏠 Home", "action": "back to home"},
+        {"label": "🔄 Reorder", "action": "reorder last order"},
+        {"label": "🍔 Browse Menu", "action": "show menu"},
     ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1060,43 +1043,43 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - deals_inquiry: User asks about deals/offers/specials → Show promo options (Combos, Specials, Promo Code, Loyalty Rewards)
 
 ━━━ CART & ORDERING ━━━
-- added_to_cart: Item added to cart (response: "added X to cart") → Next steps (View Cart, Checkout, Add More, Add to Favorites)
-- added_to_cart_with_upsell: Added main dish (burger/pizza/etc) → Suggest upsells (Add Sides?, View Cart, Checkout, Add More)
-- view_cart: Showing cart contents → Cart actions (Checkout, Add More, Apply Promo, Add Instructions, Clear Cart)
-- view_cart_high_value: Cart shown with total > Rs.500 → Highlight promo (Checkout, Apply Promo Code★, Add More, Check Allergens)
-- checkout_options: Before final checkout → Final options (Order Now, Schedule Later, Apply Promo, Back to Cart)
-- cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Search Items, Recent Orders, Reorder Last)
-- order_created: Checkout complete, user choosing dine-in/takeaway via card → Supportive actions (Cancel Order, Add More, Help)
+- added_to_cart: Item added to cart → Next steps (View Cart, Checkout, Add More)
+- added_to_cart_with_upsell: Added main dish (burger/pizza/etc) → Upsell (Add Sides?, View Cart, Checkout, Add More)
+- view_cart: Showing cart contents → Cart actions (Checkout, Add More, Add Instructions, Clear Cart)
+- view_cart_high_value: Cart shown with total > Rs.500 → (Checkout, Add More, Add Instructions)
+- checkout_options: Before final checkout → (Order Now, Back to Cart)
+- cart_empty_reminder: Cart empty → (Browse Menu, Reorder Last, Help)
+- order_created: Checkout complete, choosing dine-in/takeaway via card → (Cancel Order, Add More, Help)
 
 ━━━ POST-ORDER ━━━
-- order_confirmed: Order placed (response has "Order ID" but NO payment yet) → Post-order (Track Order, View Receipt, Order More)
-- payment_completed: Payment successful (response: "payment successful" or "paid") → Full post-order (Track, Receipt, Rate, Favorites, Reorder)
-- post_delivery: 30+ mins after delivery → Feedback prompt (Rate 5 Stars, Leave Feedback, Reorder Same, Save Favorites)
-- order_tracking: User tracking order → Tracking actions (Refresh Status, Cancel Order, Contact Support, View Receipt)
-- receipt_shown: Receipt displayed (response: "receipt" or "RECEIPT DISPLAYED" or "download") → Post-receipt (Order More, Track, Rate, Home)
+- order_confirmed: Order placed → (View Receipt, Order More, Help)
+- payment_completed: Payment successful → (View Receipt, Rate Order, Order More)
+- post_delivery: After delivery → (Rate Order, Leave Feedback, Reorder)
+- order_tracking: Checking order status → (View Receipt, Order More, Help)
+- receipt_shown: Receipt displayed → (Order More, Rate Order, Help)
 
 ━━━ TABLE BOOKING ━━━
-- booking_inquiry: User asks about booking or wants to book → Redirect to ordering (Browse Menu, View Cart, How to Book)
-- booking_confirmed: Booking confirmed via dine-in checkout → Post-booking (Order More, Track Order, Home)
+- booking_inquiry: User asks about booking → (Browse Menu, View Cart, How to Book)
+- booking_confirmed: Booking confirmed → (Order Food, View Cart, Help)
 
 ━━━ DIETARY & ALLERGENS ━━━
-- dietary_inquiry: User mentions diet/allergens/health concerns → Dietary options (Check Allergens, Add Allergen, Dietary Prefs, Veg, Nutrition)
-- allergen_management: Managing allergen preferences → Allergen actions (Add, Remove, Filter Menu, Back)
-- health_conscious: User filtering by health/diet → Health options (Veg, Nutrition Info, High Protein, Vegan, All Menu)
+- dietary_inquiry: Diet/allergen questions → (Check Allergens, Add Allergen, Veg Options, Browse Menu)
+- allergen_management: Managing allergens → (Add, Remove, Filter Menu, Browse Menu)
+- health_conscious: Health/diet filtering → (Veg Options, Check Allergens, Browse Menu)
 
 ━━━ HELP & SUPPORT ━━━
-- help_inquiry: User asks for help or has questions → Help options (FAQs, Operating Hours, Policies, Delivery Info, Contact Support)
-- faq_categories: Showing FAQ categories → FAQ topics (Order & Delivery, Payment, Booking, Returns, Back)
-- policy_shown: Showing policies → Policy types (Delivery Policy, Refund Policy, Terms, Back)
+- help_inquiry: Help or questions → (FAQs, Operating Hours, Policies, Contact Info)
+- faq_categories: FAQ categories → (Order & Delivery, Payment, Booking, Browse Menu)
+- policy_shown: Showing policies → (Policies, Browse Menu, Help)
 
 ━━━ ACCOUNT & FAVORITES ━━━
-- my_account: User asks about account/profile → Account options (Order History, Favorites, Feedback, Preferences)
-- my_favorites: Showing favorites → Favorites actions (View, Reorder Favorite, Add New, Back)
-- order_history_shown: Showing past orders → History actions (Reorder, View Receipt, Rate Past Order, Home)
+- my_account: Account/profile → (Order History, Favorites, Feedback, Browse Menu)
+- my_favorites: Favorites → (View Favorites, Browse Menu, View Cart)
+- order_history_shown: Past orders → (Reorder, View Receipt, Browse Menu)
 
 ━━━ FEEDBACK & RATING ━━━
-- feedback_prompt: After delivery, prompting feedback → Feedback options (Rate Order, Leave Feedback, Everything Great!, Later)
-- rating_submitted: User just rated order → Follow-up (Add Comments, Reorder Same, Add to Favorites, Home)
+- feedback_prompt: Prompting feedback → (Rate Order, Leave Feedback, Browse Menu)
+- rating_submitted: Rating submitted → (Add Comments, Reorder, Browse Menu)
 
 ━━━ UTILITY & FALLBACK ━━━
 - continue_ordering: General "anything else?" or continue prompt → General options (Show Menu, View Cart, Checkout, Get Help)

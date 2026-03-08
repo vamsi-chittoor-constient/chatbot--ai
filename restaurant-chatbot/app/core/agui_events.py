@@ -2057,9 +2057,9 @@ def emit_payment_success(
     try:
         if quick_replies is None:
             quick_replies = [
-                {"label": "📄 View Receipt", "action": "view_receipt"},
-                {"label": "📦 Track Order", "action": "track_order"},
-                {"label": "🍽️ Order More", "action": "order_more"}
+                {"label": "🧾 View Receipt", "action": "show receipt"},
+                {"label": "🍔 Order More", "action": "show menu"},
+                {"label": "❓ Help", "action": "help"},
             ]
 
         event = PaymentSuccessEvent(
