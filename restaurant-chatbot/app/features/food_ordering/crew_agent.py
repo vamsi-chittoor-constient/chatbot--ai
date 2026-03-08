@@ -802,6 +802,11 @@ QUICK_ACTION_SETS = {
     # CHECKOUT & PAYMENT
     # (order_type and payment_method removed — handled by OrderTypeCard and auto-payment)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    "order_created": [
+        {"label": "❌ Cancel Order", "action": "cancel my order"},
+        {"label": "🍔 Add More Items", "action": "show menu"},
+        {"label": "❓ Help", "action": "help"},
+    ],
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # POST-ORDER (4 sets)
@@ -1018,6 +1023,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - view_cart_high_value: Cart shown with total > Rs.500 → Highlight promo (Checkout, Apply Promo Code★, Add More, Check Allergens)
 - checkout_options: Before final checkout → Final options (Order Now, Schedule Later, Apply Promo, Back to Cart)
 - cart_empty_reminder: User tries checkout but cart empty → Redirect (Browse Menu, Search Items, Recent Orders, Reorder Last)
+- order_created: Checkout complete, user choosing dine-in/takeaway via card → Supportive actions (Cancel Order, Add More, Help)
 
 ━━━ POST-ORDER ━━━
 - order_confirmed: Order placed (response has "Order ID" but NO payment yet) → Post-order (Track Order, View Receipt, Order More)
@@ -1067,7 +1073,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 9. Receipt shown/displayed → "receipt_shown" (NOT view_cart!)
 10. Search results displayed (response lists menu items with prices) → "menu_displayed"
 11. AI asking "which one" / disambiguating between items → "menu_displayed"
-12. Checkout complete / choosing dine-in or takeaway → "none" (OrderTypeCard handles this)
+12. Checkout complete / choosing dine-in or takeaway → "order_created" (Cancel, Add More, Help — NOT dine-in/takeaway buttons)
 
 🚗 GUIDE PRINCIPLE:
 - Default to showing helpful actions rather than "none"
