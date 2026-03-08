@@ -554,9 +554,15 @@ _EVENT_LOOPS: Dict[str, asyncio.AbstractEventLoop] = {}
 # Tool events (SEARCH_RESULTS, MENU_DATA) are emitted from sync contexts
 # (CrewAI tools in thread pool). Instead of using call_soon_threadsafe which
 # can race with RUN_FINISHED, we stage events here and flush them explicitly.
+#
+# EPOCH SYSTEM: Each message cycle increments an epoch counter. Events are
+# tagged with the epoch at staging time. flush_pending_events only flushes
+# events matching the current epoch, discarding stale events from lingering
+# tool threads of previous crew runs (the root cause of duplicate cards).
 import threading
-_PENDING_EVENTS: Dict[str, List["AGUIEvent"]] = {}  # session_id -> list of events
+_PENDING_EVENTS: Dict[str, List[tuple]] = {}  # session_id -> list of (epoch, event)
 _PENDING_LOCK = threading.Lock()
+_SESSION_EPOCH: Dict[str, int] = {}  # session_id -> current epoch
 
 
 def get_event_queue(session_id: str) -> asyncio.Queue:
@@ -572,26 +578,26 @@ def get_event_queue(session_id: str) -> asyncio.Queue:
 
 
 def clear_event_queue(session_id: str):
-    """Clear event queue AND pending staged events for session.
+    """Clear event queue, pending staged events, and bump epoch for session.
 
-    Must clear both _EVENT_QUEUES (asyncio queue consumed by
-    stream_agui_events_to_websocket) AND _PENDING_EVENTS (staging
-    area used by _put_event_threadsafe from sync crew tool contexts).
-    Without clearing _PENDING_EVENTS, stale events from previous crew
-    runs (e.g. RECEIPT_LINK) leak into future flush_pending_events calls.
+    Bumping the epoch ensures any lingering tool threads from previous crew
+    runs will have their events discarded by flush_pending_events (they carry
+    the old epoch tag).
     """
     if session_id in _EVENT_QUEUES:
         del _EVENT_QUEUES[session_id]
     if session_id in _EVENT_LOOPS:
         del _EVENT_LOOPS[session_id]
     with _PENDING_LOCK:
+        # Bump epoch — all events staged by old threads will be stale
+        _SESSION_EPOCH[session_id] = _SESSION_EPOCH.get(session_id, 0) + 1
         if session_id in _PENDING_EVENTS:
             stale = _PENDING_EVENTS.pop(session_id)
             if stale:
                 logger.info("stale_pending_events_cleared",
                             session_id=session_id,
                             count=len(stale),
-                            types=[e.type.value for e in stale])
+                            types=[e.type.value for _, e in stale])
 
 
 def _put_event_threadsafe(session_id: str, event: "AGUIEvent"):
@@ -599,36 +605,44 @@ def _put_event_threadsafe(session_id: str, event: "AGUIEvent"):
     Thread-safe staging of events for later flush.
 
     Called from sync contexts (like CrewAI tools running in thread pool).
-    Events are staged in _PENDING_EVENTS and flushed explicitly before RUN_FINISHED.
-    This guarantees tool events (SEARCH_RESULTS, MENU_DATA) reach the queue
-    before RUN_FINISHED, preventing race conditions.
+    Events are tagged with the current session epoch so that stale events
+    from lingering threads of previous crew runs are discarded on flush.
     """
     with _PENDING_LOCK:
+        epoch = _SESSION_EPOCH.get(session_id, 0)
         if session_id not in _PENDING_EVENTS:
             _PENDING_EVENTS[session_id] = []
-        _PENDING_EVENTS[session_id].append(event)
-        # INFO level for visibility during testing
+        _PENDING_EVENTS[session_id].append((epoch, event))
         logger.info("event_staged", session_id=session_id, event_type=event.type.value,
-                    pending_count=len(_PENDING_EVENTS[session_id]))
+                    epoch=epoch, pending_count=len(_PENDING_EVENTS[session_id]))
 
 
 def flush_pending_events(session_id: str) -> int:
     """
-    Flush all pending tool events to the queue. MUST be called before RUN_FINISHED.
+    Flush pending tool events to the queue, discarding stale-epoch events.
 
-    This function is called from async context (process_with_agui_streaming)
-    and synchronously moves all staged events into the asyncio.Queue.
+    Only events tagged with the CURRENT session epoch are flushed.
+    Events from lingering tool threads of previous crew runs (old epoch)
+    are silently discarded — this prevents duplicate cards.
 
     Returns:
         Number of events flushed
     """
     queue = get_event_queue(session_id)
     flushed_count = 0
+    discarded_count = 0
 
     with _PENDING_LOCK:
-        events = _PENDING_EVENTS.pop(session_id, [])
+        current_epoch = _SESSION_EPOCH.get(session_id, 0)
+        tagged_events = _PENDING_EVENTS.pop(session_id, [])
 
-    for event in events:
+    for epoch, event in tagged_events:
+        if epoch != current_epoch:
+            discarded_count += 1
+            logger.info("stale_event_discarded", session_id=session_id,
+                        event_type=event.type.value, event_epoch=epoch,
+                        current_epoch=current_epoch)
+            continue
         try:
             queue.put_nowait(event)
             flushed_count += 1
@@ -636,10 +650,9 @@ def flush_pending_events(session_id: str) -> int:
         except Exception as e:
             logger.error("event_flush_failed", session_id=session_id, event_type=event.type.value, error=str(e))
 
-    if flushed_count > 0:
-        logger.info("events_flushed_total", session_id=session_id, count=flushed_count)
-    else:
-        logger.info("no_events_to_flush", session_id=session_id)
+    if flushed_count > 0 or discarded_count > 0:
+        logger.info("events_flushed_total", session_id=session_id,
+                    flushed=flushed_count, discarded=discarded_count)
 
     return flushed_count
 
