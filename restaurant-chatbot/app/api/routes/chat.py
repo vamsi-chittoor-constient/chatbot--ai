@@ -1333,6 +1333,16 @@ async def chat_endpoint(
 
         # Main message loop
         while True:
+            # Clear stale AGUI events at the START of every message cycle.
+            # This prevents leftover events (RECEIPT_LINK, MENU_DATA, etc.)
+            # from previous crew runs leaking into interceptor-handled messages
+            # that call stream_agui_events_to_websocket.
+            try:
+                from app.core.agui_events import clear_event_queue as _ceq_top
+                _ceq_top(session_id)
+            except Exception:
+                pass
+
             # Receive message from client
             try:
                 raw_message = await websocket.receive_text()

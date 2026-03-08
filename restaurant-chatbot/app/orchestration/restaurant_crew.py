@@ -42,7 +42,7 @@ _CREW_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CREWS)
 
 # Crew cache by session
 _CREW_CACHE: Dict[str, Crew] = {}
-_CREW_VERSION = 51  # v51: Restore deterministic order type handler, add select_order_type to RAG, receipt for invoice/bill
+_CREW_VERSION = 52  # v52: Clear stale AGUI event queue at top of every message cycle to prevent duplicate cards
 
 
 async def _translate_response(text: str, target_language: str) -> str:
