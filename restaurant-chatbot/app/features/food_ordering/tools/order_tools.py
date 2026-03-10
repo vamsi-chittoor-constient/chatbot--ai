@@ -43,6 +43,9 @@ from app.utils.list_formatter import (
 )
 # Phone normalization utility
 from app.utils.phone_utils import normalize_phone_number
+# PetPooja Kitchen Sync
+from app.core.feature_flags import FeatureFlags, Feature
+from app.services.enhanced.petpooja_sync_service import get_petpooja_sync_service
 
 logger = get_feature_logger("food_ordering")
 
@@ -193,6 +196,62 @@ class CreateOrderTool(ToolBase):
                 await session.commit()
                 await session.refresh(new_order)
 
+                # ==========================================================
+                # PETPOOJA KITCHEN SYNC (after order is safely saved in DB)
+                # ==========================================================
+                petpooja_sync_result = None
+                if FeatureFlags.is_enabled(Feature.PETPOOJA_ORDER_SYNC):
+                    try:
+                        sync_service = get_petpooja_sync_service()
+
+                        # Load order items with menu item details
+                        items_query = select(OrderItem).where(
+                            OrderItem.order_id == new_order.order_id
+                        ).options(selectinload(OrderItem.menu_item))
+                        items_result = await session.execute(items_query)
+                        order_items = items_result.scalars().all()
+
+                        # Build menu_items_map for transformer
+                        menu_items_map = {}
+                        for oi in order_items:
+                            if oi.menu_item:
+                                menu_items_map[str(oi.menu_item_id)] = oi.menu_item
+
+                        sync_order_data = {
+                            "order": new_order,
+                            "order_type": kwargs.get("order_type", ""),
+                            "order_total": new_order.totals,
+                            "order_items": order_items,
+                            "menu_items_map": menu_items_map,
+                            "variations_map": {},
+                            "customer_phone": kwargs.get("contact_phone", ""),
+                            "customer_email": "",
+                            "customer_profile": None,
+                            "customer_address": None,
+                            "order_charges": [],
+                            "order_taxes": [],
+                            "order_discounts": [],
+                            "delivery_info": None,
+                            "dining_info": None,
+                            "scheduling_info": None,
+                            "instruction_info": None,
+                            "payment_method": "COD",
+                            "restaurant_info": {
+                                "petpooja_mapping_code": "czw6b9ykas",
+                                "petpooja_restaurantid": "czw6b9ykas",
+                                "branch_name": "Main Branch",
+                            },
+                        }
+
+                        petpooja_sync_result = await sync_service.sync_order_to_kitchen(sync_order_data)
+                        logger.info(
+                            f"PetPooja sync for order {new_order.order_number}: "
+                            f"synced={petpooja_sync_result.get('synced', False)}"
+                        )
+                    except Exception as e:
+                        logger.error(f"PetPooja sync failed for order {new_order.order_number}: {str(e)}")
+                        petpooja_sync_result = {"synced": False, "error": str(e)}
+
                 # Serialize order response using schema
                 order_data = serialize_output_with_schema(
                     OrderResponse,
@@ -201,10 +260,14 @@ class CreateOrderTool(ToolBase):
                     from_orm=True
                 )
 
+                metadata = {"operation": "create_order"}
+                if petpooja_sync_result:
+                    metadata["petpooja_sync"] = petpooja_sync_result
+
                 return ToolResult(
                     status=ToolStatus.SUCCESS,
                     data=order_data,
-                    metadata={"operation": "create_order"}
+                    metadata=metadata
                 )
 
         except Exception as e:
