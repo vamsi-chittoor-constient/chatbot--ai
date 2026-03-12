@@ -304,7 +304,7 @@ function ChatInterface() {
 
       {/* Header */}
       <header className="bg-chat-secondary border-b border-chat-border px-5 py-3 flex items-center justify-between">
-        <h1 className="text-base font-semibold">Restaurant AI Assistant</h1>
+        <h1 className="text-base font-semibold">ALDEEL</h1>
         <StatusIndicator />
       </header>
 
