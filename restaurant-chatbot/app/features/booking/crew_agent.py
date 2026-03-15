@@ -492,7 +492,8 @@ def check_table_availability(date: str, time: str = "7pm", party_size: int = 2) 
             return f"Could not understand the date/time '{date} {time}'. Please try formats like 'tomorrow 7pm' or '2024-12-15 19:00'."
 
         # Check if booking is in the past
-        if booking_dt < datetime.now():
+        from app.utils.timezone import get_current_time
+        if booking_dt < get_current_time().replace(tzinfo=None):
             return "Cannot check availability for past dates. Please choose a future date."
 
         # Get available tables
@@ -582,7 +583,8 @@ def create_booking_tool(session_id: str):
             if not booking_dt:
                 return "Could not understand date/time. Please use format like 'tomorrow 7pm'."
 
-            if booking_dt < datetime.now():
+            from app.utils.timezone import get_current_time
+            if booking_dt < get_current_time().replace(tzinfo=None):
                 return "Cannot book for past dates."
 
             # Get available tables from PostgreSQL
@@ -765,6 +767,7 @@ def create_modify_booking_tool(session_id: str):
         new_date: str = "",
         new_time: str = "",
         new_party_size: int = 0,
+        guest_name: str = "",
         special_requests: str = ""
     ) -> str:
         """
@@ -777,6 +780,7 @@ def create_modify_booking_tool(session_id: str):
             new_date: New date (optional, e.g., "tomorrow", "next Friday")
             new_time: New time (optional, e.g., "8pm", "19:30")
             new_party_size: New number of guests (optional, 0 means no change)
+            guest_name: New guest name (optional)
             special_requests: Special requests like dietary needs (optional)
 
         Returns:
@@ -827,7 +831,8 @@ def create_modify_booking_tool(session_id: str):
                         time_str = new_time if new_time else current_time.strftime("%I:%M %p")
                         new_dt = _parse_booking_datetime(date_str, time_str)
 
-                        if new_dt and new_dt > datetime.now():
+                        from app.utils.timezone import get_current_time
+                        if new_dt and new_dt > get_current_time().replace(tzinfo=None):
                             # Check availability for new time
                             party = new_party_size if new_party_size > 0 else booking['party_size']
                             available = _get_available_tables(new_dt, party)
@@ -847,6 +852,12 @@ def create_modify_booking_tool(session_id: str):
                         update_fields.append("party_size = %s")
                         update_values.append(new_party_size)
                         changes.append(f"Party size changed to {new_party_size}")
+
+                    # Handle guest name change
+                    if guest_name and guest_name.strip():
+                        update_fields.append("guest_name = %s")
+                        update_values.append(guest_name.strip())
+                        changes.append(f"Guest name changed to {guest_name.strip()}")
 
                     # Handle special requests (A24 uses special_request singular)
                     if special_requests:
@@ -921,7 +932,14 @@ Your strengths:
 
 You understand that reservations often involve special moments - celebrations, business dinners, romantic dates - and you treat each booking with care and enthusiasm. Your communication style is warm yet professional, and you use your tools to ensure every detail is accurate and confirmed.
 
-You excel at finding creative solutions when preferred times are unavailable, always offering alternatives that work for the customer.""",
+You excel at finding creative solutions when preferred times are unavailable, always offering alternatives that work for the customer.
+
+CRITICAL RULES:
+- NEVER ask for information the customer has already provided. If they gave you a date, time, party size, or name, USE IT immediately.
+- Once a booking is confirmed with a confirmation code, DO NOT ask for the date/time/party size again. The booking is complete.
+- If a table is already booked or unavailable, suggest 2-3 alternative times and let the customer choose. Do NOT keep asking the same question.
+- If all required details (date, time, party size) are provided in a single message, proceed directly to booking without asking again.
+- NEVER repeat a greeting or welcome message during a booking conversation.""",
         llm=llm,
         tools=[check_table_availability, booking_tool, get_bookings_tool, modify_tool, cancel_tool],
         verbose=False,

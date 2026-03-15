@@ -19,6 +19,7 @@ from enum import Enum
 import structlog
 
 from app.core.redis import get_sync_redis_client
+from app.utils.timezone import get_current_time
 
 logger = structlog.get_logger("services.payment_state")
 
@@ -80,7 +81,7 @@ def get_payment_state(session_id: str) -> Dict[str, Any]:
         "amount": 0.0,
         "payment_id": None,
         "completed": False,
-        "created_at": datetime.now().isoformat()
+        "created_at": get_current_time().isoformat()
     }
 
 
@@ -100,7 +101,7 @@ def set_payment_state(session_id: str, state: Dict[str, Any], ttl_hours: int = 2
     key = _get_payment_state_key(session_id)
 
     try:
-        state["updated_at"] = datetime.now().isoformat()
+        state["updated_at"] = get_current_time().isoformat()
         redis.setex(key, timedelta(hours=ttl_hours), json.dumps(state))
         logger.debug("payment_state_saved", session_id=session_id, step=state.get("step"))
         return True
@@ -141,7 +142,7 @@ def init_payment_workflow(
         "amount": amount,
         "payment_id": None,
         "completed": False,
-        "created_at": datetime.now().isoformat()
+        "created_at": get_current_time().isoformat()
     }
 
     # Store items for receipt generation
@@ -235,7 +236,7 @@ def mark_payment_success(
     state["step"] = PaymentStep.PAYMENT_SUCCESS.value
     state["payment_id"] = payment_id
     state["completed"] = True
-    state["completed_at"] = datetime.now().isoformat()
+    state["completed_at"] = get_current_time().isoformat()
 
     set_payment_state(session_id, state)
 
@@ -268,7 +269,7 @@ def mark_payment_failed(
     state["step"] = PaymentStep.PAYMENT_FAILED.value
     state["error"] = error
     state["completed"] = True
-    state["failed_at"] = datetime.now().isoformat()
+    state["failed_at"] = get_current_time().isoformat()
 
     set_payment_state(session_id, state)
 

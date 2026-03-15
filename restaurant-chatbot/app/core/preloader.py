@@ -233,13 +233,26 @@ class MenuPreloader:
                     (is_drink_search and item.get("subcategory", "").lower() == "beverages"))
             ]
 
+            # Stage 1.5: Word-level substring match (handles multi-word queries like "fresh juice")
+            if not matched_items:
+                query_words = [w for w in query_lower.split() if len(w) > 2]
+                if query_words:
+                    matched_items = [
+                        item for item in available_items
+                        if all(
+                            any(word in item.get(field, "").lower()
+                                for field in ("name", "description", "subcategory"))
+                            for word in query_words
+                        )
+                    ]
+
             # Stage 2: Fuzzy match fallback for spelling variations
             # (e.g. "paratha" vs "parota", "biriyani" vs "biryani")
             if not matched_items and len(query_lower) >= 4:
                 from difflib import SequenceMatcher
                 matched_items = [
                     item for item in available_items
-                    if SequenceMatcher(None, query_lower, item.get("name", "").lower()).ratio() >= 0.65
+                    if SequenceMatcher(None, query_lower, item.get("name", "").lower()).ratio() >= 0.80
                 ]
                 if matched_items:
                     logger.info("search_fuzzy_fallback", query=query, matches=len(matched_items))
@@ -354,8 +367,8 @@ class MenuPreloader:
                 best_ratio = ratio
                 best_match = item
 
-        # Require at least 75% similarity to avoid false positives
-        if best_ratio >= 0.75 and best_match:
+        # Require at least 80% similarity to avoid false positives
+        if best_ratio >= 0.80 and best_match:
             logger.info(
                 "find_item_fuzzy_match",
                 query=name,

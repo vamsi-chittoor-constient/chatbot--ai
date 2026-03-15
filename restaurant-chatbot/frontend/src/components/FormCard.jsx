@@ -5,7 +5,18 @@ export const FormCard = ({ data, onSubmit, onCancel }) => {
   const { formType, fields, title: customTitle, description, submit_label, cancel_label } = data
   const [formData, setFormData] = useState({})
 
-  const handleChange = (name, value) => {
+  const handleChange = (name, value, field) => {
+    // For phone fields, only allow digits (and optional leading +)
+    if (field && (field.type === 'tel' || field.name === 'phone')) {
+      // Allow only digits and a leading +
+      const cleaned = value.replace(/[^0-9+]/g, '')
+      // Ensure + only at start, max 13 chars (+91 + 10 digits)
+      const normalized = cleaned.startsWith('+')
+        ? '+' + cleaned.slice(1).replace(/\+/g, '').slice(0, 12)
+        : cleaned.replace(/\+/g, '').slice(0, 10)
+      setFormData(prev => ({ ...prev, [name]: normalized }))
+      return
+    }
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
@@ -74,7 +85,7 @@ export const FormCard = ({ data, onSubmit, onCancel }) => {
         return [{ name: 'otp', label: 'OTP Code', type: 'text', placeholder: 'Enter 6-digit OTP', maxLength: 6 }]
       case 'phone':
       case 'phone_auth':
-        return [{ name: 'phone', label: 'Mobile Number', type: 'tel', placeholder: '+91 XXXXX XXXXX' }]
+        return [{ name: 'phone', label: 'Mobile Number', type: 'tel', placeholder: '+91 XXXXX XXXXX', maxLength: 13 }]
       default:
         return [{ name: 'value', label: 'Value', type: 'text', placeholder: 'Enter value' }]
     }
@@ -117,7 +128,7 @@ export const FormCard = ({ data, onSubmit, onCancel }) => {
               name={field.name}
               placeholder={field.placeholder || ''}
               value={formData[field.name] || ''}
-              onChange={(e) => handleChange(field.name, e.target.value)}
+              onChange={(e) => handleChange(field.name, e.target.value, field)}
               maxLength={field.maxLength}
               minLength={field.minLength}
               className="w-full px-3 py-2.5 bg-chat-bg border border-chat-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-accent transition-colors"

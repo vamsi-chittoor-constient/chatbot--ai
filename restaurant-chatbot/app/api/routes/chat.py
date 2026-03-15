@@ -877,6 +877,23 @@ async def chat_endpoint(
                             if not phone_number.startswith("+"):
                                 phone_number = "+91" + phone_number.lstrip("0")
 
+                            # Validate: must be digits only (after +), exactly 10 digits (Indian mobile)
+                            digits_only = phone_number.lstrip("+")
+                            if not digits_only.isdigit() or len(digits_only) < 10 or len(digits_only) > 12:
+                                print(f"[DEBUG] Invalid phone number format: {phone_number}")
+                                from app.core.agui_events import AGUIEventEmitter
+                                err_emitter = AGUIEventEmitter(session_id)
+                                err_emitter.emit_phone_auth_form(restaurant.get("name", "our restaurant"))
+                                from app.core.agui_events import flush_pending_events as _flush_err
+                                _flush_err(session_id)
+                                await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+                                await websocket_manager.send_message(
+                                    session_id=session_id,
+                                    message="Please enter a valid 10-digit mobile number.",
+                                    message_type="ai_response"
+                                )
+                                continue
+
                             logger.info(
                                 "Phone number received",
                                 session_id=session_id,

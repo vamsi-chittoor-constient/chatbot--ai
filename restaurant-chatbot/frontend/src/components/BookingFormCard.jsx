@@ -29,10 +29,9 @@ export const BookingFormCard = ({ data, onSubmit }) => {
     return dates
   }, [availability])
 
-  // Min date for date input = tomorrow
+  // Min date for date input = today (backend validates time is in future)
   const minDate = useMemo(() => {
     const d = new Date()
-    d.setDate(d.getDate() + 1)
     return d.toISOString().split('T')[0]
   }, [])
 

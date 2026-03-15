@@ -6,7 +6,8 @@ Generates PDF receipts from payment state data using reportlab.
 
 import io
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
+from app.utils.timezone import get_current_time, get_app_timezone
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -129,11 +130,15 @@ def generate_receipt_pdf(payment_state: Dict[str, Any]) -> bytes:
     if completed_at:
         try:
             dt = datetime.fromisoformat(completed_at)
+            # Convert to IST if naive (assumed UTC)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=dt_timezone.utc)
+            dt = dt.astimezone(get_app_timezone())
             date_str = dt.strftime("%B %d, %Y at %I:%M %p")
         except (ValueError, TypeError):
             date_str = completed_at
     else:
-        date_str = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        date_str = get_current_time().strftime("%B %d, %Y at %I:%M %p")
 
     info_data = [
         ["Order Number:", str(order_number)],
@@ -265,7 +270,7 @@ def generate_receipt_pdf(payment_state: Dict[str, Any]) -> bytes:
     elements.append(Paragraph("Thank you for your order!", center_style))
     elements.append(Spacer(1, 2 * mm))
     elements.append(Paragraph(
-        f"Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}",
+        f"Generated on {get_current_time().strftime('%B %d, %Y at %I:%M %p')}",
         center_style,
     ))
 

@@ -264,7 +264,12 @@ def is_valid_booking_time(dt: datetime, min_advance_hours: int = 1) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    now = datetime.now(dt.tzinfo)
+    from app.utils.timezone import get_current_time
+    now = get_current_time()
+    # Make dt timezone-aware if naive
+    if dt.tzinfo is None:
+        from app.utils.timezone import get_app_timezone
+        dt = dt.replace(tzinfo=get_app_timezone())
     min_time = now + timedelta(hours=min_advance_hours)
 
     return dt >= min_time

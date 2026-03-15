@@ -1031,7 +1031,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 📋 Available Action Sets (43 total):
 
 ━━━ ENTRY & WELCOME ━━━
-- greeting_welcome: User greets (hi/hello/hey) or response welcomes user → Show main features (Order, View Cart, Deals, Help)
+- greeting_welcome: ONLY for initial welcome message at start of conversation. Do NOT use mid-conversation even if user says hi again → Show main features (Order, View Cart, Deals, Help)
 - explore_features: User asks "what can you do" or capabilities → Show all major features (Order, Track, Allergens, Offers, Help)
 - first_time_user: New user with no history → Show onboarding options (Browse Menu, Search, Specials, Dietary, How It Works)
 
@@ -1088,7 +1088,7 @@ QUICK_REPLY_AGENT_PROMPT = """You are a quick action selector for a restaurant c
 - none: ONLY for purely informational responses with NO next action (rare - default to helpful actions!)
 
 🎯 CRITICAL DECISION RULES:
-1. Welcome/greeting → "greeting_welcome"
+1. Welcome/greeting → "greeting_welcome" (ONLY for the very first welcome message. If user is mid-conversation and says hi again, use "continue_ordering" instead. NEVER use greeting_welcome after orders, payments, or menu interactions.)
 2. Menu shown → "menu_displayed"
 3. Item added → "added_to_cart" OR "added_to_cart_with_upsell" (if burger/pizza/main dish)
 4. Cart shown + total > Rs.500 → "view_cart_high_value" (highlight promo!)
@@ -1382,12 +1382,17 @@ def create_search_menu_tool(session_id: str):
                 all_items = preloader.menu if preloader.is_loaded else []
 
                 # Find items that might be similar (contain any word from query)
-                query_words = query.lower().split()
+                # Require ALL significant query words to match to avoid false positives
+                # (e.g. "fresh juice" shouldn't match "french fries" just because "fre" is similar)
+                query_words = [w for w in query.lower().split() if len(w) > 2]
                 logger.info(f"searching_for_similar_items", query=query, query_words=query_words, total_items_to_search=len(all_items))
                 similar_items = []
                 for menu_item in all_items:  # Check all items
                     item_name = menu_item.get('name', '').lower()
-                    if any(word in item_name for word in query_words if len(word) > 2):
+                    item_desc = menu_item.get('description', '').lower()
+                    item_cat = menu_item.get('subcategory', '').lower()
+                    item_text = f"{item_name} {item_desc} {item_cat}"
+                    if all(word in item_text for word in query_words):
                         similar_items.append(menu_item)
                     if len(similar_items) >= 10:  # Limit to 10 suggestions
                         break
@@ -4311,6 +4316,13 @@ After adding items to cart, suggest complementary items naturally:
 - Only drinks in cart → "How about a snack to go with your drink?"
 - Cart total > ₹500 → "Great order! Want to add a dessert to round it off?"
 Keep suggestions brief, natural, and non-pushy. Only suggest once per add-to-cart, not repeatedly.
+
+**Table Booking (CRITICAL - Avoid Loops):**
+- When customer provides date, time, and party size, proceed DIRECTLY to make_reservation. Do NOT re-ask for details already provided.
+- Once a booking is confirmed (confirmation code generated), the booking is COMPLETE. Do NOT ask for date/time/party size again.
+- If a table is unavailable, suggest 2-3 alternative times and WAIT for customer response. Do NOT keep asking the same question.
+- If customer says "book a table" without details, show the booking form using show_booking_form tool.
+- NEVER repeat: "Could you please provide the date, time, party size..." if the customer already gave these details.
 
 **Checkout & Payment Flow:**
 When customer says "checkout" / "place order" → call checkout tool. This creates the order and shows payment options.
