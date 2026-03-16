@@ -38,6 +38,83 @@ import json
 logger = structlog.get_logger("workflows.payment")
 
 
+async def _sync_order_to_petpooja(
+    db_order_id, order_id: str, pending_order: dict, amount: float,
+    payment_method: str, session_id: str
+):
+    """Push confirmed order to PetPooja kitchen after DB commit."""
+    try:
+        from app.core.feature_flags import FeatureFlags, Feature
+        if not FeatureFlags.is_enabled(Feature.PETPOOJA_ORDER_SYNC):
+            return
+
+        from app.services.enhanced.petpooja_sync_service import get_petpooja_sync_service
+        from app.core.database import get_db_session
+        from app.features.food_ordering.models import Order, OrderItem
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        sync_service = get_petpooja_sync_service()
+
+        async with get_db_session() as db_session:
+            # Load order with items and menu item details
+            order_result = await db_session.execute(
+                select(Order).where(Order.order_id == db_order_id)
+            )
+            order = order_result.scalar_one_or_none()
+            if not order:
+                logger.warning("petpooja_sync_order_not_found", order_id=str(db_order_id))
+                return
+
+            items_result = await db_session.execute(
+                select(OrderItem).where(OrderItem.order_id == db_order_id)
+                .options(selectinload(OrderItem.menu_item))
+            )
+            order_items = items_result.scalars().all()
+
+            menu_items_map = {}
+            for oi in order_items:
+                if oi.menu_item:
+                    menu_items_map[str(oi.menu_item_id)] = oi.menu_item
+
+            sync_order_data = {
+                "order": order,
+                "order_type": pending_order.get("order_type", "takeaway"),
+                "order_total": order.totals if hasattr(order, "totals") else None,
+                "order_items": order_items,
+                "menu_items_map": menu_items_map,
+                "variations_map": {},
+                "customer_phone": pending_order.get("phone", ""),
+                "customer_email": "",
+                "customer_profile": None,
+                "customer_address": None,
+                "order_charges": [],
+                "order_taxes": [],
+                "order_discounts": [],
+                "delivery_info": None,
+                "dining_info": None,
+                "scheduling_info": None,
+                "instruction_info": None,
+                "payment_method": payment_method,
+                "restaurant_info": {
+                    "petpooja_mapping_code": "czw6b9ykas",
+                    "petpooja_restaurantid": "czw6b9ykas",
+                    "branch_name": "Main Branch",
+                },
+            }
+
+            result = await sync_service.sync_order_to_kitchen(sync_order_data)
+            logger.info(
+                "petpooja_order_sync_result",
+                order_id=str(db_order_id),
+                display_id=order_id,
+                synced=result.get("synced", False),
+                reason=result.get("reason", ""),
+            )
+    except Exception as e:
+        logger.error("petpooja_order_sync_failed", order_id=str(db_order_id), error=str(e))
+
+
 class PaymentWorkflowState(TypedDict):
     """Payment workflow state"""
     session_id: str
@@ -343,6 +420,11 @@ async def handle_cash_payment_node(state: PaymentWorkflowState) -> PaymentWorkfl
                 session_id=session_id
             )
 
+        # Push to PetPooja kitchen
+        await _sync_order_to_petpooja(
+            db_order_id, order_id, pending_order, amount, "COD", session_id
+        )
+
     state["method"] = PaymentMethod.CASH.value
     state["step"] = PaymentStep.CASH_SELECTED.value
 
@@ -431,6 +513,11 @@ async def handle_card_counter_payment_node(state: PaymentWorkflowState) -> Payme
                 display_id=order_id,
                 session_id=session_id
             )
+
+        # Push to PetPooja kitchen
+        await _sync_order_to_petpooja(
+            db_order_id, order_id, pending_order, amount, "CARD", session_id
+        )
 
     state["method"] = PaymentMethod.CARD_AT_COUNTER.value
     state["step"] = PaymentStep.CASH_SELECTED.value

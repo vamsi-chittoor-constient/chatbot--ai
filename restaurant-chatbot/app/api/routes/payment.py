@@ -362,6 +362,26 @@ async def payment_callback(
                         except Exception as e:
                             logger.warning("mark_payment_success_failed", session_id=session_id, error=str(e))
 
+                    # Push confirmed order to PetPooja kitchen
+                    if session_id:
+                        try:
+                            from app.workflows.payment_workflow import _sync_order_to_petpooja
+                            import json as _sync_json
+                            from app.core.redis import get_sync_redis_client as _sync_redis
+                            _r = _sync_redis()
+                            _po_data = _r.get(f"pending_order:{session_id}")
+                            _pending = _sync_json.loads(_po_data) if _po_data else {}
+                            await _sync_order_to_petpooja(
+                                payment_order.order_id,
+                                str(order.order_invoice_number) if order else "",
+                                _pending,
+                                float(payment_order.order_amount) if payment_order.order_amount else 0,
+                                "ONLINE",
+                                session_id
+                            )
+                        except Exception as e:
+                            logger.warning("petpooja_sync_after_payment_failed", session_id=session_id, error=str(e))
+
                     # Send WebSocket notification to chat
                     # NOTE: Must send directly via WebSocket (not AGUI event queue)
                     # because the agui_task consumer has already exited after the

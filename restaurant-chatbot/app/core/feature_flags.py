@@ -171,7 +171,7 @@ class FeatureFlags:
     # Feature flag state (loaded from environment variables)
     _flags = {
         # Food Ordering - Default: DISABLED
-        Feature.PETPOOJA_ORDER_SYNC: os.getenv("ENABLE_PETPOOJA_SYNC", "false").lower() == "true",
+        Feature.PETPOOJA_ORDER_SYNC: os.getenv("ENABLE_PETPOOJA_SYNC", "true").lower() == "true",
         Feature.ORDER_STATUS_TRACKING: os.getenv("ENABLE_ORDER_TRACKING", "false").lower() == "true",
         Feature.ADVANCED_ORDER_VALIDATION: os.getenv("ENABLE_ADVANCED_VALIDATION", "false").lower() == "true",
 
