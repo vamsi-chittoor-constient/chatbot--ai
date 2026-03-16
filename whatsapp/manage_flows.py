@@ -204,8 +204,10 @@ def auto_provision_flows() -> Dict[str, str]:
                 # Re-upload latest JSON in case it changed, then publish
                 _log(f"Draft — re-uploading JSON and publishing")
                 if upload_json(flow_id, json_file):
-                    publish_flow(flow_id)
-                result[key] = flow_id
+                    if publish_flow(flow_id):
+                        result[key] = flow_id
+                    else:
+                        _log(f"Flow {flow_id} still DRAFT (publish failed) — will use fallback", "WARN")
                 continue
 
             else:
@@ -219,7 +221,10 @@ def auto_provision_flows() -> Dict[str, str]:
             continue
 
         if upload_json(flow_id, json_file):
-            publish_flow(flow_id)
+            if publish_flow(flow_id):
+                result[key] = flow_id
+            else:
+                _log(f"Flow {flow_id} created but publish failed — will use fallback", "WARN")
         else:
             _log(f"Flow {flow_id} created but JSON upload failed — left in DRAFT", "WARN")
 
