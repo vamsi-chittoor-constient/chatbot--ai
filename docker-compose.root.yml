@@ -270,6 +270,8 @@ services:
     environment:
       # Override WebSocket URL to use Docker service name
       - CHATBOT_WS_BASE_URL=ws://chatbot-app:8000/api/v1/chat
+      # Enable WhatsApp Flows (item selection, cart management, booking)
+      - USE_WHATSAPP_FLOWS=true
       # Logging
       - LOG_LEVEL=INFO
     depends_on:
