@@ -130,10 +130,12 @@ def generate_receipt_pdf(payment_state: Dict[str, Any]) -> bytes:
     if completed_at:
         try:
             dt = datetime.fromisoformat(completed_at)
-            # Convert to IST if naive (assumed UTC)
+            # completed_at is stored via get_current_time() which returns IST
+            # If naive (no tz info), it's already IST — do NOT assume UTC
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=dt_timezone.utc)
-            dt = dt.astimezone(get_app_timezone())
+                dt = dt.replace(tzinfo=get_app_timezone())
+            else:
+                dt = dt.astimezone(get_app_timezone())
             date_str = dt.strftime("%B %d, %Y at %I:%M %p")
         except (ValueError, TypeError):
             date_str = completed_at

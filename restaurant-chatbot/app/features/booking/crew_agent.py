@@ -486,6 +486,10 @@ def check_table_availability(date: str, time: str = "7pm", party_size: int = 2) 
     # Note: This tool doesn't have session_id, so we can't emit activity here
     # Activity will be emitted from restaurant_crew.py before crew.kickoff()
     try:
+        # Guard: check if any tables exist in the database
+        if not _get_table_capacities():
+            return "Table booking is not available at this time. Please contact the restaurant directly to reserve a table."
+
         # Parse datetime
         booking_dt = _parse_booking_datetime(date, time)
         if not booking_dt:
@@ -531,6 +535,10 @@ def create_show_booking_form_tool(session_id: str):
         emit_tool_activity(session_id, "show_booking_form")
 
         try:
+            # Guard: check if any tables exist in the database
+            if not _get_table_capacities():
+                return "Table booking is not available at this time. Please contact the restaurant directly to reserve a table."
+
             # Query real availability from database
             availability = _get_availability_map(days=7)
             emit_booking_intake_form(
@@ -576,6 +584,18 @@ def create_booking_tool(session_id: str):
         # Emit activity for frontend
         from app.core.agui_events import emit_tool_activity
         emit_tool_activity(session_id, "make_reservation")
+
+        # CODE-LEVEL DEDUP: Prevent booking loops by checking if a booking was just made
+        try:
+            from app.core.redis import get_sync_redis_client
+            _redis = get_sync_redis_client()
+            _recent_booking_key = f"session:{session_id}:recent_booking"
+            _recent = _redis.get(_recent_booking_key)
+            if _recent:
+                logger.info("booking_dedup_hit", session_id=session_id)
+                return f"You already have a confirmed reservation: {_recent.decode() if isinstance(_recent, bytes) else _recent}. No need to book again!"
+        except Exception as e:
+            logger.warning("booking_dedup_check_failed", error=str(e))
 
         try:
             # Parse datetime
@@ -626,6 +646,14 @@ def create_booking_tool(session_id: str):
                 table_number=str(best_table['table_number']),
                 table_location=best_table.get('location', ''),
             )
+
+            # Store recent booking in Redis to prevent duplicate booking loops
+            try:
+                _dedup_summary = f"Code: {confirmation_code}, Table {best_table['table_number']} for {party_size} on {booking_dt.strftime('%A, %B %d at %I:%M %p')}"
+                _redis = get_sync_redis_client()
+                _redis.setex(f"session:{session_id}:recent_booking", 120, _dedup_summary)
+            except Exception:
+                pass
 
             # Build response with table details
             location_info = f" ({best_table['location']})" if best_table.get('location') else ""

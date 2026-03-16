@@ -16,6 +16,7 @@ This eliminates first-message latency by:
 """
 
 import os
+import re
 import asyncio
 import threading
 from contextvars import ContextVar
@@ -24,6 +25,18 @@ from queue import Queue, Empty
 from dataclasses import dataclass
 from contextlib import contextmanager
 import structlog
+
+from crewai.tools import tool
+from app.core.redis import get_cart, save_cart, clear_cart as clear_cart_redis
+from app.core.agui_events import (
+    emit_tool_activity_async, emit_menu_data_async,
+    emit_cart_data_async
+)
+from app.core.preloader import get_menu_preloader, get_current_meal_period
+from app.core.semantic_context import get_entity_graph
+from app.features.food_ordering.crew_agent import (
+    _get_menu_from_preloader, _infer_category
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -130,6 +143,8 @@ class SessionContext:
     """Context that gets bound to tools at request time."""
     session_id: str
     user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    phone: Optional[str] = None
 
 
 # ContextVar for coroutine-safe session context
@@ -137,9 +152,9 @@ class SessionContext:
 _session_context: ContextVar[Optional[SessionContext]] = ContextVar('session_context', default=None)
 
 
-def set_session_context(session_id: str, user_id: Optional[str] = None):
+def set_session_context(session_id: str, user_id: Optional[str] = None, user_name: Optional[str] = None, phone: Optional[str] = None):
     """Set session context for current coroutine/task."""
-    _session_context.set(SessionContext(session_id=session_id, user_id=user_id))
+    _session_context.set(SessionContext(session_id=session_id, user_id=user_id, user_name=user_name, phone=phone))
 
 
 def get_session_context() -> Optional[SessionContext]:
@@ -166,6 +181,22 @@ def get_current_user_id() -> Optional[str]:
     if ctx is None:
         return None
     return ctx.user_id
+
+
+def get_current_user_name() -> Optional[str]:
+    """Get current user_name from coroutine-local context."""
+    ctx = get_session_context()
+    if ctx is None:
+        return None
+    return ctx.user_name
+
+
+def get_current_phone() -> Optional[str]:
+    """Get current phone from coroutine-local context."""
+    ctx = get_session_context()
+    if ctx is None:
+        return None
+    return ctx.phone
 
 
 # =============================================================================
@@ -244,29 +275,93 @@ def create_dynamic_tools():
     These tools use native async for all I/O operations.
     Use with crew.akickoff() for proper async execution.
     """
-    from crewai.tools import tool
-    from app.core.redis import get_cart, save_cart, clear_cart as clear_cart_redis
-    from app.core.agui_events import (
-        emit_tool_activity_async, emit_menu_data_async,
-        emit_cart_data_async
-    )
-    from app.core.preloader import get_menu_preloader, get_current_meal_period
-    from app.core.semantic_context import get_entity_graph
-    from app.features.food_ordering.crew_agent import (
-        _get_menu_from_preloader, _infer_category
-    )
+    def _parse_price_from_query(query: str) -> tuple:
+        """Extract price constraints from natural language query.
+
+        Returns (max_price, min_price, cleaned_query) where cleaned_query
+        has the price phrase removed so it doesn't pollute text search.
+        """
+        max_price = 0.0
+        min_price = 0.0
+        cleaned = query
+
+        # Patterns: "below 100", "under 200", "less than 150", "cheaper than 300", "within 500"
+        max_pattern = re.search(
+            r'(?:below|under|less\s+than|cheaper\s+than|within|upto|up\s+to|max|budget)\s*(?:rs\.?|inr|₹)?\s*(\d+)',
+            query, re.IGNORECASE
+        )
+        if max_pattern:
+            max_price = float(max_pattern.group(1))
+            cleaned = query[:max_pattern.start()].strip() + " " + query[max_pattern.end():].strip()
+
+        # Patterns: "above 200", "over 100", "more than 150", "starting from 100", "minimum 200"
+        min_pattern = re.search(
+            r'(?:above|over|more\s+than|starting\s+from|minimum|min|at\s+least)\s*(?:rs\.?|inr|₹)?\s*(\d+)',
+            query, re.IGNORECASE
+        )
+        if min_pattern:
+            min_price = float(min_pattern.group(1))
+            cleaned = cleaned[:min_pattern.start()].strip() + " " + cleaned[min_pattern.end():].strip()
+
+        # Pattern: "between 100 and 300" or "100 to 300" or "100-300"
+        range_pattern = re.search(
+            r'(?:between\s+)?(?:rs\.?|inr|₹)?\s*(\d+)\s*(?:to|-|and)\s*(?:rs\.?|inr|₹)?\s*(\d+)',
+            query, re.IGNORECASE
+        )
+        if range_pattern and not max_pattern and not min_pattern:
+            min_price = float(range_pattern.group(1))
+            max_price = float(range_pattern.group(2))
+            cleaned = query[:range_pattern.start()].strip() + " " + query[range_pattern.end():].strip()
+
+        # Clean up extra whitespace and common leftover words
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = re.sub(r'\b(items?|show|me|the|all|food|price|cheap|expensive)\b', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        return max_price, min_price, cleaned
 
     @tool("search_menu")
-    async def search_menu(query: str = "") -> str:
-        """Search menu items by name, category, or dietary preference. Use empty string for full menu."""
+    async def search_menu(query: str = "", max_price: float = 0, min_price: float = 0) -> str:
+        """Search menu items by name, category, dietary preference, or price range.
+
+        Args:
+            query: Search term (e.g. "burger", "spicy", "chicken"). Use "" for full menu.
+            max_price: Maximum price filter (e.g. 100 for "items below 100"). 0 means no limit.
+            min_price: Minimum price filter (e.g. 200 for "items above 200"). 0 means no limit.
+        """
         session_id = get_current_session_id()
         await emit_tool_activity_async(session_id, "search_menu")
+
+        # Parse price from query if not passed explicitly
+        _max_price, _min_price, _cleaned_query = _parse_price_from_query(query)
+        if max_price <= 0:
+            max_price = _max_price
+        if min_price <= 0:
+            min_price = _min_price
+        if _cleaned_query != query:
+            query = _cleaned_query
 
         items = _get_menu_from_preloader(query)
         if not items:
             if query:
                 return f"No items found matching '{query}'. Try browsing the full menu."
             return "Menu is loading. Please try again."
+
+        # Apply price filtering
+        if max_price > 0:
+            items = [i for i in items if i.get("price", 0) <= max_price]
+        if min_price > 0:
+            items = [i for i in items if i.get("price", 0) >= min_price]
+
+        if not items:
+            price_desc = ""
+            if max_price > 0 and min_price > 0:
+                price_desc = f" between Rs.{min_price:.0f} and Rs.{max_price:.0f}"
+            elif max_price > 0:
+                price_desc = f" under Rs.{max_price:.0f}"
+            elif min_price > 0:
+                price_desc = f" above Rs.{min_price:.0f}"
+            return f"No items found{price_desc}{' matching ' + repr(query) if query else ''}. Try a different price range."
 
         # Track displayed menu
         try:
@@ -275,33 +370,37 @@ def create_dynamic_tools():
         except Exception:
             pass
 
-        # Emit menu card for full menu
-        if not query:
-            try:
-                current_meal = get_current_meal_period()
-                cart_data = await get_cart(session_id)
-                cart_items = cart_data.get("items", []) if cart_data else []
-                cart_item_names = {i.get("name", "").lower() for i in cart_items}
+        # Emit menu card
+        try:
+            current_meal = get_current_meal_period()
+            cart_data = await get_cart(session_id)
+            cart_items = cart_data.get("items", []) if cart_data else []
+            cart_item_names = {i.get("name", "").lower() for i in cart_items}
 
-                structured_items = [
-                    {
-                        "name": item.get("name", ""),
-                        "price": item.get("price", 0),
-                        "category": _infer_category(item.get("name", "")),
-                        "description": item.get("description", ""),
-                        "item_id": str(item.get("id", "")),
-                        "meal_types": item.get("meal_types", ["All Day"]),
-                    }
-                    for item in items
-                    if item.get("name", "").lower() not in cart_item_names
-                ]
+            structured_items = [
+                {
+                    "name": item.get("name", ""),
+                    "price": item.get("price", 0),
+                    "category": _infer_category(item.get("name", "")),
+                    "description": item.get("description", ""),
+                    "item_id": str(item.get("id", "")),
+                    "meal_types": item.get("meal_types", ["All Day"]),
+                }
+                for item in items
+                if item.get("name", "").lower() not in cart_item_names
+            ]
 
-                if structured_items:
-                    await emit_menu_data_async(session_id, structured_items, current_meal_period=current_meal)
+            if structured_items:
+                await emit_menu_data_async(session_id, structured_items, current_meal_period=current_meal)
 
-                return f"[MENU CARD DISPLAYED - {len(structured_items)} items. Tell customer to browse!]"
-            except Exception:
-                pass
+            price_label = ""
+            if max_price > 0:
+                price_label = f" under Rs.{max_price:.0f}"
+            elif min_price > 0:
+                price_label = f" above Rs.{min_price:.0f}"
+            return f"[MENU CARD DISPLAYED - {len(structured_items)} items{price_label}]"
+        except Exception:
+            pass
 
         menu_items = [f"{item.get('name')} (Rs.{item.get('price')})" for item in items[:15]]
         return f"Menu: {', '.join(menu_items)}" + (f" (+{len(items)-15} more)" if len(items) > 15 else "")
@@ -488,35 +587,41 @@ def create_dynamic_tools():
 
 def create_dynamic_booking_tools():
     """Create booking tools with dynamic session binding."""
-    from crewai.tools import tool
 
     @tool
     def check_table_availability(date: str, time: str, party_size: int) -> str:
         """Check table availability for a reservation."""
-        from app.features.booking.crew_agent import _check_availability_impl
-        session_id = get_current_session_id()
-        return _check_availability_impl(date, time, party_size, session_id)
+        from app.features.booking.crew_agent import check_table_availability as _check_avail
+        return _check_avail._run(date=date, time=time, party_size=party_size)
 
     @tool
-    def make_reservation(date: str, time: str, party_size: int, name: str, phone: str) -> str:
+    def make_reservation(date: str, time: str, party_size: int, name: str = "", phone: str = "") -> str:
         """Make a table reservation."""
-        from app.features.booking.crew_agent import _make_reservation_impl
+        from app.features.booking.crew_agent import create_booking_tool
         session_id = get_current_session_id()
-        return _make_reservation_impl(date, time, party_size, name, phone, session_id)
+        # Auto-populate name/phone from authenticated session if not provided
+        if not name:
+            name = get_current_user_name() or ""
+        if not phone:
+            phone = get_current_phone() or ""
+        _tool = create_booking_tool(session_id)
+        return _tool._run(date=date, time=time, party_size=party_size, guest_name=name, phone=phone)
 
     @tool
     def get_my_bookings() -> str:
         """Get user's current bookings."""
-        from app.features.booking.crew_agent import _get_bookings_impl
+        from app.features.booking.crew_agent import create_get_bookings_tool
         session_id = get_current_session_id()
-        return _get_bookings_impl(session_id)
+        _tool = create_get_bookings_tool(session_id)
+        return _tool._run()
 
     @tool
     def cancel_reservation(booking_id: str) -> str:
         """Cancel a reservation."""
-        from app.features.booking.crew_agent import _cancel_booking_impl
+        from app.features.booking.crew_agent import create_cancel_booking_tool
         session_id = get_current_session_id()
-        return _cancel_booking_impl(booking_id, session_id)
+        _tool = create_cancel_booking_tool(session_id)
+        return _tool._run(booking_id=booking_id)
 
     return {
         'check_table_availability': check_table_availability,
@@ -744,7 +849,6 @@ async def process_with_pooled_crew(
     This is a drop-in replacement for process_with_restaurant_crew.
     """
     from app.orchestration.restaurant_crew import clean_crew_response
-    from app.core.semantic_context import get_entity_graph
 
     logger.info("processing_with_pooled_crew", session_id=session_id)
 

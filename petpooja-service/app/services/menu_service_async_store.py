@@ -8,7 +8,7 @@ import uuid
 from typing import Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete as sql_delete
 
 from app.models.branch_models import BranchInfoTable, BranchLocationTable, BranchContactTable
 from app.models.chain_models import ChainInfoTable
@@ -618,7 +618,6 @@ async def store_menu_async(
                     select(MenuItemTaxMapping).where(MenuItemTaxMapping.menu_item_id == menu_item_id)
                 )
                 # Delete existing mappings
-                from sqlalchemy import delete as sql_delete
                 await db.execute(
                     sql_delete(MenuItemTaxMapping).where(MenuItemTaxMapping.menu_item_id == menu_item_id)
                 )
@@ -646,7 +645,6 @@ async def store_menu_async(
             item_addon_groups = item.get("item_addon_grp", [])
             if item_addon_groups:
                 # Delete existing mappings
-                from sqlalchemy import delete as sql_delete
                 await db.execute(
                     sql_delete(MenuItemAddonMapping).where(MenuItemAddonMapping.menu_item_id == menu_item_id)
                 )

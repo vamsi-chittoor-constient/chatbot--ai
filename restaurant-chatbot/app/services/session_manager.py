@@ -104,8 +104,8 @@ class SessionManager:
         self.nosql = None
 
         # Configuration
-        self.session_ttl = 3600  # 1 hour default
-        self.conversation_ttl = 7200  # 2 hours default
+        self.session_ttl = 86400  # 24 hours (safety net alongside 30-day JWT tokens)
+        self.conversation_ttl = 86400  # 24 hours (match session TTL)
         self.max_messages_per_conversation = 1000
 
         # Key prefixes

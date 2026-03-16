@@ -11,9 +11,13 @@ This eliminates cold start latency!
 v2: Added meal_type support for time-aware menu filtering
 """
 import asyncio
+import os
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import structlog
+
+from app.core.db_pool import get_async_pool
 
 logger = structlog.get_logger(__name__)
 
@@ -55,6 +59,7 @@ class MenuPreloader:
         self._menu_cache: Optional[List[Dict]] = None
         self._last_refresh: Optional[datetime] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        self._has_recommendation_tags: bool = False
 
     @property
     def menu(self) -> List[Dict]:
@@ -68,8 +73,6 @@ class MenuPreloader:
 
     async def load(self):
         """Load menu from database into cache with meal_type info."""
-        from app.core.db_pool import get_async_pool
-
         try:
             pool = await get_async_pool()
             async with pool.acquire() as conn:
@@ -82,6 +85,7 @@ class MenuPreloader:
                         mi.menu_item_description as description,
                         mi.menu_item_in_stock as is_available,
                         mi.menu_item_is_recommended as is_recommended,
+                        mi.recommendation_tags as recommendation_tags,
                         ARRAY_AGG(DISTINCT mt.meal_type_name)
                             FILTER (WHERE mt.meal_type_name IS NOT NULL) as meal_types,
                         msc.sub_category_name as category
@@ -114,6 +118,10 @@ class MenuPreloader:
                     if not meal_types or "All Day" in meal_types:
                         meal_types = list(_ALL_MEAL_PERIODS)
 
+                    # Parse recommendation_tags from JSONB (comes as list or None)
+                    _raw_tags = row['recommendation_tags']
+                    _rec_tags = _raw_tags if isinstance(_raw_tags, list) else []
+
                     self._menu_cache.append({
                         "id": str(row['id']),
                         "name": row['name'],
@@ -122,7 +130,8 @@ class MenuPreloader:
                         "is_available": row['is_available'],
                         "is_recommended": row['is_recommended'],
                         "meal_types": meal_types,
-                        "category": row['category'] or "Other"
+                        "category": row['category'] or "Other",
+                        "recommendation_tags": _rec_tags,
                     })
                 self._last_refresh = datetime.now()
 
@@ -134,6 +143,9 @@ class MenuPreloader:
 
                 # Auto-index into ChromaDB for semantic search
                 await self._sync_vector_db()
+
+                # Tag untagged items via LLM recommendation engine
+                await self._tag_untagged_items()
 
         except Exception as e:
             logger.error("menu_preload_failed", error=str(e))
@@ -170,6 +182,18 @@ class MenuPreloader:
         except Exception as e:
             # Non-critical — semantic search degrades to category fallback
             logger.debug("vector_db_sync_skipped", error=str(e))
+
+    async def _tag_untagged_items(self):
+        """Run LLM tagger on any menu items missing recommendation_tags."""
+        try:
+            from app.services.menu_tagger import tag_untagged_items
+            self._menu_cache = await tag_untagged_items(self._menu_cache)
+            self._has_recommendation_tags = any(
+                item.get("recommendation_tags") for item in (self._menu_cache or [])
+            )
+        except Exception as e:
+            # Non-critical — recommendation falls back to food group engine
+            logger.debug("menu_tagger_skipped", error=str(e))
 
     async def start_background_refresh(self):
         """Start background refresh task."""
@@ -249,7 +273,6 @@ class MenuPreloader:
             # Stage 2: Fuzzy match fallback for spelling variations
             # (e.g. "paratha" vs "parota", "biriyani" vs "biryani")
             if not matched_items and len(query_lower) >= 4:
-                from difflib import SequenceMatcher
                 matched_items = [
                     item for item in available_items
                     if SequenceMatcher(None, query_lower, item.get("name", "").lower()).ratio() >= 0.80
@@ -308,18 +331,24 @@ class MenuPreloader:
         # Return top items (could add popularity sorting later)
         return suggestions[:limit]
 
-    def find_item(self, name: str) -> Optional[Dict]:
+    def find_item(self, name: str, with_confidence: bool = False):
         """
         Find item by name with multi-stage matching.
 
-        Stage 1: Exact/substring match (fast, precise)
+        Stage 1: Exact/substring match (fast, precise) — confidence 1.0
         Stage 2: Fuzzy match via SequenceMatcher (handles spelling variations
                  like parota/paratha, biryani/biriyani, dosa/dosai)
 
-        Returns best match, or None if not found.
+        Args:
+            name: Item name to search for
+            with_confidence: If True, returns (item, confidence) tuple
+
+        Returns:
+            If with_confidence=False: best match dict, or None
+            If with_confidence=True: (item, confidence) tuple, or (None, 0.0)
         """
         if not self._menu_cache:
-            return None
+            return (None, 0.0) if with_confidence else None
 
         name_lower = name.lower().strip()
         name_singular = name_lower.rstrip('s') if name_lower.endswith('s') else name_lower
@@ -330,7 +359,7 @@ class MenuPreloader:
                 continue
             item_name = item.get("name", "").lower()
             if item_name == name_lower or item_name == name_singular:
-                return item
+                return (item, 1.0) if with_confidence else item
 
         # Stage 1b: Substring match — prefer the longest (most specific) match
         # Without this, "amla juice" (substring of "aswins amla juice") would
@@ -348,12 +377,10 @@ class MenuPreloader:
                     best_len = len(item_name)
                     best_substring = item
         if best_substring:
-            return best_substring
+            return (best_substring, 1.0) if with_confidence else best_substring
 
         # Stage 2: Fuzzy match (handles LLM "correcting" spellings)
         # e.g. "aloo paratha" matches "Aloo Parota", "biriyani" matches "Biryani"
-        from difflib import SequenceMatcher
-
         best_match = None
         best_ratio = 0.0
 
@@ -367,17 +394,19 @@ class MenuPreloader:
                 best_ratio = ratio
                 best_match = item
 
-        # Require at least 80% similarity to avoid false positives
-        if best_ratio >= 0.80 and best_match:
+        # Require at least 85% similarity for single-item lookup
+        # (catches spelling variations like idli/idly, paneer/panir
+        #  but rejects false positives like "fresh juice" → "french fries")
+        if best_ratio >= 0.85 and best_match:
             logger.info(
                 "find_item_fuzzy_match",
                 query=name,
                 matched=best_match.get("name"),
                 similarity=f"{best_ratio:.2f}"
             )
-            return best_match
+            return (best_match, best_ratio) if with_confidence else best_match
 
-        return None
+        return (None, 0.0) if with_confidence else None
 
     def get_similar_items(self, query: str, limit: int = 10, exclude_ids: Optional[set] = None) -> tuple[List[Dict], str]:
         """
@@ -478,7 +507,189 @@ class MenuPreloader:
                 ]
                 return cat_items[:limit], cat
 
-        # Step 3: No similar items at all — suggest popular alternatives
+        # Step 3: LLM-based recommendation engine (tag overlap)
+        # Each menu item has pre-computed recommendation_tags from the LLM tagger.
+        # Score items by how many tags they share with query-matching items.
+        if self._has_recommendation_tags:
+            # Find items whose tags match the query words
+            query_words = set(query_lower.replace("-", "_").replace(" ", "_").split("_"))
+            query_words.update(query_lower.split())  # also keep original words
+            # Add full underscore-joined form (e.g. "ice cream" => "ice_cream" tag match)
+            query_words.add(query_lower.replace(" ", "_").replace("-", "_"))
+            query_words = {w for w in query_words if len(w) > 2}
+
+            # Collect tags from items that directly match the query (name/desc substring)
+            seed_tags: set = set()
+            for item in self._menu_cache:
+                item_tags = item.get("recommendation_tags", [])
+                if not item_tags:
+                    continue
+                item_name = item.get("name", "").lower()
+                # If the query appears in item name or vice versa, use its tags as seed
+                if query_lower in item_name or item_name in query_lower:
+                    seed_tags.update(item_tags)
+                else:
+                    # Also check if any query word matches a tag directly
+                    tag_set = set(item_tags)
+                    if query_words & tag_set:
+                        seed_tags.update(item_tags)
+
+            # If no seed from name match, use query words directly as tags
+            if not seed_tags:
+                seed_tags = query_words
+
+            if seed_tags:
+                scored = []
+                for item in self._menu_cache:
+                    if (item.get("price", 0) <= 0 or not item.get("is_available", True)
+                            or item["id"] in exclude_ids):
+                        continue
+                    item_tags = set(item.get("recommendation_tags", []))
+                    if not item_tags:
+                        continue
+                    # Score = number of shared tags with seed
+                    overlap = len(seed_tags & item_tags)
+                    if overlap > 0:
+                        scored.append((overlap, item))
+
+                if scored:
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    result = [item for _, item in scored[:limit]]
+                    logger.info(
+                        "similar_items_tag_engine",
+                        query=query,
+                        seed_tags=list(seed_tags)[:10],
+                        count=len(result),
+                        items=[i["name"] for i in result[:5]],
+                    )
+                    return result, "similar items"
+
+        # Step 3b: Fallback — hardcoded food group engine (used when tags not yet generated)
+        _FOOD_GROUPS = {
+            "fast_food": {
+                "keywords": ["burger", "pizza", "sandwich", "wrap", "roll", "hotdog", "sub", "shawarma", "frankie"],
+                "related": ["snacks", "appetizers"],
+            },
+            "snacks": {
+                "keywords": ["fries", "nachos", "wings", "nuggets", "fingers", "tikka", "kebab", "cutlet", "pakoda", "pakora", "bajji", "bonda", "side orders", "add ons"],
+                "related": ["fast_food", "appetizers"],
+            },
+            "appetizers": {
+                "keywords": ["soup", "starter", "appetizer", "salad", "manchurian", "gobi", "paneer tikka", "spring roll"],
+                "related": ["snacks"],
+            },
+            "rice_dishes": {
+                "keywords": ["biryani", "biriyani", "pulao", "fried rice", "rice", "khichdi", "jeera rice"],
+                "related": ["north_indian"],
+            },
+            "south_indian": {
+                "keywords": ["dosa", "dosai", "idli", "idly", "vada", "vadai", "upma", "pongal", "uttapam", "appam", "puttu", "parota", "paratha", "kothu"],
+                "related": ["breakfast"],
+            },
+            "north_indian": {
+                "keywords": ["naan", "nan", "roti", "chapati", "kulcha", "paratha", "paneer", "dal", "curry", "butter chicken", "tandoori", "tikka masala", "chicken", "chicken meal"],
+                "related": ["rice_dishes"],
+            },
+            "chinese": {
+                "keywords": ["noodles", "chowmein", "hakka", "manchurian", "schezwan", "fried rice", "momos", "dim sum", "spring roll", "chilli"],
+                "related": ["fast_food"],
+            },
+            "beverages": {
+                "keywords": ["juice", "shake", "smoothie", "lassi", "coffee", "tea", "chai", "soda", "lemonade", "mojito", "cooler", "drink", "water", "cola", "beverages", "hot coffees"],
+                "related": ["desserts"],
+            },
+            "desserts": {
+                "keywords": ["ice cream", "cake", "brownie", "pudding", "gulab jamun", "rasgulla", "halwa", "kheer", "payasam", "kulfi", "sweet", "mousse", "pastry", "desserts"],
+                "related": ["beverages"],
+            },
+            "breakfast": {
+                "keywords": ["omelette", "egg", "toast", "cereal", "pancake", "waffle", "poha", "upma", "sandwich"],
+                "related": ["south_indian"],
+            },
+            "seafood": {
+                "keywords": ["fish", "prawn", "shrimp", "crab", "lobster", "squid", "calamari", "seafood", "seafood meal"],
+                "related": ["north_indian", "chinese"],
+            },
+        }
+
+        matched_groups = set()
+        for group_key, group_data in _FOOD_GROUPS.items():
+            for kw in group_data["keywords"]:
+                if kw in query_lower or query_lower in kw:
+                    matched_groups.add(group_key)
+                    break
+
+        if matched_groups:
+            all_groups = set(matched_groups)
+            for g in matched_groups:
+                all_groups.update(_FOOD_GROUPS[g].get("related", []))
+
+            all_keywords = set()
+            for g in all_groups:
+                if g in _FOOD_GROUPS:
+                    all_keywords.update(_FOOD_GROUPS[g]["keywords"])
+
+            scored = []
+            for item in self._menu_cache:
+                if (item.get("price", 0) <= 0 or not item.get("is_available", True)
+                        or item["id"] in exclude_ids):
+                    continue
+                item_name = item.get("name", "").lower()
+                item_desc = item.get("description", "").lower()
+                item_cat = item.get("category", "").lower()
+                item_text = f"{item_name} {item_desc} {item_cat}"
+
+                score = 0.0
+                for kw in all_keywords:
+                    if kw in item_text:
+                        is_primary = any(kw in _FOOD_GROUPS.get(g, {}).get("keywords", []) for g in matched_groups)
+                        score += 2.0 if is_primary else 1.0
+
+                query_words = [w for w in query_lower.split() if len(w) > 2]
+                item_words = [w for w in item_name.split() if len(w) > 2]
+                for qw in query_words:
+                    for iw in item_words:
+                        ratio = SequenceMatcher(None, qw, iw).ratio()
+                        if ratio >= 0.60:
+                            score += ratio
+
+                if score > 0:
+                    scored.append((score, item))
+
+            if scored:
+                scored.sort(key=lambda x: x[0], reverse=True)
+                result = [item for _, item in scored[:limit]]
+                group_labels = [g.replace("_", " ").title() for g in matched_groups]
+                label = f"similar to {', '.join(group_labels)}"
+                logger.info("similar_items_food_group", query=query, groups=list(matched_groups),
+                           count=len(result), items=[i["name"] for i in result[:5]])
+                return result, label
+
+        # Step 4: No food group match — try pure fuzzy for unlisted food terms
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+        if query_words:
+            scored_items = []
+            for item in self._menu_cache:
+                if (item.get("price", 0) <= 0 or not item.get("is_available", True)
+                        or item["id"] in exclude_ids):
+                    continue
+                item_name = item.get("name", "").lower()
+                item_words = [w for w in item_name.split() if len(w) > 2]
+                score = 0.0
+                for qw in query_words:
+                    for iw in item_words:
+                        ratio = SequenceMatcher(None, qw, iw).ratio()
+                        if ratio >= 0.60:
+                            score += ratio
+                if score > 0.5:
+                    scored_items.append((score, item))
+            if scored_items:
+                scored_items.sort(key=lambda x: x[0], reverse=True)
+                result = [item for _, item in scored_items[:limit]]
+                logger.info("similar_items_fuzzy", query=query, count=len(result))
+                return result, "similar items"
+
+        # Step 5: No matches — suggest popular/recommended alternatives
         alternatives = [
             item for item in self._menu_cache
             if item.get("price", 0) > 0

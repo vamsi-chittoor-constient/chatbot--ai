@@ -6,6 +6,20 @@ const generateNewSessionId = () => {
   return 'sess_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36)
 }
 
+// Device ID: persistent across sessions/tabs (localStorage)
+const getDeviceId = () => {
+  let deviceId = localStorage.getItem('device_id')
+  if (!deviceId) {
+    deviceId = 'dev_' + Math.random().toString(36).substr(2, 12) + Date.now().toString(36)
+    localStorage.setItem('device_id', deviceId)
+  }
+  return deviceId
+}
+
+// Session token: 30-day JWT for authenticated users (localStorage)
+const getSessionToken = () => localStorage.getItem('session_token')
+const setSessionToken = (token) => localStorage.setItem('session_token', token)
+
 // Store current page's sessionId (generated fresh on each page load)
 let currentPageSessionId = null
 
@@ -40,6 +54,7 @@ export const hasRecentSession = () => {
 export const clearSession = () => {
   sessionStorage.removeItem('sessionId')
   sessionStorage.removeItem('sessionLastActivity')
+  localStorage.removeItem('session_token')  // Clear JWT on fresh start
   const newSessionId = generateNewSessionId()
   sessionStorage.setItem('sessionId', newSessionId)
   return newSessionId
@@ -73,7 +88,13 @@ export const useWebSocket = (onEvent) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     // Backend WebSocket endpoint is at /api/v1/chat/{session_id}
-    const wsUrl = `${protocol}//${host}/api/v1/chat/${sessionId}`
+    // Pass device_id and session_token for multi-tier identity recognition
+    const deviceId = getDeviceId()
+    const token = getSessionToken()
+    const params = new URLSearchParams()
+    params.set('device_id', deviceId)
+    if (token) params.set('session_token', token)
+    const wsUrl = `${protocol}//${host}/api/v1/chat/${sessionId}?${params.toString()}`
 
     setStatus('connecting')
 
@@ -161,6 +182,10 @@ export const useWebSocket = (onEvent) => {
             }
             // Reset flag after processing ai_response
             receivedStreamingRef.current = false
+          } else if (data.message_type === 'session_token' && data.token) {
+            // Store long-lived JWT for reconnection across page refreshes
+            setSessionToken(data.token)
+            console.log('Session token stored for reconnection')
           } else if (data.message_type === 'quick_replies' && data.quick_replies) {
             onEvent({ type: 'QUICK_REPLIES', options: data.quick_replies })
           } else if (data.message_type === 'typing_indicator') {

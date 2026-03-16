@@ -13,6 +13,7 @@ Stores and retrieves:
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import json
+import re
 import structlog
 from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -219,7 +220,6 @@ class ConversationMemory:
         # Preferences (simple extraction)
         if "table for" in text_lower or "party of" in text_lower:
             # Extract party size
-            import re
             match = re.search(r'(?:table for|party of)\s+(\d+)', text_lower)
             if match:
                 memory["preferences"]["usual_party_size"] = int(match.group(1))

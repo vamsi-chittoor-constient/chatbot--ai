@@ -965,7 +965,9 @@ async def process_with_agui_streaming(
     device_id: Optional[str] = None,
     language: str = "English",
     voice_mode: bool = False,
-    source: str = "web"
+    source: str = "web",
+    user_name: Optional[str] = None,
+    phone: Optional[str] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Process user message with AG-UI event streaming.
@@ -1003,7 +1005,7 @@ async def process_with_agui_streaming(
 
     # Set session context so tools can access user_id via get_current_user_id()
     from app.services.crew_pool import set_session_context
-    set_session_context(session_id, user_id)
+    set_session_context(session_id, user_id, user_name=user_name, phone=phone)
 
     # Emit run started
     emitter.emit_run_started()
@@ -1220,7 +1222,7 @@ async def process_with_agui_streaming(
         quick_replies_to_emit = None
         try:
             from app.features.food_ordering.crew_agent import get_response_quick_replies, DEFAULT_QUICK_REPLIES
-            quick_replies_to_emit = get_response_quick_replies(response)
+            quick_replies_to_emit = get_response_quick_replies(response, session_id=session_id)
             if not quick_replies_to_emit:
                 quick_replies_to_emit = DEFAULT_QUICK_REPLIES
         except Exception as e:

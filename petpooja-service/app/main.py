@@ -6,6 +6,7 @@ FastAPI application for PetPooja integration
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -13,10 +14,11 @@ from slowapi.errors import RateLimitExceeded
 import logging
 import sys
 from datetime import datetime
+import time
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.core.db_session_async import init_db_async, warm_connection_pool, close_db, get_db
+from app.core.db_session_async import init_db_async, warm_connection_pool, close_db, get_db, AsyncSessionLocal
 from app.petpooja_client.order_client_async import close_async_order_client
 from app.routers import menu_router, order_router, webhook_router, restaurant_router
 
@@ -36,7 +38,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for FastAPI application"""
-    import time
     start_time = time.time()
 
     # Startup
@@ -54,6 +55,22 @@ async def lifespan(app: FastAPI):
         # Warm up connection pool for faster first requests
         await warm_connection_pool()
         logger.info("Async connection pool warmed up")
+
+        # Run pending migrations (idempotent)
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(text(
+                    "ALTER TABLE menu_item "
+                    "ADD COLUMN IF NOT EXISTS recommendation_tags JSONB"
+                ))
+                await db.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_menu_item_recommendation_tags "
+                    "ON menu_item USING GIN (recommendation_tags)"
+                ))
+                await db.commit()
+            logger.info("Migration: recommendation_tags column ensured")
+        except Exception as e:
+            logger.warning(f"Migration recommendation_tags skipped: {e}")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
@@ -129,7 +146,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     """Health check endpoint"""
     try:
         # Simple async health check
-        from sqlalchemy import text
         await db.execute(text("SELECT 1"))
         db_healthy = True
         overall_status = "healthy"

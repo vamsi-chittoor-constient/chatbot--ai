@@ -4,6 +4,7 @@ Transforms database order data to PetPooja format
 """
 
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, Any
 from decimal import Decimal
@@ -41,7 +42,6 @@ def transform_db_order_to_petpooja(order_data: Dict[str, Any]) -> SaveOrderReque
             if order and order.order_id:
                 external_order_id = f"{settings.ORDER_ID_PREFIX}{str(order.order_id)[:8].upper()}"
             else:
-                import uuid
                 external_order_id = f"{settings.ORDER_ID_PREFIX}{str(uuid.uuid4())[:8].upper()}"
         logger.info(f"Transforming DB order {external_order_id} to PetPooja format")
 

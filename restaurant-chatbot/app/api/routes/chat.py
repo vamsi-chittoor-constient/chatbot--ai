@@ -5,7 +5,9 @@ Pure agentic AI chat interface for customer interactions
 """
 
 import json
-from datetime import datetime, timezone
+import os
+import asyncio
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
@@ -14,6 +16,35 @@ from sqlalchemy import text
 import structlog
 
 from app.api.middleware.logging import log_chat_message, log_system_event
+from app.core.agui_events import (
+    AGUIEventEmitter, clear_event_queue, get_event_queue,
+    emit_quick_replies, flush_pending_events,
+    emit_cart_data, emit_booking_intake_form,
+    QuickRepliesEvent, PaymentSuccessEvent, ReceiptLinkEvent,
+    PACKAGING_CHARGE_PER_ITEM, DINE_IN_CHARGE_PER_PERSON,
+    _PENDING_EVENTS,
+)
+from app.core.redis import get_sync_redis_client
+from app.core.database import get_db_session
+from app.core.db_pool import SyncDBConnection
+from app.core.config import config
+from app.core.response_sanitizer import sanitize_response, sanitize_error
+from app.core.session_events import get_sync_session_tracker
+from app.services.identity_service import identity_service
+from app.services.session_manager import SessionManager
+from app.services.payment_state_service import (
+    get_payment_state, set_payment_state, clear_payment_state, PaymentStep,
+)
+from app.services.user_data_manager import get_user_data_manager
+from app.ai_services.welcome_service import welcome_service
+from app.utils.welcome import get_time_based_greeting, get_restaurant_name
+from app.features.food_ordering.tools_event_sourced import create_event_sourced_tools
+from app.features.booking.crew_agent import _get_availability_map, create_booking_tool
+from app.features.user_management.tools.otp_tools import (
+    check_user_exists, create_user, send_otp, verify_otp,
+)
+from app.orchestration.restaurant_crew import process_with_agui_streaming
+from app.workflows.payment_workflow import run_payment_workflow
 
 router = APIRouter()
 logger = structlog.get_logger("api.chat")
@@ -66,7 +97,6 @@ async def translate_response(text: str, target_language: str) -> str:
 
     try:
         from openai import AsyncOpenAI
-        import os
 
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -238,7 +268,6 @@ class WebSocketManager:
             # EVENT QUEUE CLEANUP - Prevent stale events from leaking
             # ========================================================================
             try:
-                from app.core.agui_events import clear_event_queue
                 clear_event_queue(session_id)
                 logger.debug("event_queue_cleared", session_id=session_id)
             except Exception as e:
@@ -253,9 +282,6 @@ class WebSocketManager:
                 user_id = connection_info.get("user_id")
                 if user_id:
                     # User was authenticated - use service layer for cleanup
-                    from app.services.user_data_manager import get_user_data_manager
-                    from app.core.database import get_db_session
-
                     user_manager = get_user_data_manager()
 
                     # Use service method which internally handles inventory release
@@ -304,7 +330,6 @@ class WebSocketManager:
         if not metadata:
             return {}
 
-        import json
         try:
             # Try to serialize - if it works, return as-is
             json.dumps(metadata)
@@ -484,8 +509,6 @@ async def manage_cart_ownership(session_id: str, user_id: str):
     Always tag session_state with current user_id.
     """
     try:
-        from app.core.database import get_db_session
-
         async with get_db_session() as db:
             # Check existing owner in session_state
             result = await db.execute(
@@ -525,6 +548,42 @@ async def manage_cart_ownership(session_id: str, user_id: str):
 
     except Exception as e:
         logger.error(f"Failed to manage cart ownership: {str(e)}")
+
+
+async def issue_and_send_session_token(
+    websocket_manager,
+    websocket: WebSocket,
+    session_id: str,
+    device_id: str,
+    user_id: str
+):
+    """
+    Issue a 30-day JWT session token and send it to the frontend.
+    Frontend stores it in localStorage for reconnection across page refreshes.
+    """
+    if not device_id:
+        logger.debug("No device_id provided, skipping session token issuance", session_id=session_id)
+        return
+
+    try:
+        jwt_token = await identity_service.link_device_to_user(device_id, user_id)
+        # Send token to frontend via a dedicated message type
+        await websocket.send_text(json.dumps({
+            "message_type": "session_token",
+            "token": jwt_token,
+            "session_id": session_id
+        }))
+        logger.info(
+            "Session token issued and sent to frontend",
+            session_id=session_id,
+            user_id=user_id
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to issue session token",
+            session_id=session_id,
+            error=str(e)
+        )
 
 
 @router.websocket("/chat/{session_id}")
@@ -593,7 +652,6 @@ async def chat_endpoint(
 
     try:
         # Initialize session with existing services
-        from app.services.session_manager import SessionManager
         session_manager = SessionManager()
 
         # Get or create session (SessionManager methods are async)
@@ -619,9 +677,6 @@ async def chat_endpoint(
         # UPFRONT PHONE AUTHENTICATION FLOW
         # ========================================================================
         # Check if authentication is required and user is not already authenticated
-        from app.core.config import config
-        from app.core.agui_events import AGUIEventEmitter
-
         auth_emitter = AGUIEventEmitter(session_id)
         is_authenticated = False
         authenticated_user_name = None
@@ -643,10 +698,9 @@ async def chat_endpoint(
             # Manage cart ownership on reconnection
             await manage_cart_ownership(session_id, authenticated_user_id)
 
-        # Check if user already authenticated via session_token
+        # Check if user already authenticated via session_token (30-day JWT)
         elif session_token:
             try:
-                from app.services.identity_service import identity_service
                 recognition_result = await identity_service.recognize_user(
                     device_id=device_id,
                     session_token=session_token
@@ -655,14 +709,25 @@ async def chat_endpoint(
                     is_authenticated = True
                     authenticated_user_name = recognition_result.get("user_name")
                     authenticated_user_id = recognition_result.get("user_id")
+                    authenticated_phone = recognition_result.get("phone_number")
                     logger.info(
                         "User already authenticated via session_token",
                         session_id=session_id,
                         user_name=authenticated_user_name
                     )
-                    
+
                     # Manage Cart Ownership (Auto-Login)
                     await manage_cart_ownership(session_id, authenticated_user_id)
+
+                    # Persist auth state in Redis so subsequent reconnects
+                    # within 24h don't need to re-validate the JWT
+                    await session_manager.update_session(
+                        session_id,
+                        is_authenticated=True,
+                        user_id=authenticated_user_id,
+                        phone_number=authenticated_phone,
+                        metadata={"user_name": authenticated_user_name}
+                    )
 
             except Exception as e:
                 logger.warning(f"Session token validation failed: {str(e)}")
@@ -685,8 +750,6 @@ async def chat_endpoint(
             )
 
             try:
-                from app.features.user_management.tools.otp_tools import check_user_exists, create_user
-
                 user_check = await check_user_exists(phone_number=wa_phone_raw)
 
                 if user_check.get("success") and user_check.get("data", {}).get("exists"):
@@ -877,15 +940,14 @@ async def chat_endpoint(
                             if not phone_number.startswith("+"):
                                 phone_number = "+91" + phone_number.lstrip("0")
 
-                            # Validate: must be digits only (after +), exactly 10 digits (Indian mobile)
+                            # Validate: must be digits only, exactly 10-digit Indian mobile after +91
                             digits_only = phone_number.lstrip("+")
-                            if not digits_only.isdigit() or len(digits_only) < 10 or len(digits_only) > 12:
+                            local_digits = digits_only[2:] if digits_only.startswith("91") else digits_only
+                            if not digits_only.isdigit() or len(local_digits) != 10 or local_digits[0] not in "6789":
                                 print(f"[DEBUG] Invalid phone number format: {phone_number}")
-                                from app.core.agui_events import AGUIEventEmitter
                                 err_emitter = AGUIEventEmitter(session_id)
                                 err_emitter.emit_phone_auth_form(restaurant.get("name", "our restaurant"))
-                                from app.core.agui_events import flush_pending_events as _flush_err
-                                _flush_err(session_id)
+                                flush_pending_events(session_id)
                                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                                 await websocket_manager.send_message(
                                     session_id=session_id,
@@ -901,7 +963,6 @@ async def chat_endpoint(
                             )
 
                             # Check if user exists
-                            from app.features.user_management.tools.otp_tools import check_user_exists, send_otp
                             print(f"[DEBUG] Checking if user exists for phone: {phone_number[:6]}****")
                             user_check = await check_user_exists(phone_number=phone_number)
                             print(f"[DEBUG] check_user_exists result: {user_check}")
@@ -945,6 +1006,12 @@ async def chat_endpoint(
                                     user_id=authenticated_user_id,
                                     phone_number=authenticated_phone,
                                     metadata={"user_name": authenticated_user_name}
+                                )
+
+                                # Issue 30-day JWT session token for persistent reconnection
+                                await issue_and_send_session_token(
+                                    websocket_manager, websocket, session_id,
+                                    device_id, authenticated_user_id
                                 )
 
                             else:
@@ -994,7 +1061,6 @@ async def chat_endpoint(
                                 continue
 
                             # Verify OTP
-                            from app.features.user_management.tools.otp_tools import verify_otp, create_user
                             otp_result = await verify_otp(
                                 phone_number=auth_phone,
                                 otp_code=otp_code,
@@ -1046,7 +1112,6 @@ async def chat_endpoint(
                             )
 
                             # Create user account with the provided name
-                            from app.features.user_management.tools.otp_tools import create_user
                             create_result = await create_user(
                                 phone_number=auth_phone,
                                 full_name=user_name
@@ -1089,6 +1154,12 @@ async def chat_endpoint(
                                     metadata={"user_name": authenticated_user_name}
                                 )
 
+                                # Issue 30-day JWT session token for persistent reconnection
+                                await issue_and_send_session_token(
+                                    websocket_manager, websocket, session_id,
+                                    device_id, authenticated_user_id
+                                )
+
                             else:
                                 logger.error(f"Failed to create user: {create_result.get('message')}")
                                 # Fall back to Guest account
@@ -1124,39 +1195,33 @@ async def chat_endpoint(
         # - Tier 3 (Authenticated): Fully personalized with name, favorites, history
 
         # Check if welcome was already sent for this session (prevent duplicates on reconnect)
+        # Use Redis-backed flag so it survives WebSocket disconnects (payment redirects, network blips)
         welcome_already_sent = websocket_manager.connection_metadata.get(session_id, {}).get("welcome_sent", False)
+        if not welcome_already_sent:
+            try:
+                _redis = get_sync_redis_client()
+                welcome_already_sent = bool(_redis.get(f"session:{session_id}:welcome_sent"))
+            except Exception:
+                pass
         preserved_welcome_msg = websocket_manager.connection_metadata.get(session_id, {}).get("welcome_msg")
 
         if welcome_already_sent and preserved_welcome_msg:
-            # Re-send the preserved welcome message on reconnect
-            logger.info("welcome_resent_on_reconnect", session_id=session_id, message_length=len(preserved_welcome_msg))
-            await websocket_manager.send_message(
-                session_id=session_id,
-                message=preserved_welcome_msg,
-                message_type="ai_response"
-            )
-            # Re-emit welcome quick replies on reconnect
-            from app.core.agui_events import emit_quick_replies as _emit_reconn_qr, flush_pending_events as _flush_reconn
-            _emit_reconn_qr(session_id, [
-                {"label": "🍔 Order Food", "action": "show me the menu"},
-                {"label": "🛒 View Cart", "action": "view my cart"},
-                {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
-                {"label": "❓ Help & FAQs", "action": "help"},
-            ])
-            _flush_reconn(session_id)
-            await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
+            # AUTO-RECONNECT (network blip): Frontend still has messages in React state.
+            # Do NOT re-send welcome or quick replies — just resume silently.
+            logger.info("reconnect_skip_welcome", session_id=session_id)
         elif welcome_already_sent:
             logger.info("welcome_skipped_already_sent", session_id=session_id)
         else:
             # Mark welcome as sent BEFORE sending to prevent race conditions
             if session_id in websocket_manager.connection_metadata:
                 websocket_manager.connection_metadata[session_id]["welcome_sent"] = True
+            try:
+                _redis = get_sync_redis_client()
+                _redis.setex(f"session:{session_id}:welcome_sent", 86400, "1")
+            except Exception:
+                pass
 
             try:
-                from app.services.identity_service import identity_service
-                from app.ai_services.welcome_service import welcome_service
-                from app.utils.welcome import get_time_based_greeting, get_restaurant_name
-
                 # If already authenticated via phone auth flow, use that info
                 if is_authenticated and authenticated_user_name:
                     tier = 3
@@ -1189,7 +1254,6 @@ async def chat_endpoint(
 
                 # Emit starting activity for welcome generation
                 # This masks the LLM latency with a "Setting up..." status
-                from app.core.agui_events import AGUIEventEmitter
                 welcome_emitter = AGUIEventEmitter(session_id)
                 welcome_emitter.emit_activity("thinking", "Setting up your personal waiter...")
                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
@@ -1197,7 +1261,6 @@ async def chat_endpoint(
                 # Check for existing cart items (from PostgreSQL session_cart)
                 has_cart_items = False
                 try:
-                    from app.core.session_events import get_sync_session_tracker
                     tracker = get_sync_session_tracker(session_id)
                     cart_data = tracker.get_cart_summary()
                     has_cart_items = bool(cart_data.get("items"))
@@ -1228,14 +1291,13 @@ async def chat_endpoint(
                 )
 
                 # Emit welcome quick replies so user has actionable buttons
-                from app.core.agui_events import emit_quick_replies as _emit_welcome_qr, flush_pending_events as _flush_welcome
-                _emit_welcome_qr(session_id, [
+                emit_quick_replies(session_id, [
                     {"label": "🍔 Order Food", "action": "show me the menu"},
                     {"label": "🛒 View Cart", "action": "view my cart"},
                     {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
                     {"label": "❓ Help & FAQs", "action": "help"},
                 ])
-                _flush_welcome(session_id)
+                flush_pending_events(session_id)
                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
 
                 # Store welcome message for adding to conversation history
@@ -1273,14 +1335,13 @@ async def chat_endpoint(
                 )
 
                 # Emit welcome quick replies for fallback too
-                from app.core.agui_events import emit_quick_replies as _emit_fb_qr, flush_pending_events as _flush_fb
-                _emit_fb_qr(session_id, [
+                emit_quick_replies(session_id, [
                     {"label": "🍔 Order Food", "action": "show me the menu"},
                     {"label": "🛒 View Cart", "action": "view my cart"},
                     {"label": "🎁 Today's Deals", "action": "today's specials and offers"},
                     {"label": "❓ Help & FAQs", "action": "help"},
                 ])
-                _flush_fb(session_id)
+                flush_pending_events(session_id)
                 await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
 
                 # Store fallback welcome message for adding to conversation history
@@ -1298,8 +1359,6 @@ async def chat_endpoint(
         # but the WebSocket notification is lost. On reconnect, check Redis
         # for a completed payment and deliver the PaymentSuccessEvent.
         try:
-            from app.services.payment_state_service import get_payment_state, set_payment_state
-
             payment_state = get_payment_state(session_id)
             # Skip for WhatsApp sessions — WA bridge bg listener already
             # handles payment delivery; re-sending causes duplicates.
@@ -1310,9 +1369,6 @@ async def chat_endpoint(
                 and payment_state.get("completed")
                 and not payment_state.get("ws_delivered")
             ):
-                from app.core.agui_events import PaymentSuccessEvent
-                import json as _json
-
                 event = PaymentSuccessEvent(
                     order_id=payment_state.get("order_id", ""),
                     order_number=payment_state.get("order_number", ""),
@@ -1325,7 +1381,7 @@ async def chat_endpoint(
                     ]
                 )
 
-                event_data = _json.loads(event.to_json())
+                event_data = json.loads(event.to_json())
                 sent = await websocket_manager.send_message_with_metadata(
                     session_id=session_id,
                     message="",
@@ -1367,8 +1423,7 @@ async def chat_endpoint(
             # from previous crew runs leaking into interceptor-handled messages
             # that call stream_agui_events_to_websocket.
             try:
-                from app.core.agui_events import clear_event_queue as _ceq_top
-                _ceq_top(session_id)
+                clear_event_queue(session_id)
             except Exception:
                 pass
 
@@ -1424,8 +1479,6 @@ async def chat_endpoint(
                         # Direct add-to-cart from UI cards - bypass LLM entirely
                         items = form_data.get("items", [])
                         if items:
-                            from app.features.food_ordering.tools_event_sourced import create_event_sourced_tools
-
                             # Get user_id from connection metadata
                             customer_id = None
                             if session_id in websocket_manager.connection_metadata:
@@ -1453,7 +1506,6 @@ async def chat_endpoint(
                                 result = "No items added"
 
                             # Flush staged events to queue, then stream to WebSocket
-                            from app.core.agui_events import flush_pending_events
                             flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
@@ -1474,9 +1526,6 @@ async def chat_endpoint(
                         item_name = form_data.get("item_name", "")
                         new_quantity = int(form_data.get("quantity", 1))
                         if item_name and new_quantity > 0:
-                            from app.core.db_pool import SyncDBConnection
-                            from app.core.agui_events import emit_cart_data
-
                             with SyncDBConnection() as conn:
                                 with conn.cursor() as cur:
                                     cur.execute(
@@ -1497,7 +1546,6 @@ async def chat_endpoint(
                                     new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
 
                             emit_cart_data(session_id, items_list, new_total)
-                            from app.core.agui_events import flush_pending_events
                             flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
@@ -1507,9 +1555,6 @@ async def chat_endpoint(
                         # Uses SQL session_cart (same store as AI agent tools)
                         item_name = form_data.get("item_name", "")
                         if item_name:
-                            from app.core.db_pool import SyncDBConnection
-                            from app.core.agui_events import emit_cart_data
-
                             with SyncDBConnection() as conn:
                                 with conn.cursor() as cur:
                                     cur.execute(
@@ -1530,7 +1575,6 @@ async def chat_endpoint(
                                     new_total = float(total_row[0]) if total_row and total_row[0] else 0.0
 
                             emit_cart_data(session_id, items_list, new_total)
-                            from app.core.agui_events import flush_pending_events
                             flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=1.0)
                             continue
@@ -1543,8 +1587,6 @@ async def chat_endpoint(
                         logger.info("order_type_selected", session_id=session_id,
                                     order_type=selected_order_type, order_id=order_id)
 
-                        from app.core.redis import get_sync_redis_client
-                        import json as _json
                         _redis = get_sync_redis_client()
                         _pending_key = f"pending_order:{session_id}"
                         _pending_data = _redis.get(_pending_key)
@@ -1554,11 +1596,10 @@ async def chat_endpoint(
                                 session_id, "Your order has expired. Please checkout again.")
                             continue
 
-                        _pending = _json.loads(_pending_data)
+                        _pending = json.loads(_pending_data)
 
                         if selected_order_type == "take_away":
                             # TAKEAWAY: add packaging charges and trigger payment
-                            from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM
                             total_qty = _pending.get("total_quantity", 0)
                             packaging_charges = total_qty * PACKAGING_CHARGE_PER_ITEM
                             subtotal = _pending.get("subtotal", 0)
@@ -1569,7 +1610,7 @@ async def chat_endpoint(
                             _pending["packaging_charges"] = packaging_charges
                             _pending["total"] = total
                             _pending["status"] = "pending_payment"
-                            _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+                            _redis.setex(_pending_key, 3600, json.dumps(_pending))
 
                             # Send charges breakdown message
                             charges_msg = (
@@ -1582,7 +1623,6 @@ async def chat_endpoint(
                             await websocket_manager.send_message(session_id, charges_msg)
 
                             # Trigger payment workflow
-                            from app.workflows.payment_workflow import run_payment_workflow
                             await run_payment_workflow(
                                 session_id, _pending["order_id"], total,
                                 initial_method="online",
@@ -1591,7 +1631,6 @@ async def chat_endpoint(
                                 subtotal=subtotal,
                                 packaging_charges=packaging_charges,
                             )
-                            from app.core.agui_events import flush_pending_events
                             flush_pending_events(session_id)
                             await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
@@ -1601,11 +1640,9 @@ async def chat_endpoint(
                             _pending["packaging_charges"] = 0
                             _pending["total"] = _pending.get("subtotal", 0)
                             _pending["status"] = "pending_booking"
-                            _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+                            _redis.setex(_pending_key, 3600, json.dumps(_pending))
 
                             # Show booking form for table reservation
-                            from app.features.booking.crew_agent import _get_availability_map
-                            from app.core.agui_events import emit_booking_intake_form, flush_pending_events
                             availability = _get_availability_map(days=7)
                             emit_booking_intake_form(
                                 session_id=session_id,
@@ -1624,7 +1661,11 @@ async def chat_endpoint(
                         booking_time = form_data.get("time", "")
                         booking_party_size = int(form_data.get("party_size", 2))
 
-                        from app.features.booking.crew_agent import create_booking_tool
+                        # Auto-populate guest_name and phone from authenticated session
+                        _booking_meta = websocket_manager.connection_metadata.get(session_id, {})
+                        _booking_guest_name = _booking_meta.get("user_name", "") or ""
+                        _booking_phone = _booking_meta.get("phone_number") or _booking_meta.get("auth_phone") or ""
+
                         _make_reservation = create_booking_tool(session_id)
                         result = None
                         try:
@@ -1632,6 +1673,8 @@ async def chat_endpoint(
                                 date=booking_date,
                                 time=booking_time,
                                 party_size=booking_party_size,
+                                guest_name=_booking_guest_name,
+                                phone=_booking_phone,
                             )
                             logger.info("booking_intake_form_processed", session_id=session_id, result=str(result)[:100])
                         except Exception as e:
@@ -1639,7 +1682,6 @@ async def chat_endpoint(
                             result = "Sorry, something went wrong with your reservation. Please try again."
 
                         # Flush events (make_reservation emits BOOKING_CONFIRMATION internally on success)
-                        from app.core.agui_events import flush_pending_events, _PENDING_EVENTS
                         has_confirmation = any(
                             getattr(ev, 'type', None) and ev.type.value == 'BOOKING_CONFIRMATION'
                             for ev in _PENDING_EVENTS.get(session_id, [])
@@ -1654,16 +1696,13 @@ async def chat_endpoint(
 
                         # Check if this booking is part of a dine-in checkout flow
                         # If so, add dine-in service charge and trigger payment
-                        from app.core.redis import get_sync_redis_client
-                        import json as _json
                         _redis = get_sync_redis_client()
                         _pending_key = f"pending_order:{session_id}"
                         _pending_data = _redis.get(_pending_key)
                         if _pending_data:
-                            _pending = _json.loads(_pending_data)
+                            _pending = json.loads(_pending_data)
                             if _pending.get("status") == "pending_booking" and _pending.get("order_type") == "dine_in":
                                 # Dine-in service charge: Rs.5 per person
-                                from app.core.agui_events import DINE_IN_CHARGE_PER_PERSON
                                 dine_in_charge = booking_party_size * DINE_IN_CHARGE_PER_PERSON
                                 subtotal = _pending.get("subtotal", 0)
                                 total = subtotal + dine_in_charge
@@ -1672,7 +1711,7 @@ async def chat_endpoint(
                                 _pending["total"] = total
                                 _pending["party_size"] = booking_party_size
                                 _pending["status"] = "pending_payment"
-                                _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+                                _redis.setex(_pending_key, 3600, json.dumps(_pending))
 
                                 # Send charges breakdown message
                                 charges_msg = (
@@ -1684,7 +1723,6 @@ async def chat_endpoint(
                                 )
                                 await websocket_manager.send_message(session_id, charges_msg)
 
-                                from app.workflows.payment_workflow import run_payment_workflow
                                 await run_payment_workflow(
                                     session_id, _pending["order_id"], total,
                                     initial_method="online",
@@ -1710,13 +1748,11 @@ async def chat_endpoint(
                     _is_takeaway_text = any(kw in _msg_lower for kw in ["take away", "takeaway", "take-away", "pack it", "to go"])
                     _is_dinein_text = any(kw in _msg_lower for kw in ["dine in", "dine-in", "dinein", "eat here", "eat in"])
 
-                    from app.core.redis import get_sync_redis_client
-                    import json as _json
                     _redis = get_sync_redis_client()
                     _pending_key = f"pending_order:{session_id}"
                     _pending_data = _redis.get(_pending_key)
                     if _pending_data:
-                        _pending = _json.loads(_pending_data)
+                        _pending = json.loads(_pending_data)
                         if _pending.get("status") == "pending_order_type":
                             if _is_takeaway_text or _is_dinein_text:
                                 # Deterministic handling — bypass crew agent entirely
@@ -1725,7 +1761,6 @@ async def chat_endpoint(
                                             order_type=selected_order_type, text=_msg_lower)
 
                                 if selected_order_type == "take_away":
-                                    from app.core.agui_events import PACKAGING_CHARGE_PER_ITEM, flush_pending_events
                                     total_qty = _pending.get("total_quantity", 0)
                                     packaging_charges = total_qty * PACKAGING_CHARGE_PER_ITEM
                                     subtotal = _pending.get("subtotal", 0)
@@ -1735,7 +1770,7 @@ async def chat_endpoint(
                                     _pending["packaging_charges"] = packaging_charges
                                     _pending["total"] = total
                                     _pending["status"] = "pending_payment"
-                                    _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+                                    _redis.setex(_pending_key, 3600, json.dumps(_pending))
 
                                     charges_msg = (
                                         f"📦 **Takeaway Order**\n"
@@ -1746,7 +1781,6 @@ async def chat_endpoint(
                                     )
                                     await websocket_manager.send_message(session_id, charges_msg)
 
-                                    from app.workflows.payment_workflow import run_payment_workflow
                                     await run_payment_workflow(
                                         session_id, _pending["order_id"], total,
                                         initial_method="online",
@@ -1759,15 +1793,12 @@ async def chat_endpoint(
                                     await stream_agui_events_to_websocket(session_id, websocket_manager, timeout=2.0)
 
                                 elif selected_order_type == "dine_in":
-                                    from app.core.agui_events import flush_pending_events
                                     _pending["order_type"] = "dine_in"
                                     _pending["packaging_charges"] = 0
                                     _pending["total"] = _pending.get("subtotal", 0)
                                     _pending["status"] = "pending_booking"
-                                    _redis.setex(_pending_key, 3600, _json.dumps(_pending))
+                                    _redis.setex(_pending_key, 3600, json.dumps(_pending))
 
-                                    from app.features.booking.crew_agent import _get_availability_map
-                                    from app.core.agui_events import emit_booking_intake_form
                                     availability = _get_availability_map(days=7)
                                     emit_booking_intake_form(
                                         session_id=session_id,
@@ -1840,9 +1871,8 @@ async def chat_endpoint(
                 # - Payment text ("pay now", "complete payment") → re-show Razorpay link
                 # - Any other message → remind about pending payment with link + cancel quick replies
                 try:
-                    from app.services.payment_state_service import get_payment_state as _gps, PaymentStep as _PStep
-                    _pstate = _gps(session_id)
-                    if (_pstate.get("step") == _PStep.AWAITING_PAYMENT.value
+                    _pstate = get_payment_state(session_id)
+                    if (_pstate.get("step") == PaymentStep.AWAITING_PAYMENT.value
                             and _pstate.get("order_id")):
                         _pay_order_id = _pstate["order_id"]
                         _pay_amount = _pstate.get("amount", 0)
@@ -1860,7 +1890,6 @@ async def chat_endpoint(
 
                         if _is_cancel:
                             # Clear payment state and let user continue
-                            from app.services.payment_state_service import clear_payment_state
                             clear_payment_state(session_id)
                             await websocket_manager.send_message_with_metadata(
                                 session_id=session_id,
@@ -1872,8 +1901,6 @@ async def chat_endpoint(
                                 metadata={"direct_action": "payment_cancelled"}
                             )
                             # Show helpful quick replies after cancellation
-                            import json as _json
-                            from app.core.agui_events import QuickRepliesEvent
                             _cancel_qr = QuickRepliesEvent(replies=[
                                 {"label": "🛒 View Cart", "action": "view cart"},
                                 {"label": "🍔 Show Menu", "action": "show menu"},
@@ -1883,7 +1910,7 @@ async def chat_endpoint(
                                 session_id=session_id,
                                 message="",
                                 message_type="agui_event",
-                                metadata={"agui": _json.loads(_cancel_qr.to_json())}
+                                metadata={"agui": json.loads(_cancel_qr.to_json())}
                             )
                             logger.info("payment_cancelled_by_user", session_id=session_id, order_id=_pay_order_id)
                             continue
@@ -1917,8 +1944,6 @@ async def chat_endpoint(
                             metadata={"direct_action": "payment_pending_confirm_cancel"}
                         )
                         # Show quick reply buttons for cancel / complete payment
-                        import json as _json
-                        from app.core.agui_events import QuickRepliesEvent
                         _confirm_qr = QuickRepliesEvent(replies=[
                             {"label": "Yes, cancel payment", "action": "yes cancel"},
                             {"label": "No, complete payment", "action": "complete payment"},
@@ -1927,7 +1952,7 @@ async def chat_endpoint(
                             session_id=session_id,
                             message="",
                             message_type="agui_event",
-                            metadata={"agui": _json.loads(_confirm_qr.to_json())}
+                            metadata={"agui": json.loads(_confirm_qr.to_json())}
                         )
                         logger.info("payment_pending_cancel_prompt", session_id=session_id, order_id=_pay_order_id)
                         continue
@@ -1945,8 +1970,7 @@ async def chat_endpoint(
 
                     # Also match natural language when payment is completed
                     if not _is_receipt and not _is_order_more:
-                        from app.services.payment_state_service import get_payment_state as _gps2
-                        _ps2 = _gps2(session_id)
+                        _ps2 = get_payment_state(session_id)
                         if _ps2.get("order_id") and _ps2.get("step") in ("payment_success", "cash_selected"):
                             if not _is_receipt:
                                 _is_receipt = (
@@ -1962,8 +1986,7 @@ async def chat_endpoint(
                                 _is_order_more = _msg_low in ("order more", "order again", "order something else")
 
                     if _is_receipt:
-                        from app.services.payment_state_service import get_payment_state as _gps3
-                        _pstate2 = _gps3(session_id)
+                        _pstate2 = get_payment_state(session_id)
                         _display_id = _pstate2.get("order_id", "")
                         _order_num = _pstate2.get("order_number") or _display_id or "N/A"
                         _amt = _pstate2.get("amount", 0)
@@ -1971,8 +1994,6 @@ async def chat_endpoint(
 
                         if _display_id:
                             # Emit RECEIPT_LINK card via AGUI (same as get_order_receipt tool)
-                            import json as _rjson
-                            from app.core.agui_events import ReceiptLinkEvent
                             _pdf_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
                             _receipt_items = []
                             for _ri in _items:
@@ -1991,7 +2012,7 @@ async def chat_endpoint(
                                 session_id=session_id,
                                 message="",
                                 message_type="agui_event",
-                                metadata={"agui": _rjson.loads(_receipt_event.to_json())}
+                                metadata={"agui": json.loads(_receipt_event.to_json())}
                             )
                             await websocket_manager.send_message(
                                 session_id,
@@ -2000,8 +2021,6 @@ async def chat_endpoint(
                         else:
                             await websocket_manager.send_message(session_id, "📄 **Order Receipt**\n\nYour receipt will be sent to you via SMS and email shortly.\n\nAnything else I can help you with?")
                         # Emit quick replies after receipt
-                        import json as _qr_json
-                        from app.core.agui_events import QuickRepliesEvent
                         _receipt_qr = QuickRepliesEvent(replies=[
                             {"label": "🍔 Order More", "action": "show menu"},
                             {"label": "⭐ Rate Order", "action": "rate this order"},
@@ -2011,19 +2030,16 @@ async def chat_endpoint(
                             session_id=session_id,
                             message="",
                             message_type="agui_event",
-                            metadata={"agui": _qr_json.loads(_receipt_qr.to_json())}
+                            metadata={"agui": json.loads(_receipt_qr.to_json())}
                         )
                         logger.info("view_receipt_handled", session_id=session_id)
                         continue
 
                     if _is_order_more:
-                        from app.services.payment_state_service import clear_payment_state as _clear_ps
-                        _clear_ps(session_id)
+                        clear_payment_state(session_id)
                         await websocket_manager.send_message(session_id, "🍽️ Great! What else would you like to order? I can show you our menu or you can tell me what you're craving!")
                         # Emit quick replies after order more
-                        import json as _qr_json2
-                        from app.core.agui_events import QuickRepliesEvent as _QR2
-                        _more_qr = _QR2(replies=[
+                        _more_qr = QuickRepliesEvent(replies=[
                             {"label": "🍔 Show Menu", "action": "show menu"},
                             {"label": "🔍 Search", "action": "search menu"},
                             {"label": "🛒 View Cart", "action": "view cart"},
@@ -2032,7 +2048,7 @@ async def chat_endpoint(
                             session_id=session_id,
                             message="",
                             message_type="agui_event",
-                            metadata={"agui": _qr_json2.loads(_more_qr.to_json())}
+                            metadata={"agui": json.loads(_more_qr.to_json())}
                         )
                         logger.info("order_more_handled", session_id=session_id)
                         continue
@@ -2044,7 +2060,6 @@ async def chat_endpoint(
                 # Clear stale events from previous processing cycles so they
                 # don't leak into the new response stream.
                 try:
-                    from app.core.agui_events import clear_event_queue
                     clear_event_queue(session_id)
                 except Exception:
                     pass
@@ -2211,9 +2226,6 @@ async def stream_agui_events_to_websocket(
     This runs concurrently with message processing and forwards all AG-UI
     events (ACTIVITY_START, TOOL_CALL_START, etc.) to the frontend via WebSocket.
     """
-    from app.core.agui_events import get_event_queue
-    import asyncio
-
     queue = get_event_queue(session_id)
     start_time = asyncio.get_event_loop().time()
 
@@ -2312,14 +2324,7 @@ async def process_message_with_ai(
 
     Performance: ~2-3 seconds per message
     """
-    import asyncio
-
     try:
-        # Import AG-UI streaming version
-        from app.orchestration.restaurant_crew import process_with_agui_streaming
-        from app.core.agui_events import AGUIEventEmitter
-        from app.services.session_manager import SessionManager
-
         logger.info(
             "Using Restaurant Crew with AG-UI streaming",
             session_id=session_id,
@@ -2343,7 +2348,6 @@ async def process_message_with_ai(
         # Only include recent messages (last 30 minutes) to prevent stale context
         conversation_history = []
         try:
-            from datetime import datetime, timezone, timedelta
             context_window = timedelta(minutes=30)  # Only use messages from last 30 mins
             now = datetime.now(timezone.utc)
 
@@ -2403,6 +2407,10 @@ async def process_message_with_ai(
                 _conn_meta = websocket_manager.connection_metadata.get(session_id, {})
                 _source = _conn_meta.get("source", "web")
 
+                # Get authenticated user name and phone from connection metadata
+                _auth_user_name = _conn_meta.get("user_name")
+                _auth_phone = _conn_meta.get("phone_number") or _conn_meta.get("auth_phone")
+
                 ai_response, cycle_metadata = await process_with_agui_streaming(
                     user_message=message,
                     session_id=session_id,
@@ -2411,7 +2419,9 @@ async def process_message_with_ai(
                     user_id=authenticated_user_id,
                     welcome_msg=welcome_msg,
                     language=language,
-                    source=_source
+                    source=_source,
+                    user_name=_auth_user_name,
+                    phone=_auth_phone,
                 )
             finally:
                 # Wait for event stream to finish naturally (flush queue)
@@ -2433,7 +2443,6 @@ async def process_message_with_ai(
                         logger.warning(f"Error waiting for event stream: {str(e)}")
 
         # SECURITY: Sanitize crew response before sending to frontend
-        from app.core.response_sanitizer import sanitize_response
         ai_response = sanitize_response(ai_response)
 
         # Log cycle metadata for analytics
@@ -2456,7 +2465,6 @@ async def process_message_with_ai(
         )
 
         # SECURITY: Convert technical error to user-friendly message
-        from app.core.response_sanitizer import sanitize_error
         fallback_response = sanitize_error(e)
 
         return fallback_response, {

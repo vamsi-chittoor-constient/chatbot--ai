@@ -109,6 +109,8 @@ class MenuItem(Base):
     menu_item_is_seasonal = Column(Boolean, default=False)
     menu_item_image_url = Column(String(500), )
     menu_item_serving_unit = Column(String(20), )
+    # LLM-generated recommendation tags (e.g. ["spicy", "grilled", "indian", "chicken", "main_course"])
+    recommendation_tags = Column(JSONB, )
 
 class MenuItemAddonGroup(Base):
     """Auto-generated model for menu_item_addon_group table"""

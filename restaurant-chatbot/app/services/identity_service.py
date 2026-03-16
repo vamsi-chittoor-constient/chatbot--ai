@@ -12,6 +12,7 @@ Tier 3: Authenticated (session_token or recent OTP) - full personalization
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 import secrets
+import uuid
 import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -248,11 +249,8 @@ class IdentityService:
             if not device:
                 # Create new device record
                 try:
-                    from app.utils.id_generator import generate_id
-                    device_db_id = await generate_id(session, "user_devices")
-
                     device = UserDevice(
-                        id=device_db_id,
+                        id=uuid.uuid4(),
                         device_id=device_id,
                         first_seen_at=datetime.now(timezone.utc),
                         last_seen_at=datetime.now(timezone.utc)
@@ -471,11 +469,8 @@ class IdentityService:
                 device.last_seen_at = datetime.now(timezone.utc)
             else:
                 try:
-                    from app.utils.id_generator import generate_id
-                    device_db_id = await generate_id(session, "user_devices")
-
                     device = UserDevice(
-                        id=device_db_id,
+                        id=uuid.uuid4(),
                         device_id=device_id,
                         user_id=user_id,
                         first_seen_at=datetime.now(timezone.utc),
@@ -500,9 +495,8 @@ class IdentityService:
             now = datetime.now(timezone.utc)
             expiry = now + timedelta(days=self.session_token_expiry_days)
 
-            # Generate unique token ID for revocation support
-            from app.utils.id_generator import generate_id
-            token_db_id = await generate_id(session, "session_tokens")
+            # Generate UUID for token record (DB uses UUID primary key)
+            token_db_id = str(uuid.uuid4())
 
             # Create JWT payload
             jwt_payload = {

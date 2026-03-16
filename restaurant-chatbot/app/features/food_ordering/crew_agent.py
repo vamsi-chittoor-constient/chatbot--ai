@@ -26,10 +26,23 @@ Performance Note:
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
 from typing import Dict, Any, List, Optional
+import json
+import uuid
 import structlog
 import asyncio
 import re
+import concurrent.futures
 from datetime import datetime
+
+from app.core.agui_events import (
+    emit_tool_activity, emit_menu_data, emit_quick_replies,
+    emit_receipt_link, emit_order_type_selection,
+)
+from app.core.redis import get_cart_sync, save_cart_sync, get_sync_redis_client
+from app.core.preloader import get_menu_preloader, get_current_meal_period
+from app.core.semantic_context import get_entity_graph
+from app.core.db_pool import SyncDBConnection
+from app.core.session_events import get_sync_session_tracker
 
 # Phase 1 tools: Customer profile, FAQ, feedback
 from app.features.food_ordering.new_tools_phase1 import get_all_phase1_tools
@@ -45,9 +58,6 @@ logger = structlog.get_logger(__name__)
 # Cache crews by session to avoid recreating them every message
 _CREW_CACHE = {}
 _CREW_VERSION = 30  # v30: ALL PHASES COMPLETE - 55 total tools (20 base + 35 new)
-
-# Concurrency configuration - custom ThreadPoolExecutor for handling concurrent users
-import concurrent.futures
 MAX_CONCURRENT_CREWS = 20  # Rate limit: max 20 concurrent crew executions
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=50,  # Thread pool size: can handle up to 50 concurrent requests
@@ -105,7 +115,6 @@ def clean_crew_response(raw_response: str) -> str:
 
     We need to extract just the final human-readable answer.
     """
-    import re
 
     response = str(raw_response).strip()
 
@@ -176,7 +185,6 @@ def _get_menu_from_preloader(query: str = "", use_meal_filter: bool = True, stri
         List of menu items, filtered by current meal period
     """
     try:
-        from app.core.preloader import get_menu_preloader, get_current_meal_period
         preloader = get_menu_preloader()
 
         if preloader.is_loaded:
@@ -223,12 +231,14 @@ def _infer_category(item_name: str) -> str:
 
 def _search_menu_impl(query: str, session_id: str) -> str:
     """Sync implementation of search_menu for crew pool."""
-    from app.core.agui_events import emit_tool_activity, emit_menu_data
-    from app.core.redis import get_cart_sync
-    from app.core.preloader import get_current_meal_period
 
     # Emit activity
     emit_tool_activity(session_id, "search_menu")
+
+    # Parse price from query
+    max_price, min_price, cleaned_query = _parse_price_from_query(query)
+    if cleaned_query != query:
+        query = cleaned_query
 
     # Get current meal period
     current_meal = get_current_meal_period()
@@ -236,10 +246,23 @@ def _search_menu_impl(query: str, session_id: str) -> str:
     # Get menu from preloader (without meal filtering for searches, so we can provide context)
     items = _get_menu_from_preloader(query, use_meal_filter=False) if query else _get_menu_from_preloader(query)
 
+    # Apply price filtering
+    if max_price > 0:
+        items = [i for i in items if i.get("price", 0) <= max_price]
+    if min_price > 0:
+        items = [i for i in items if i.get("price", 0) >= min_price]
+
     if not items:
         logger.warning("menu_preloader_empty", query=query)
         if query:
             return f"No items found matching '{query}'. Try browsing the full menu."
+        price_desc = ""
+        if max_price > 0:
+            price_desc = f" under Rs.{max_price:.0f}"
+        elif min_price > 0:
+            price_desc = f" above Rs.{min_price:.0f}"
+        if price_desc:
+            return f"No items found{price_desc}. Try a different price range."
         return "Menu is loading. Please try again in a moment."
 
     # Check if search results are available in current meal period (when there's a query)
@@ -320,7 +343,6 @@ def _search_menu_impl(query: str, session_id: str) -> str:
 
     # Track displayed menu
     try:
-        from app.core.semantic_context import get_entity_graph
         graph = get_entity_graph(session_id)
         displayed_items = [item.get('name') for item in items[:15]]
         graph.set_displayed_menu(displayed_items)
@@ -374,10 +396,6 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
     ORDER_TYPE_SELECTION card so the user can choose Dine-in or Takeaway.
     Payment is triggered later by the order_type_selection handler in chat.py.
     """
-    from app.core.agui_events import emit_tool_activity, emit_order_type_selection
-    from app.core.session_events import get_sync_session_tracker
-    import uuid
-    from datetime import datetime
 
     emit_tool_activity(session_id, "checkout")
 
@@ -412,8 +430,6 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
         order_display_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
         # Store order as pending_order_type in Redis (waiting for dine-in/takeaway selection)
-        from app.core.redis import get_sync_redis_client
-        import json
         redis_client = get_sync_redis_client()
         pending_order_key = f"pending_order:{session_id}"
         pending_order = {
@@ -436,7 +452,6 @@ def _checkout_impl(order_type: str, session_id: str) -> str:
                      status="pending_order_type")
 
         # Clear session_cart in PostgreSQL so cart shows empty after checkout
-        from app.core.db_pool import SyncDBConnection
         try:
             with SyncDBConnection() as conn:
                 with conn.cursor() as cur:
@@ -481,9 +496,6 @@ def _select_order_type_impl(order_type: str, session_id: str) -> str:
     The actual charges calculation and payment workflow are triggered
     by the order_type_selection handler in chat.py after the crew finishes.
     """
-    from app.core.agui_events import emit_tool_activity
-    from app.core.redis import get_sync_redis_client
-    import json
 
     emit_tool_activity(session_id, "select_order_type")
 
@@ -519,7 +531,6 @@ def _select_order_type_impl(order_type: str, session_id: str) -> str:
 
 def _cancel_order_impl(session_id: str) -> str:
     """Sync implementation of cancel_order for crew pool."""
-    from app.core.agui_events import emit_tool_activity
     emit_tool_activity(session_id, "cancel_order")
     return "Order cancellation requires an order ID. What order would you like to cancel?"
 
@@ -528,8 +539,6 @@ def _cancel_order_impl(session_id: str) -> str:
 
 def _get_item_details_impl(item_name: str, session_id: str) -> str:
     """Sync implementation of get_item_details for crew pool."""
-    from app.core.agui_events import emit_tool_activity
-    from app.core.preloader import get_menu_preloader
 
     emit_tool_activity(session_id, "get_item_details")
 
@@ -544,15 +553,12 @@ def _get_item_details_impl(item_name: str, session_id: str) -> str:
 
 def _reorder_impl(session_id: str) -> str:
     """Sync implementation of reorder for crew pool."""
-    from app.core.agui_events import emit_tool_activity
     emit_tool_activity(session_id, "reorder")
     return "To reorder, I need your previous order ID. What order would you like to reorder?"
 
 
 def _set_special_instructions_impl(item_name: str, instructions: str, session_id: str) -> str:
     """Sync implementation of set_special_instructions for crew pool."""
-    from app.core.agui_events import emit_tool_activity
-    from app.core.redis import get_cart_sync, save_cart_sync
 
     emit_tool_activity(session_id, "set_special_instructions")
 
@@ -578,8 +584,6 @@ def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
     Reads receipt data from Redis payment_state (which has full item details)
     rather than PostgreSQL (which doesn't store item_name/quantity).
     """
-    from app.core.agui_events import emit_tool_activity, emit_receipt_link
-    from datetime import datetime
 
     emit_tool_activity(session_id, "get_order_receipt")
 
@@ -646,9 +650,6 @@ def _get_order_receipt_impl(order_id: str, session_id: str) -> str:
 
 def _get_order_status_impl(order_id: str, session_id: str) -> str:
     """Sync implementation of get_order_status for crew pool."""
-    from app.core.agui_events import emit_tool_activity
-    from app.core.redis import get_sync_redis_client
-    from app.core.db_pool import SyncDBConnection
 
     emit_tool_activity(session_id, "get_order_status")
 
@@ -692,9 +693,6 @@ def _get_order_status_impl(order_id: str, session_id: str) -> str:
 
 def _get_order_history_impl(session_id: str) -> str:
     """Sync implementation of get_order_history for crew pool."""
-    from app.core.agui_events import emit_tool_activity
-    from app.core.redis import get_sync_redis_client
-    from app.core.db_pool import SyncDBConnection
 
     emit_tool_activity(session_id, "get_order_history")
 
@@ -1114,17 +1112,20 @@ Return JSON only:
 {{"action_set": "<set_name>"}}"""
 
 
-def get_response_quick_replies(response: str) -> List[Dict[str, str]]:
+def get_response_quick_replies(response: str, session_id: str = "") -> List[Dict[str, str]]:
     """
     Use a small LLM agent to intelligently determine which quick reply buttons to show.
 
     This replaces fragile rule-based detection with contextual understanding.
     Uses GPT-4o-mini for speed and cost efficiency.
 
+    Args:
+        response: The AI response text to classify
+        session_id: Session ID to check greeting state (prevents greeting loops)
+
     Returns:
         List of reply dicts, or empty list if none applicable.
     """
-    import json
 
     try:
         from langchain_openai import ChatOpenAI
@@ -1163,6 +1164,22 @@ def get_response_quick_replies(response: str) -> List[Dict[str, str]]:
             logger.debug("quick_reply_agent_decision",
                         action_set=action_set,
                         items=items)
+
+            # CODE-LEVEL OVERRIDE: Suppress greeting_welcome after initial welcome
+            # This prevents greeting loops where LLM classifier returns greeting_welcome mid-conversation
+            if action_set == "greeting_welcome" and session_id:
+                try:
+                    
+                    _redis = get_sync_redis_client()
+                    _hist_data = _redis.get(f"conversation:{session_id}")
+                    if _hist_data:
+                        _hist = json.loads(_hist_data)
+                        _user_msgs = [m for m in _hist if isinstance(m, dict) and m.get("role") == "user"] if isinstance(_hist, list) else []
+                        if len(_user_msgs) > 0:
+                            action_set = "continue_ordering"
+                            logger.info("greeting_welcome_suppressed", session_id=session_id, user_msg_count=len(_user_msgs))
+                except Exception as e:
+                    logger.warning("greeting_check_failed", error=str(e))
 
             # Get the replies for the selected action set
             if action_set == "which_item" and items:
@@ -1214,7 +1231,6 @@ def _emit_response_quick_replies(session_id: str, response: str):
     This function uses thread-safe emission which can cause race conditions
     with streaming. Prefer using get_response_quick_replies() + emitter.emit_quick_replies().
     """
-    from app.core.agui_events import emit_quick_replies
 
     replies = get_response_quick_replies(response)
     if replies:
@@ -1275,7 +1291,6 @@ async def _find_item_by_name(item_name: str) -> Optional[Dict]:
 
     # Try preloader first (instant)
     try:
-        from app.core.preloader import get_menu_preloader
         preloader = get_menu_preloader()
 
         if preloader.is_loaded:
@@ -1325,11 +1340,56 @@ async def _find_item_by_name(item_name: str) -> Optional[Dict]:
 # ============================================================================
 
 
+def _parse_price_from_query(query: str) -> tuple:
+    """Extract price constraints from natural language query.
+
+    Returns (max_price, min_price, cleaned_query).
+    """
+    max_price = 0.0
+    min_price = 0.0
+    cleaned = query
+
+    # "below 100", "under 200", "less than 150", "cheaper than 300", "within 500"
+    max_pat = re.search(
+        r'(?:below|under|less\s+than|cheaper\s+than|within|upto|up\s+to|max|budget)\s*(?:rs\.?|inr|₹)?\s*(\d+)',
+        query, re.IGNORECASE
+    )
+    if max_pat:
+        max_price = float(max_pat.group(1))
+        cleaned = query[:max_pat.start()].strip() + " " + query[max_pat.end():].strip()
+
+    # "above 200", "over 100", "more than 150", "starting from 100"
+    min_pat = re.search(
+        r'(?:above|over|more\s+than|starting\s+from|minimum|min|at\s+least)\s*(?:rs\.?|inr|₹)?\s*(\d+)',
+        query, re.IGNORECASE
+    )
+    if min_pat:
+        min_price = float(min_pat.group(1))
+        cleaned = cleaned[:min_pat.start()].strip() + " " + cleaned[min_pat.end():].strip()
+
+    # "between 100 and 300", "100 to 300", "100-300"
+    range_pat = re.search(
+        r'(?:between\s+)?(?:rs\.?|inr|₹)?\s*(\d+)\s*(?:to|-|and)\s*(?:rs\.?|inr|₹)?\s*(\d+)',
+        query, re.IGNORECASE
+    )
+    if range_pat and not max_pat and not min_pat:
+        min_price = float(range_pat.group(1))
+        max_price = float(range_pat.group(2))
+        cleaned = query[:range_pat.start()].strip() + " " + query[range_pat.end():].strip()
+
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Strip common filler words left after price extraction
+    cleaned = re.sub(r'\b(items?|show|me|the|all|food|price|cheap|expensive)\b', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    return max_price, min_price, cleaned
+
+
 def create_search_menu_tool(session_id: str):
     """Factory to create search_menu tool with session context."""
 
     @tool("search_menu")
-    def search_menu(query: Optional[str] = None) -> str:
+    def search_menu(query: Optional[str] = None, max_price: float = 0, min_price: float = 0) -> str:
         """
         Search the restaurant menu for food items.
 
@@ -1339,6 +1399,8 @@ def create_search_menu_tool(session_id: str):
         Args:
             query: Search term to filter menu items (e.g., "burger", "spicy", "chicken").
                    Use None or "" to show full menu.
+            max_price: Maximum price filter (e.g. 100 for "items below 100"). 0 = no limit.
+            min_price: Minimum price filter (e.g. 200 for "items above 200"). 0 = no limit.
 
         Returns:
             Confirmation message that menu card was displayed with item count.
@@ -1347,23 +1409,36 @@ def create_search_menu_tool(session_id: str):
             - search_menu("") → Full menu card displayed
             - search_menu("burger") → All burger items in menu card
             - search_menu("spicy") → All items containing "spicy"
-            - search_menu("vegetarian") → Vegetarian items only
-            - search_menu("pizza") → All pizza varieties
+            - search_menu("", max_price=100) → All items under Rs.100
+            - search_menu("chicken", max_price=200) → Chicken items under Rs.200
         """
         # Convert None to empty string for backward compatibility
         query = query or ""
 
+        # Parse price from query if not passed explicitly
+        _max_price, _min_price, _cleaned = _parse_price_from_query(query)
+        if max_price <= 0:
+            max_price = _max_price
+        if min_price <= 0:
+            min_price = _min_price
+        if _cleaned != query:
+            query = _cleaned
+
         # Emit activity for frontend (async)
-        from app.core.agui_events import emit_tool_activity
         emit_tool_activity(session_id, "search_menu")
 
         # Get current meal period for time-aware filtering
-        from app.core.preloader import get_current_meal_period
         current_meal = get_current_meal_period()
 
         # Try preloader first (instant - no DB query!)
         # For searches, get ALL items without pre-filtering to enable contextual messages
         items = _get_menu_from_preloader(query, use_meal_filter=False) if query else _get_menu_from_preloader(query)
+
+        # Apply price filtering
+        if max_price > 0:
+            items = [i for i in items if i.get("price", 0) <= max_price]
+        if min_price > 0:
+            items = [i for i in items if i.get("price", 0) >= min_price]
 
         # DEBUG: Log what preloader returned
         logger.info(f"preloader_search_result", query=query, items_count=len(items) if items else 0,
@@ -1377,7 +1452,6 @@ def create_search_menu_tool(session_id: str):
             # Return helpful message instead of DB fallback
             if query:
                 # Try to find similar items and show as MENU CARD
-                from app.core.preloader import get_menu_preloader
                 preloader = get_menu_preloader()
                 all_items = preloader.menu if preloader.is_loaded else []
 
@@ -1401,9 +1475,6 @@ def create_search_menu_tool(session_id: str):
                 if similar_items:
                     # CRITICAL: Emit MENU_DATA card with similar items (user journey!)
                     try:
-                        from app.core.agui_events import emit_menu_data
-                        from app.core.redis import get_cart_sync
-                        from app.core.preloader import get_current_meal_period
 
                         current_meal = get_current_meal_period()
                         cart_data = get_cart_sync(session_id)
@@ -1474,9 +1545,6 @@ def create_search_menu_tool(session_id: str):
                     if category_items:
                         # Emit MENU_DATA with alternative category items
                         try:
-                            from app.core.agui_events import emit_menu_data
-                            from app.core.redis import get_cart_sync
-                            from app.core.preloader import get_current_meal_period
 
                             current_meal = get_current_meal_period()
                             cart_data = get_cart_sync(session_id)
@@ -1510,7 +1578,6 @@ def create_search_menu_tool(session_id: str):
                     try:
                         current_meal_items = _get_menu_from_preloader("", use_meal_filter=True, strict_filter=True)
                         if current_meal_items:
-                            from app.core.redis import get_cart_sync
                             cart_data = get_cart_sync(session_id)
                             cart_items = cart_data.get("items", []) if cart_data else []
                             cart_item_names = {item.get("name", "").lower() for item in cart_items}
@@ -1570,8 +1637,6 @@ def create_search_menu_tool(session_id: str):
 
                 # Emit full lunch/dinner menu card so user can browse
                 try:
-                    from app.core.agui_events import emit_menu_data
-                    from app.core.redis import get_cart_sync
 
                     cart_data = get_cart_sync(session_id)
                     cart_items = cart_data.get("items", []) if cart_data else []
@@ -1628,7 +1693,6 @@ def create_search_menu_tool(session_id: str):
 
         # Track displayed menu in entity graph (for "the 2nd one" resolution)
         try:
-            from app.core.semantic_context import get_entity_graph
             graph = get_entity_graph(session_id)
             # Store item names in display order
             displayed_items = [item.get('name') for item in items[:15]]
@@ -1650,9 +1714,6 @@ def create_search_menu_tool(session_id: str):
         # Don't show MenuCard for item searches like "pizza" - just return text
         if not query:  # Empty query = full menu request
             try:
-                from app.core.agui_events import emit_menu_data
-                from app.core.redis import get_cart_sync
-                from app.core.preloader import get_current_meal_period
 
                 # Get current meal period for frontend
                 current_meal = get_current_meal_period()
@@ -1691,9 +1752,6 @@ def create_search_menu_tool(session_id: str):
             # Multiple matches - show filtered menu for clarification
             logger.info(f"ambiguous_query_detected", query=query, matches=len(items))
             try:
-                from app.core.agui_events import emit_menu_data
-                from app.core.redis import get_cart_sync
-                from app.core.preloader import get_current_meal_period
 
                 current_meal = get_current_meal_period()
                 cart_data = get_cart_sync(session_id)
@@ -1771,18 +1829,17 @@ def create_add_to_cart_tool(session_id: str):
             - "I want 1 Butter Chicken and 2 Naan" → add_to_cart('[{"item": "Butter Chicken", "quantity": 1}, {"item": "Naan", "quantity": 2}]')
             - "Add biryani" → Do NOT call. Ask: "How many would you like?"
         """
-        import json as _json
+        
 
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "add_to_cart")
 
         from app.core.redis import get_cart_sync, set_cart_sync
-        from app.core.preloader import get_menu_preloader
 
         try:
             # Parse items JSON
             try:
-                items_list = _json.loads(items)
+                items_list = json.loads(items)
                 if isinstance(items_list, dict):
                     items_list = [items_list]
             except (_json.JSONDecodeError, TypeError):
@@ -1810,10 +1867,22 @@ def create_add_to_cart_tool(session_id: str):
                 if quantity > 50:
                     return f"[INVALID QUANTITY] Maximum 50 per item. '{item_name}' has quantity {quantity}."
 
-                found_item = preloader.find_item(item_name) if preloader.is_loaded else None
+                if preloader.is_loaded:
+                    found_item, confidence = preloader.find_item(item_name, with_confidence=True)
+                else:
+                    found_item, confidence = None, 0.0
+
                 if not found_item:
                     not_found.append(item_name)
                     continue
+
+                # Low-confidence fuzzy match: ask user to confirm instead of silently adding
+                if confidence < 0.85:
+                    return (
+                        f"I'm not sure about \"{item_name}\". "
+                        f"Did you mean **{found_item.get('name')}** (₹{found_item.get('price', 0)})? "
+                        f"Please confirm and I'll add it to your cart."
+                    )
 
                 # Check if already in cart
                 existing = None
@@ -1837,7 +1906,6 @@ def create_add_to_cart_tool(session_id: str):
 
                 # Track last mentioned item
                 try:
-                    from app.core.semantic_context import get_entity_graph
                     graph = get_entity_graph(session_id)
                     graph.update_last_mentioned(found_item['name'])
                 except Exception:
@@ -1900,7 +1968,6 @@ def create_view_cart_tool(session_id: str):
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "view_cart")
 
-        from app.core.redis import get_cart_sync
 
         try:
             cart_data = get_cart_sync(session_id) or {"items": []}
@@ -1961,7 +2028,7 @@ def create_remove_from_cart_tool(session_id: str):
             - "remove the burger" → remove_from_cart('[{"item": "burger"}]')
             - "delete 2 cokes and the pizza" → remove_from_cart('[{"item": "coke", "quantity": 2}, {"item": "pizza"}]')
         """
-        import json as _json
+        
 
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "remove_from_cart")
@@ -1971,7 +2038,7 @@ def create_remove_from_cart_tool(session_id: str):
         try:
             # Parse items JSON
             try:
-                items_list = _json.loads(items)
+                items_list = json.loads(items)
                 if isinstance(items_list, dict):
                     items_list = [items_list]
             except (_json.JSONDecodeError, TypeError):
@@ -2121,7 +2188,6 @@ def _create_checkout_tool_async_DISABLED(session_id: str):
         order_type = "take_away"
 
         from app.core.redis import get_cart, set_cart
-        import uuid
 
         try:
             # Get cart (async Redis)
@@ -2288,7 +2354,6 @@ def _create_checkout_tool_async_DISABLED(session_id: str):
             # ============================================================
             try:
                 from app.core.redis import get_redis_client
-                import json
 
                 redis_client = await get_redis_client()
                 order_key = f"order:{session_id}:{order_display_id}"
@@ -2376,7 +2441,6 @@ def create_cancel_order_tool(session_id: str):
         await emit_tool_activity_async(session_id, "cancel_order")
 
         from app.core.redis import get_redis_client
-        import json
 
         try:
             redis_client = await get_redis_client()
@@ -2765,7 +2829,6 @@ def create_update_quantity_tool(session_id: str):
         from app.core.agui_events import emit_tool_activity, emit_cart_data
         emit_tool_activity(session_id, "update_quantity")
 
-        from app.core.db_pool import SyncDBConnection
 
         try:
             # VALIDATION: Quantity must be positive and reasonable
@@ -2838,7 +2901,6 @@ def create_set_special_instructions_tool(session_id: str):
             Confirmation that instructions were added.
         """
         # Emit activity for frontend (sync)
-        from app.core.agui_events import emit_tool_activity
         emit_tool_activity(session_id, "set_special_instructions")
 
         from app.core.redis import get_cart_sync, set_cart_sync
@@ -2906,7 +2968,6 @@ def create_get_item_details_tool(session_id: str):
             Item details including description, ingredients, and allergen info.
         """
         # Emit activity for frontend (sync)
-        from app.core.agui_events import emit_tool_activity
         emit_tool_activity(session_id, "get_item_details")
 
         try:
@@ -2993,7 +3054,6 @@ def create_reorder_tool(session_id: str):
         await emit_tool_activity_async(session_id, "reorder_last_order")
 
         from app.core.redis import get_redis_client, get_cart, set_cart
-        import json
 
         try:
             # Order history operations use async Redis client
@@ -3085,9 +3145,6 @@ def create_filter_by_cuisine_tool(session_id: str):
         Returns:
             List of menu items from that cuisine or available cuisine types.
         """
-        from app.core.agui_events import emit_tool_activity, emit_menu_data
-        from app.core.preloader import get_menu_preloader, get_current_meal_period
-        from app.core.redis import get_cart_sync
 
         emit_tool_activity(session_id, "filter_by_cuisine")
 
@@ -3202,9 +3259,6 @@ def create_show_popular_items_tool(session_id: str):
         Returns:
             List of popular/recommended menu items.
         """
-        from app.core.agui_events import emit_tool_activity, emit_menu_data
-        from app.core.preloader import get_menu_preloader, get_current_meal_period
-        from app.core.redis import get_cart_sync
 
         emit_tool_activity(session_id, "show_popular_items")
 
@@ -3284,10 +3338,8 @@ def create_initiate_payment_tool(session_id: str):
             Payment link or error message.
         """
         async def _async_initiate_payment():
-                from app.core.redis import get_sync_redis_client
                 from app.core.agui_events import emit_payment_link
                 from app.tools.external_apis.razorpay_tools import razorpay_payment_tool
-                import json
                 import os
 
                 try:
@@ -3490,8 +3542,6 @@ def create_submit_card_details_tool(session_id: str):
         """
         from app.core.redis import get_redis_client
         from app.core.db_pool import AsyncDBConnection
-        import json
-        import re
         import uuid as uuid_module
 
         try:
@@ -3649,7 +3699,6 @@ def create_verify_payment_otp_tool(session_id: str):
         """
         from app.core.redis import get_redis_client
         from app.core.db_pool import AsyncDBConnection
-        import json
         import random
 
         try:
@@ -3768,7 +3817,6 @@ def create_verify_payment_otp_tool(session_id: str):
             try:
                 from pymongo import MongoClient
                 import os
-                from datetime import datetime
 
                 mongo_url = os.getenv("MONGODB_CONNECTION_STRING", "mongodb://mongodb:27017")
                 mongo_db = os.getenv("MONGODB_DATABASE_NAME", "restaurant_ai_analytics")
@@ -3878,7 +3926,6 @@ def create_check_payment_status_tool(session_id: str):
             Payment status details.
         """
         from app.core.redis import get_redis_client
-        import json
 
         try:
             redis_client = await get_redis_client()
@@ -3988,7 +4035,6 @@ def create_cancel_payment_tool(session_id: str):
             Confirmation of payment cancellation.
         """
         from app.core.redis import get_redis_client
-        import json
 
         try:
             redis_client = await get_redis_client()
@@ -4084,7 +4130,6 @@ def create_select_payment_method_tool(session_id: str):
         async def _async_select():
             from app.services.payment_state_service import get_payment_state, PaymentStep
             from app.workflows.payment_workflow import run_payment_workflow
-            from app.core.agui_events import emit_tool_activity
 
             emit_tool_activity(session_id, "select_payment_method")
 
@@ -4295,6 +4340,9 @@ NEVER call add_to_cart without an explicit quantity from the customer. If they s
 When adding multiple items, add them ALL in ONE add_to_cart call using a JSON array:
 Example: "2 burgers and 1 coke" → add_to_cart('[{"item": "burger", "quantity": 2}, {"item": "coke", "quantity": 1}]')
 Example: "I want pizza" → Ask "How many?" first, then add_to_cart('[{"item": "pizza", "quantity": N}]')
+
+**Item Not on Menu:**
+If a customer asks for an item that is NOT found in the search results or menu, clearly tell them it's not available. Do NOT keep asking follow-up questions about the same unavailable item. Say something like: "I'm sorry, [item] isn't on our menu. Can I help you find something else?" and offer alternatives or show the menu.
 
 **Ambiguity Resolution:**
 When confirmations are unclear (like "yes" after offering multiple options), ask which specific option the customer prefers.

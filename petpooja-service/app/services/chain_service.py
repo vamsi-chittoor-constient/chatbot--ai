@@ -847,7 +847,6 @@ def store_menu_data(db: Session, request: StoreChainDetailsPetpoojaRequest) -> D
             if not minutes_str or minutes_str == "":
                 return None
             try:
-                import re
                 numbers = re.findall(r'\d+', minutes_str)
                 return int(numbers[0]) if numbers else None
             except (ValueError, IndexError, TypeError):

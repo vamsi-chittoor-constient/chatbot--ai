@@ -9,10 +9,12 @@ Tier 3 (Authenticated): Fully personalized with name, favorites, history
 """
 
 from typing import Dict, Any, Optional, List
+import random
 import structlog
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.ai_services.agent_llm_factory import get_llm_for_agent
+from app.core.config import config
 
 logger = structlog.get_logger("services.welcome")
 
@@ -60,8 +62,6 @@ class WelcomeMessageService:
 
         # Get or assign waiter name for personalization
         if not waiter_name:
-            import random
-            from app.core.config import config
             waiter_name = random.choice(config.waiter_names_list)
 
         logger.info(

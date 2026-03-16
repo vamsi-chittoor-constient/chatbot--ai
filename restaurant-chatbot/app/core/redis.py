@@ -290,3 +290,15 @@ def set_cart_sync(session_id: str, cart_data: Dict[str, Any], ttl: int = 3600):
     client = get_sync_redis_client()
     cart_key = f"cart:{session_id}"
     client.setex(cart_key, ttl, json.dumps(cart_data))
+
+
+# Aliases used by crew_pool
+save_cart = set_cart
+save_cart_sync = set_cart_sync
+
+
+async def clear_cart(session_id: str):
+    """Delete cart data for a session."""
+    client = get_redis_client()
+    cart_key = f"cart:{session_id}"
+    await client.delete(cart_key)

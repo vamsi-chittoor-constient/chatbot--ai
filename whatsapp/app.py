@@ -5,6 +5,7 @@ import asyncio
 import websockets
 import json
 import os
+import uuid
 from typing import Dict, Optional, List, Any
 from logger_wrapper import LOGGER
 from dotenv import load_dotenv
@@ -809,9 +810,8 @@ async def send_whatsapp_flow_message(
     footer_text: str = None,
 ) -> bool:
     """Send a WhatsApp Flow interactive message (navigate mode)."""
-    import uuid as _uuid
     if flow_token is None:
-        flow_token = str(_uuid.uuid4())
+        flow_token = str(uuid.uuid4())
 
     interactive = {
         "type": "flow",
@@ -843,7 +843,6 @@ async def _send_item_selection_flow(
     phone: str, category_name: str, items: list, meal: str = ""
 ) -> None:
     """Send Item Selection Flow with CheckboxGroup for a set of menu items."""
-    import uuid as _uuid
 
     flow_items = []
     for item in items[:20]:  # CheckboxGroup max 20 items
@@ -862,7 +861,7 @@ async def _send_item_selection_flow(
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
     body = f"{meal_emoji} *{category_name}*\n{len(flow_items)} items available. Select to add:"
 
-    flow_token = f"select_{phone}_{_uuid.uuid4().hex[:8]}"
+    flow_token = f"select_{phone}_{uuid.uuid4().hex[:8]}"
     _active_flows[phone] = {
         "type": "select_items",
         "category": category_name,
@@ -887,7 +886,6 @@ async def _send_item_selection_qty_flow(
     phone: str, category_name: str, items: list, meal: str = ""
 ) -> None:
     """Send Item Selection + Qty Flow: per-item TextInput (number) for quantity entry."""
-    import uuid as _uuid
 
     flow_data: Dict[str, Any] = {
         "screen_title": _truncate(category_name, 80),
@@ -909,7 +907,7 @@ async def _send_item_selection_qty_flow(
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
     body = f"{meal_emoji} *{category_name}*\n{len(item_names)} items. Enter qty to add:"
 
-    flow_token = f"selqty_{phone}_{_uuid.uuid4().hex[:8]}"
+    flow_token = f"selqty_{phone}_{uuid.uuid4().hex[:8]}"
     _active_flows[phone] = {
         "type": "select_items_qty",
         "category": category_name,
@@ -932,7 +930,6 @@ async def _send_item_selection_qty_flow(
 
 async def _send_cart_management_flow(phone: str, items: list, total: float) -> None:
     """Send Cart Management Flow with per-item TextInput for quantity entry."""
-    import uuid as _uuid
 
     flow_data: Dict[str, Any] = {
         "cart_summary": f"{len(items)} items \u2014 \u20b9{total:.0f}",
@@ -956,7 +953,7 @@ async def _send_cart_management_flow(phone: str, items: list, total: float) -> N
             flow_data[f"item_{idx}_label"] = "-"
             flow_data[f"item_{idx}_qty"] = 0
 
-    flow_token = f"cart_{phone}_{_uuid.uuid4().hex[:8]}"
+    flow_token = f"cart_{phone}_{uuid.uuid4().hex[:8]}"
     _active_flows[phone] = {
         "type": "manage_cart",
         "item_names": item_names,
