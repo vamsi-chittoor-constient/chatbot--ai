@@ -34,6 +34,7 @@ FLOW_PROVISION_MODE = os.getenv("FLOW_PROVISION_MODE", "auto").strip().lower()
 FLOW_SELECT_ITEMS_ID = os.getenv("FLOW_SELECT_ITEMS_ID", "")
 FLOW_SELECT_ITEMS_QTY_ID = os.getenv("FLOW_SELECT_ITEMS_QTY_ID", "")
 FLOW_MANAGE_CART_ID = os.getenv("FLOW_MANAGE_CART_ID", "")
+FLOW_BOOKING_ID = os.getenv("FLOW_BOOKING_ID", "")
 
 LOGGER.info("WhatsApp Bridge starting...")
 LOGGER.info(f"Chatbot WebSocket base URL: {CHATBOT_WS_BASE_URL}")
@@ -47,7 +48,7 @@ async def _auto_provision_flows():
     Checks existing flows by name, creates missing ones, uploads JSON, publishes drafts.
     In manual mode, flow IDs must be set in .env.
     """
-    global FLOW_SELECT_ITEMS_ID, FLOW_SELECT_ITEMS_QTY_ID, FLOW_MANAGE_CART_ID
+    global FLOW_SELECT_ITEMS_ID, FLOW_SELECT_ITEMS_QTY_ID, FLOW_MANAGE_CART_ID, FLOW_BOOKING_ID
 
     if FLOW_PROVISION_MODE != "auto":
         LOGGER.info("FLOW_PROVISION_MODE=manual — using .env flow IDs")
@@ -71,6 +72,9 @@ async def _auto_provision_flows():
         if "manage_cart" in flow_ids:
             FLOW_MANAGE_CART_ID = flow_ids["manage_cart"]
             LOGGER.info(f"Provisioned manage_cart: {FLOW_MANAGE_CART_ID}")
+        if "booking" in flow_ids:
+            FLOW_BOOKING_ID = flow_ids["booking"]
+            LOGGER.info(f"Provisioned booking: {FLOW_BOOKING_ID}")
 
         LOGGER.info("Flow auto-provision complete")
     except Exception as e:
@@ -184,6 +188,21 @@ async def _process_message(phone: str, user_message: str, msg_id: str):
                 _start_bg_listener(phone)
                 return
             await _handle_flow_response(phone, response_data)
+            _start_bg_listener(phone)
+            return
+
+        # Intercept order type selection button replies
+        if user_message in ("order_type_takeaway", "order_type_dinein"):
+            flow_ctx = _active_flows.pop(phone, {})
+            order_id = flow_ctx.get("order_id", "")
+            order_type = "take_away" if user_message == "order_type_takeaway" else "dine_in"
+            form_response = {
+                "type": "form_response",
+                "form_type": "order_type_selection",
+                "data": {"order_type": order_type, "order_id": order_id},
+            }
+            LOGGER.info(f"Order type selected: {order_type} (order={order_id}) for {phone}")
+            await _send_form_response_to_chatbot(phone, form_response)
             _start_bg_listener(phone)
             return
 
@@ -769,6 +788,12 @@ async def _handle_agui_event(phone: str, agui: dict) -> bool:
     elif event_type == "BOOKING_CONFIRMATION":
         await _convert_booking_confirmation(phone, agui)
         return True
+    elif event_type == "ORDER_TYPE_SELECTION":
+        await _convert_order_type_selection(phone, agui)
+        return True
+    elif event_type == "BOOKING_INTAKE_FORM":
+        await _convert_booking_intake_form(phone, agui)
+        return True
 
     # Lifecycle events — skip silently (TEXT_MESSAGE_* handled by caller)
     elif event_type in (
@@ -1042,6 +1067,27 @@ async def _handle_flow_response(phone: str, response_data: dict) -> None:
 
         if not removes and not updates:
             await send_whatsapp_reply(phone, "Cart unchanged.")
+
+    elif flow_type == "booking_intake":
+        booking_date = response_data.get("booking_date", "")
+        booking_time = response_data.get("booking_time", "")
+        party_size = response_data.get("party_size", "2")
+
+        if not booking_date or not booking_time:
+            await send_whatsapp_reply(phone, "Please select a date and time for your booking.")
+            return
+
+        form_response = {
+            "type": "form_response",
+            "form_type": "booking_intake",
+            "data": {
+                "date": booking_date,
+                "time": booking_time,
+                "party_size": int(party_size),
+            },
+        }
+        LOGGER.info(f"Flow booking_intake -> {booking_date} {booking_time} party={party_size} for {phone}")
+        await _send_form_response_to_chatbot(phone, form_response)
 
     elif flow_type == "select_items_qty":
         item_names = flow_ctx.get("item_names", [])
@@ -1700,9 +1746,135 @@ async def _convert_booking_confirmation(phone: str, agui: dict) -> None:
     LOGGER.info(f"Sent booking confirmation ({code}) to {phone}")
 
 
-# ===================================================================
-# WHATSAPP MESSAGE SENDERS
-# ===================================================================
+# --- ORDER_TYPE_SELECTION ---
+async def _convert_order_type_selection(phone: str, agui: dict) -> None:
+    """Convert order type selection to Dine-in / Takeaway buttons."""
+    order_id = agui.get("order_id", "")
+    subtotal = agui.get("subtotal", 0)
+    item_count = agui.get("item_count", 0)
+    summary = agui.get("items_summary", "")
+
+    body = f"🛒 *Order Ready!*\n"
+    if summary:
+        body += f"{summary}\n"
+    body += f"Subtotal: ₹{subtotal:.0f} ({item_count} items)\n\n"
+    body += "How would you like your order?"
+
+    # Store order_id so button response can include it
+    _active_flows[phone] = {
+        "type": "order_type_selection",
+        "order_id": order_id,
+        "ts": asyncio.get_event_loop().time(),
+    }
+
+    buttons = [
+        {"type": "reply", "reply": {"id": "order_type_takeaway", "title": "🥡 Takeaway"}},
+        {"type": "reply", "reply": {"id": "order_type_dinein", "title": "🍽️ Dine In"}},
+    ]
+    await send_whatsapp_interactive(phone, {
+        "type": "button",
+        "body": {"text": _truncate(body, 1024)},
+        "action": {"buttons": buttons}
+    })
+    LOGGER.info(f"Sent order type selection (order={order_id}) to {phone}")
+
+
+# --- BOOKING_INTAKE_FORM ---
+async def _convert_booking_intake_form(phone: str, agui: dict) -> None:
+    """
+    Convert booking intake form to WhatsApp Flow (if available) or text prompts.
+
+    The AGUI event contains:
+      - availability: {date_str: {slots: {time_label: {available, max_party, tables_free}}}}
+      - party_sizes: [1, 2, 3, ...]
+      - max_party_size: int
+    """
+    availability = agui.get("availability", {})
+    party_sizes = agui.get("party_sizes", list(range(1, 9)))
+    max_party = agui.get("max_party_size", 8)
+
+    if USE_WHATSAPP_FLOWS and FLOW_BOOKING_ID:
+        # Build flow data from availability
+        date_options = []
+        time_slots_by_date = {}
+        for date_str, date_info in sorted(availability.items())[:7]:
+            slots = date_info.get("slots", {})
+            available_slots = [t for t, s in slots.items() if s.get("available", False)]
+            if available_slots:
+                # Parse date for display
+                try:
+                    from datetime import datetime as _dt
+                    d = _dt.strptime(date_str, "%Y-%m-%d")
+                    display = d.strftime("%a, %b %d")
+                except Exception:
+                    display = date_str
+                date_options.append({"id": date_str, "title": display})
+                time_slots_by_date[date_str] = available_slots
+
+        if not date_options:
+            await send_whatsapp_reply(
+                phone,
+                "Sorry, no tables are available for booking right now. "
+                "Please contact the restaurant directly."
+            )
+            return
+
+        # For navigate-mode flow, we pre-load all time slots as a flat list
+        # (user picks date first, then time — but flow is single screen so we
+        # show all available times across all dates)
+        all_times = sorted(set(t for times in time_slots_by_date.values() for t in times))
+        time_options = [{"id": t, "title": t} for t in all_times[:20]]
+        party_options = [{"id": str(p), "title": f"{p} guest{'s' if p > 1 else ''}"} for p in party_sizes[:10]]
+
+        flow_data = {
+            "date_options": date_options,
+            "time_options": time_options,
+            "party_options": party_options,
+        }
+
+        flow_token = f"booking_{phone}_{uuid.uuid4().hex[:8]}"
+        _active_flows[phone] = {
+            "type": "booking_intake",
+            "flow_token": flow_token,
+            "ts": asyncio.get_event_loop().time(),
+        }
+
+        await send_whatsapp_flow_message(
+            to_number=phone,
+            flow_id=FLOW_BOOKING_ID,
+            flow_cta="Book a Table",
+            body_text="📅 *Reserve a Table*\nSelect your preferred date, time, and party size.",
+            screen_id="BOOKING_FORM",
+            flow_data=flow_data,
+            flow_token=flow_token,
+        )
+        LOGGER.info(f"Sent booking flow ({len(date_options)} dates, {len(time_options)} times) to {phone}")
+
+    else:
+        # Fallback: text prompt — user types booking details
+        dates_preview = []
+        for date_str, date_info in sorted(availability.items())[:5]:
+            slots = date_info.get("slots", {})
+            available_count = sum(1 for s in slots.values() if s.get("available", False))
+            if available_count > 0:
+                try:
+                    from datetime import datetime as _dt
+                    d = _dt.strptime(date_str, "%Y-%m-%d")
+                    display = d.strftime("%a, %b %d")
+                except Exception:
+                    display = date_str
+                dates_preview.append(f"  • {display} — {available_count} slots")
+
+        text = "📅 *Book a Table*\n\n"
+        if dates_preview:
+            text += "Available dates:\n" + "\n".join(dates_preview) + "\n\n"
+        text += (
+            f"Party sizes: 1-{max_party} guests\n\n"
+            "Please reply with your booking details, e.g.:\n"
+            '*"Book a table for 4 on March 20 at 7 PM"*'
+        )
+        await send_whatsapp_reply(phone, text)
+        LOGGER.info(f"Sent booking text fallback ({len(dates_preview)} dates) to {phone}")
 async def send_whatsapp_reply(to_number: str, message: str) -> bool:
     """
     Send text message to WhatsApp user via WhatsApp Business Cloud API.

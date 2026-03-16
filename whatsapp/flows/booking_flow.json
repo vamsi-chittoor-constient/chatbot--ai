@@ -1,0 +1,107 @@
+{
+  "version": "7.3",
+  "screens": [
+    {
+      "id": "BOOKING_FORM",
+      "title": "Book a Table",
+      "terminal": true,
+      "data": {
+        "date_options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "2026-03-20", "title": "Thu, Mar 20" },
+            { "id": "2026-03-21", "title": "Fri, Mar 21" }
+          ]
+        },
+        "time_options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "12:00 PM", "title": "12:00 PM" },
+            { "id": "1:00 PM", "title": "1:00 PM" }
+          ]
+        },
+        "party_options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "2", "title": "2 guests" },
+            { "id": "4", "title": "4 guests" }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "booking_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Reserve a Table"
+              },
+              {
+                "type": "TextBody",
+                "text": "Select your preferred date, time, and party size."
+              },
+              {
+                "type": "Dropdown",
+                "name": "booking_date",
+                "label": "Date",
+                "required": true,
+                "data-source": "${data.date_options}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "booking_time",
+                "label": "Time",
+                "required": true,
+                "data-source": "${data.time_options}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "party_size",
+                "label": "Party Size",
+                "required": true,
+                "data-source": "${data.party_options}"
+              },
+              {
+                "type": "Footer",
+                "label": "Book Table",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "booking_date": "${form.booking_date}",
+                    "booking_time": "${form.booking_time}",
+                    "party_size": "${form.party_size}",
+                    "flow_type": "booking_intake"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

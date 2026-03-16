@@ -47,6 +47,11 @@ FLOW_DEFS = {
         "json_file": "flows/select_items_qty_flow.json",
         "categories": ["OTHER"],
     },
+    "booking": {
+        "name": "A24 Table Booking",
+        "json_file": "flows/booking_flow.json",
+        "categories": ["APPOINTMENT_BOOKING"],
+    },
 }
 
 
