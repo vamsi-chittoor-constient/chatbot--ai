@@ -488,8 +488,11 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
             websocket = ws_connections[phone]
 
             # On new connection, drain welcome/init messages from chatbot
+            # suppress_quick_replies=True prevents stale init quick replies leaking to user
             if is_new_connection:
-                welcome_text, _ = await _drain_and_collect_response(websocket, phone, timeout=15)
+                welcome_text, _ = await _drain_and_collect_response(
+                    websocket, phone, timeout=15, suppress_quick_replies=True
+                )
                 if welcome_text:
                     LOGGER.info(f"Welcome message for {phone}: {welcome_text[:80]}...")
                     await send_whatsapp_reply(phone, welcome_text)
@@ -552,7 +555,8 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
 async def _drain_and_collect_response(
     websocket: websockets.WebSocketClientProtocol,
     phone: str,
-    timeout: float = 45
+    timeout: float = 45,
+    suppress_quick_replies: bool = False,
 ) -> tuple:
     """
     Read messages from the chatbot WebSocket and collect response.
@@ -679,10 +683,13 @@ async def _drain_and_collect_response(
                 break
 
     # Flush the last buffered QUICK_REPLIES (deduplicates tool + orchestrator emissions)
-    if last_quick_replies:
+    # Skip during welcome drain — init quick replies are stale and leak into new sessions
+    if last_quick_replies and not suppress_quick_replies:
         await _convert_quick_replies(phone, last_quick_replies)
         any_sent = True
         LOGGER.info(f"Sent final QUICK_REPLIES to {phone}")
+    elif last_quick_replies and suppress_quick_replies:
+        LOGGER.info(f"Suppressed welcome QUICK_REPLIES for {phone} (session init)")
 
     # Build final text from any remaining pieces
     remaining_text = None
@@ -1298,21 +1305,14 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
 
 
 # --- MENU_DATA ---
-MENU_DIRECT_THRESHOLD = 100
-MENU_CATEGORY_BUTTON_THRESHOLD = 9  # Max categories to show as inline buttons (3 per message)
 
 async def _convert_menu_data(phone: str, agui: dict) -> None:
     """
     Convert menu to WhatsApp interactive messages.
 
-    With Flows configured:
     - Single category or ≤20 items → Item Selection Flow (multi-select CheckboxGroup)
-    - Multiple categories ≤9 → inline category buttons → user taps → Flow for that category
-    - Multiple categories >9 → category list picker → user taps → Flow for that category
-
-    Without Flows (graceful degradation):
-    - Small menu (≤100 items): list message grouped by category
-    - Large menu (>100 items): category picker list
+    - Multiple categories, ≤100 items → interactive list grouped by category
+    - Large menu (>100 items) → category picker list
     """
     items = agui.get("items", [])
     categories = agui.get("categories", [])
@@ -1334,107 +1334,65 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     meal = agui.get("current_meal_period", "")
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
-    # ── Flow path: single category or small item set → Item Selection Flow ──
+    # ── Flow path: send one Flow per category (multi-select + qty) ──
     _has_any_select_flow = USE_WHATSAPP_FLOWS and (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID)
-    if _has_any_select_flow and (len(cat_order) == 1 or len(items) <= 20):
-        cat_name = cat_order[0] if len(cat_order) == 1 else "Menu"
-        if FLOW_SELECT_ITEMS_QTY_ID and len(items) <= 10:
-            await _send_item_selection_qty_flow(phone, cat_name, items, meal)
-        else:
-            await _send_item_selection_flow(phone, cat_name, items, meal)
-        return
-
-    # ── Flow path: multiple categories → show categories as inline buttons ──
-    if _has_any_select_flow and len(cat_order) <= MENU_CATEGORY_BUTTON_THRESHOLD:
+    if _has_any_select_flow:
+        # Send header message
         body = f"{meal_emoji} *Menu*"
         if meal:
             body += f" \u2014 {meal} Time"
-        body += f"\n{len(items)} items across {len(cat_order)} categories.\nTap a category to browse:"
+        body += f"\n{len(items)} items across {len(cat_order)} categories."
+        body += "\nSelect items & qty from each category below:"
         await send_whatsapp_reply(phone, body)
 
-        chunks = [cat_order[i:i + 3] for i in range(0, len(cat_order), 3)]
-        for chunk in chunks:
-            buttons = []
-            for cat in chunk:
-                count = len(by_category.get(cat, []))
-                buttons.append({
-                    "type": "reply",
-                    "reply": {
-                        "id": _truncate(f"show {cat} menu", 256),
-                        "title": _truncate(f"{cat} ({count})", 20),
-                    },
-                })
-            await send_whatsapp_interactive(phone, {
-                "type": "button",
-                "body": {"text": "Pick a category:"},
-                "action": {"buttons": buttons},
-            })
-        LOGGER.info(f"Sent category buttons ({len(cat_order)} categories) to {phone}")
+        # Send one Flow per category
+        for cat in cat_order:
+            cat_items = by_category.get(cat, [])
+            if not cat_items:
+                continue
+            if FLOW_SELECT_ITEMS_QTY_ID and len(cat_items) <= 10:
+                await _send_item_selection_qty_flow(phone, cat, cat_items, meal)
+            else:
+                # CheckboxGroup max 20 — split if needed
+                for chunk_start in range(0, len(cat_items), 20):
+                    chunk = cat_items[chunk_start:chunk_start + 20]
+                    suffix = f" ({chunk_start + 1}-{chunk_start + len(chunk)})" if len(cat_items) > 20 else ""
+                    await _send_item_selection_flow(phone, f"{cat}{suffix}", chunk, meal)
+
+        LOGGER.info(f"Sent {len(cat_order)} category flows ({len(items)} total items) to {phone}")
         return
 
-    # ── Fallback / no-Flow path ──
-    if len(items) <= MENU_DIRECT_THRESHOLD:
-        # Small menu: show all items grouped by category in one list
-        sections = []
-        for cat in cat_order:
-            if cat not in by_category:
-                continue
-            rows = []
-            for item in by_category[cat][:10]:
-                name = item.get("name", "Item")
-                price = item.get("price", 0)
-                rows.append({
-                    "id": _truncate(f"add {name} to cart", 200),
-                    "title": _truncate(name, 24),
-                    "description": _truncate(f"\u20b9{price}", 72),
-                })
-            if rows:
-                sections.append({"title": _truncate(cat, 24), "rows": rows})
-
-        if not sections:
-            return
-
-        body = f"{meal_emoji} *Menu*"
-        if meal:
-            body += f" \u2014 {meal} Time"
-        body += f"\n{len(items)} items available now. Tap to add:"
-
-        await send_whatsapp_interactive(phone, {
-            "type": "list",
-            "body": {"text": _truncate(body, 1024)},
-            "action": {"button": "Browse Menu", "sections": sections[:10]},
-        })
-        LOGGER.info(f"Sent full menu ({len(items)} items, {len(sections)} sections) to {phone}")
-
-    else:
-        # Large menu: show categories as filter options
+    # ── Fallback (no Flows): interactive list grouped by category ──
+    sections = []
+    for cat in cat_order:
+        if cat not in by_category:
+            continue
         rows = []
-        for cat in cat_order[:10]:
-            count = len(by_category.get(cat, []))
+        for item in by_category[cat][:10]:
+            name = item.get("name", "Item")
+            price = item.get("price", 0)
             rows.append({
-                "id": _truncate(f"show {cat} menu", 200),
-                "title": _truncate(cat, 24),
-                "description": _truncate(f"{count} items", 72),
+                "id": _truncate(f"add {name} to cart", 200),
+                "title": _truncate(name, 24),
+                "description": _truncate(f"\u20b9{price}", 72),
             })
+        if rows:
+            sections.append({"title": _truncate(cat, 24), "rows": rows})
 
-        if not rows:
-            return
+    if not sections:
+        return
 
-        body = f"{meal_emoji} *Menu*"
-        if meal:
-            body += f" ({meal})"
-        body += f"\n{len(items)} items across {len(cat_order)} categories."
-        body += "\nPick a category to browse:"
+    body = f"{meal_emoji} *Menu*"
+    if meal:
+        body += f" \u2014 {meal} Time"
+    body += f"\n{len(items)} items available now. Tap to add:"
 
-        await send_whatsapp_interactive(phone, {
-            "type": "list",
-            "body": {"text": _truncate(body, 1024)},
-            "action": {
-                "button": "Choose Category",
-                "sections": [{"title": "Categories", "rows": rows}],
-            },
-        })
-        LOGGER.info(f"Sent category filter ({len(cat_order)} categories, {len(items)} total items) to {phone}")
+    await send_whatsapp_interactive(phone, {
+        "type": "list",
+        "body": {"text": _truncate(body, 1024)},
+        "action": {"button": "Browse Menu", "sections": sections[:10]},
+    })
+    LOGGER.info(f"Sent full menu list ({len(items)} items, {len(sections)} sections) to {phone}")
 
 
 # --- CART_DATA ---
