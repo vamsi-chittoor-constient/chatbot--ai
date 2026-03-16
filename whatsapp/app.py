@@ -96,6 +96,13 @@ _active_flows: Dict[str, dict] = {}
 _FLOW_CONTEXT_TTL = 1800  # 30 min
 
 
+def _cleanup_user(phone: str):
+    """Remove all per-user state when WebSocket closes."""
+    ws_connections.pop(phone, None)
+    _user_locks.pop(phone, None)
+    _active_flows.pop(phone, None)
+
+
 # ===================================================================
 # WEBHOOK VERIFICATION ENDPOINT (GET)
 # ===================================================================
@@ -157,7 +164,15 @@ async def receive_message(request: Request):
                     user_message = _extract_user_message(message, message_type)
 
                     if user_message is None:
-                        LOGGER.warning(f"Unsupported message type: {message_type}")
+                        LOGGER.warning(f"Unsupported message type: {message_type} from {from_number}")
+                        if message_type in ("image", "audio", "video", "sticker", "document", "location", "contacts"):
+                            asyncio.create_task(
+                                send_whatsapp_reply(
+                                    from_number,
+                                    "I can only handle text and button messages right now. "
+                                    "Please type your request instead! 😊"
+                                )
+                            )
                         continue
 
                     LOGGER.info(f"Message from {from_number} ({user_name}): {user_message[:50]}...")
@@ -356,7 +371,7 @@ async def _bg_listen(phone: str):
         LOGGER.debug(f"Background listener cancelled for {phone}")
     except websockets.exceptions.ConnectionClosed:
         LOGGER.debug(f"Background listener: WS closed for {phone}")
-        ws_connections.pop(phone, None)
+        _cleanup_user(phone)
     except Exception as e:
         LOGGER.error(f"Background listener error for {phone}: {e}", exc_info=True)
 
@@ -452,7 +467,7 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
                     ws = ws_connections[phone]
                     if not ws.open:
                         LOGGER.warning(f"WebSocket for {phone} is closed, reconnecting...")
-                        del ws_connections[phone]
+                        _cleanup_user(phone)
                     else:
                         LOGGER.debug(f"Reusing existing WebSocket for {phone}")
 
@@ -520,20 +535,17 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
 
     except asyncio.TimeoutError:
         LOGGER.error(f"Timeout waiting for response for {phone}")
-        if phone in ws_connections:
-            del ws_connections[phone]
+        _cleanup_user(phone)
         return "Sorry, the assistant is taking too long to respond. Please try again."
 
     except websockets.exceptions.ConnectionClosed:
         LOGGER.error(f"WebSocket connection closed for {phone}")
-        if phone in ws_connections:
-            del ws_connections[phone]
+        _cleanup_user(phone)
         return "Sorry, the connection was lost. Please try again."
 
     except Exception as e:
         LOGGER.error(f"Error communicating with chatbot for {phone}: {e}", exc_info=True)
-        if phone in ws_connections:
-            del ws_connections[phone]
+        _cleanup_user(phone)
         return "Sorry, the assistant is currently unavailable. Please try again later."
 
 
@@ -1077,16 +1089,35 @@ async def _handle_flow_response(phone: str, response_data: dict) -> None:
             await send_whatsapp_reply(phone, "Please select a date and time for your booking.")
             return
 
+        # Validate date format and ensure it's not in the past
+        from datetime import datetime as _dt, date as _date
+        try:
+            parsed_date = _dt.strptime(booking_date, "%Y-%m-%d").date()
+            if parsed_date < _date.today():
+                await send_whatsapp_reply(phone, "That date is in the past. Please select a future date.")
+                return
+        except ValueError:
+            await send_whatsapp_reply(phone, "Invalid date format. Please try booking again.")
+            return
+
+        try:
+            ps = int(party_size)
+            if ps < 1 or ps > 20:
+                await send_whatsapp_reply(phone, "Party size must be between 1 and 20.")
+                return
+        except (ValueError, TypeError):
+            ps = 2
+
         form_response = {
             "type": "form_response",
             "form_type": "booking_intake",
             "data": {
                 "date": booking_date,
                 "time": booking_time,
-                "party_size": int(party_size),
+                "party_size": ps,
             },
         }
-        LOGGER.info(f"Flow booking_intake -> {booking_date} {booking_time} party={party_size} for {phone}")
+        LOGGER.info(f"Flow booking_intake -> {booking_date} {booking_time} party={ps} for {phone}")
         await _send_form_response_to_chatbot(phone, form_response)
 
     elif flow_type == "select_items_qty":
