@@ -118,6 +118,7 @@ services:
       # PetPooja Integration (call this service)
       - PETPOOJA_SERVICE_URL=http://petpooja-app:8001
       - WHATSAPP_BRIDGE_URL=http://whatsapp-bridge:8002
+      - WHATSAPP_PHONE_NUMBER=${WHATSAPP_PHONE_NUMBER:-6379772826}
       # Note: PETPOOJA_SERVICE_TOKEN is loaded from .env file via env_file
       # Application
       - ENVIRONMENT=production

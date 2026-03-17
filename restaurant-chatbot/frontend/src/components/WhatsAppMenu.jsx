@@ -49,19 +49,25 @@ const ErrorScreen = ({ message }) => (
   </PageShell>
 )
 
-const SuccessScreen = ({ title, subtitle, onAction, actionLabel }) => (
+const SuccessScreen = ({ title, subtitle, onAction, actionLabel, waDeeplink }) => (
   <PageShell>
     <div className="flex-1 flex items-center justify-center p-6">
       <div className="text-center max-w-sm">
         <CheckCircle size={56} className="text-green-500 mx-auto mb-4" />
         <h2 className="text-white text-xl font-semibold mb-2">{title}</h2>
         <p className="text-gray-400 mb-2">{subtitle}</p>
-        <p className="text-gray-500 text-sm mb-6">You can close this page and return to WhatsApp.</p>
-        {onAction && (
-          <button onClick={onAction} className="px-6 py-2 bg-orange-600 text-white rounded-lg font-medium active:bg-orange-700">
-            {actionLabel || 'Continue'}
-          </button>
-        )}
+        <div className="space-y-3 mt-6">
+          {waDeeplink && (
+            <a href={waDeeplink} className="block w-full py-3 bg-green-600 text-white font-semibold rounded-xl text-center active:bg-green-700">
+              Return to WhatsApp
+            </a>
+          )}
+          {onAction && (
+            <button onClick={onAction} className="w-full py-2.5 bg-orange-600/20 text-orange-400 font-medium rounded-xl active:bg-orange-600/30">
+              {actionLabel || 'Continue'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   </PageShell>
@@ -111,7 +117,7 @@ async function postAction(token, action, data = {}) {
 // ══════════════════════════════════════════════════════
 // MENU PAGE
 // ══════════════════════════════════════════════════════
-function MenuPage({ data, token }) {
+function MenuPage({ data, token, waDeeplink }) {
   const { items = [], categories = [] } = data
   const [selected, setSelected] = useState({})
   const [expanded, setExpanded] = useState(new Set(categories.slice(0, 3)))
@@ -160,7 +166,7 @@ function MenuPage({ data, token }) {
     finally { setSubmitting(false) }
   }
 
-  if (done) return <SuccessScreen title="Added to Cart!" subtitle={`${totalItems} item${totalItems > 1 ? 's' : ''} - Rs.${totalPrice}`} onAction={() => { setDone(false); setSelected({}) }} actionLabel="Add More Items" />
+  if (done) return <SuccessScreen title="Added to Cart!" subtitle={`${totalItems} item${totalItems > 1 ? 's' : ''} - Rs.${totalPrice}`} onAction={() => { setDone(false); setSelected({}) }} actionLabel="Add More Items" waDeeplink={waDeeplink} />
 
   return (
     <PageShell>
@@ -238,7 +244,7 @@ function MenuPage({ data, token }) {
 // ══════════════════════════════════════════════════════
 // CART PAGE
 // ══════════════════════════════════════════════════════
-function CartPage({ data, token }) {
+function CartPage({ data, token, waDeeplink }) {
   const [items, setItems] = useState(data.items || [])
   const packagingRate = data.packaging_charge || 30
   const [submitting, setSubmitting] = useState(false)
@@ -293,7 +299,7 @@ function CartPage({ data, token }) {
 
   if (done) {
     const msg = actionType === 'checkout' ? 'Proceeding to checkout...' : actionType === 'add_more' ? 'Opening menu...' : 'Cart updated!'
-    return <SuccessScreen title={msg} subtitle="Check WhatsApp for next steps." />
+    return <SuccessScreen title={msg} subtitle="Check WhatsApp for next steps." waDeeplink={waDeeplink} />
   }
 
   if (!items.length) {
@@ -361,7 +367,7 @@ function CartPage({ data, token }) {
 // ══════════════════════════════════════════════════════
 // SEARCH RESULTS PAGE
 // ══════════════════════════════════════════════════════
-function SearchPage({ data, token }) {
+function SearchPage({ data, token, waDeeplink }) {
   const { items = [], query = '' } = data
   const [selected, setSelected] = useState({})
   const [submitting, setSubmitting] = useState(false)
@@ -396,7 +402,7 @@ function SearchPage({ data, token }) {
     finally { setSubmitting(false) }
   }
 
-  if (done) return <SuccessScreen title="Added to Cart!" subtitle={`${totalItems} item${totalItems > 1 ? 's' : ''} - Rs.${totalPrice}`} />
+  if (done) return <SuccessScreen title="Added to Cart!" subtitle={`${totalItems} item${totalItems > 1 ? 's' : ''} - Rs.${totalPrice}`} waDeeplink={waDeeplink} />
 
   return (
     <PageShell>
@@ -459,7 +465,7 @@ function SearchPage({ data, token }) {
 // ══════════════════════════════════════════════════════
 // ORDER PAGE
 // ══════════════════════════════════════════════════════
-function OrderPage({ data }) {
+function OrderPage({ data, waDeeplink }) {
   const { order_id, items = [], total, status, order_type } = data
   const statusColors = {
     pending: 'text-yellow-400 bg-yellow-900/30',
@@ -511,7 +517,13 @@ function OrderPage({ data }) {
       </main>
 
       <div className="p-4 bg-gray-900 border-t border-gray-700">
-        <p className="text-center text-gray-500 text-sm">Close this page and return to WhatsApp for updates.</p>
+        {waDeeplink ? (
+          <a href={waDeeplink} className="block w-full py-3 bg-green-600 text-white font-semibold rounded-xl text-center active:bg-green-700">
+            Return to WhatsApp
+          </a>
+        ) : (
+          <p className="text-center text-gray-500 text-sm">Close this page and return to WhatsApp for updates.</p>
+        )}
       </div>
     </PageShell>
   )
@@ -537,11 +549,13 @@ export default function WhatsAppMenu() {
   if (error) return <ErrorScreen message={error} />
   if (!pageData) return <ErrorScreen message="No data available" />
 
+  const waDeeplink = pageData.wa_deeplink || ''
+
   switch (pageData.page_type) {
-    case 'menu': return <MenuPage data={pageData} token={sessionId} />
-    case 'cart': return <CartPage data={pageData} token={sessionId} />
-    case 'search': return <SearchPage data={pageData} token={sessionId} />
-    case 'order': return <OrderPage data={pageData} />
+    case 'menu': return <MenuPage data={pageData} token={sessionId} waDeeplink={waDeeplink} />
+    case 'cart': return <CartPage data={pageData} token={sessionId} waDeeplink={waDeeplink} />
+    case 'search': return <SearchPage data={pageData} token={sessionId} waDeeplink={waDeeplink} />
+    case 'order': return <OrderPage data={pageData} waDeeplink={waDeeplink} />
     default: return <ErrorScreen message={`Unknown page: ${pageData.page_type}`} />
   }
 }

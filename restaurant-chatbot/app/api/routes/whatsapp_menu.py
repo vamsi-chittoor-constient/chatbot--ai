@@ -105,16 +105,25 @@ async def get_page_data(token: str):
     page_type = info["page_type"]
     stored_data = info.get("data", {})
 
+    # WhatsApp bot number for deeplink back to chat
+    wa_number = os.getenv("WHATSAPP_PHONE_NUMBER", "")
+
     if page_type == "menu":
-        return await _get_menu_data(phone, stored_data)
+        result = await _get_menu_data(phone, stored_data)
     elif page_type == "cart":
-        return _get_cart_data(stored_data)
+        result = _get_cart_data(stored_data)
     elif page_type == "search":
-        return _get_search_data(stored_data)
+        result = _get_search_data(stored_data)
     elif page_type == "order":
-        return _get_order_data(stored_data)
+        result = _get_order_data(stored_data)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown page type: {page_type}")
+
+    # Inject WhatsApp deeplink for "Return to WhatsApp" button
+    if wa_number:
+        result["wa_deeplink"] = f"https://wa.me/{wa_number}"
+
+    return result
 
 
 @router.post("/wa/action")
