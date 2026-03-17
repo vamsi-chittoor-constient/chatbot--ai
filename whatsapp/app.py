@@ -1216,7 +1216,7 @@ async def _send_form_response_to_chatbot(phone: str, form_response: dict) -> Non
 
 # --- SEARCH_RESULTS ---
 async def _convert_search_results(phone: str, agui: dict) -> None:
-    """Convert search results to reply buttons (≤3) or list message (>3) with availability indicators."""
+    """Convert search results to CTA web page or reply buttons/list with availability indicators."""
     items = agui.get("items", [])
     if not items:
         return
@@ -1225,6 +1225,18 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
     available = [i for i in items if i.get("is_available_now", True)]
     unavailable = [i for i in items if not i.get("is_available_now", True)]
 
+    # ── CTA URL path: full search results with add-to-cart ──
+    search_body = f"\ud83d\udd0d *{len(items)} results for \"{query}\"*"
+    if available:
+        search_body += f"\n\u2705 {len(available)} available now"
+    if unavailable:
+        search_body += f"\n\ud83d\udd50 {len(unavailable)} available later"
+    search_body += "\n\nTap below to view results and add to cart:"
+    search_data = {"query": query, "items": items, "current_meal_period": agui.get("current_meal_period", "")}
+    if await _send_cta_page(phone, "search", search_body, "View Results", search_data):
+        return
+
+    # ── Fallback: buttons/list ──
     if len(items) <= 3:
         # Reply buttons — one per available item only
         buttons = []
@@ -1309,6 +1321,45 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
     LOGGER.info(f"Sent search results ({len(items)} items, {len(available)} available) to {phone}")
 
 
+# --- CTA URL Helper ---
+
+async def _send_cta_page(phone: str, page_type: str, body_text: str, cta_label: str, data: dict = None) -> bool:
+    """
+    Generate a token, store page data in Redis, and send a CTA URL button.
+    Returns True if sent successfully, False to fall back to non-CTA path.
+    """
+    if not MENU_PAGE_BASE_URL:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{CHATBOT_API_BASE_URL}/api/v1/wa/token",
+                json={"phone": phone, "page_type": page_type, "data": data or {}},
+            )
+            if resp.status_code != 200:
+                LOGGER.warning(f"Failed to get {page_type} token: {resp.status_code}")
+                return False
+            token = resp.json().get("token", "")
+            page_url = f"{MENU_PAGE_BASE_URL}/menu/{token}"
+
+            await send_whatsapp_interactive(phone, {
+                "type": "cta_url",
+                "body": {"text": body_text},
+                "action": {
+                    "name": "cta_url",
+                    "parameters": {
+                        "display_text": _truncate(cta_label, 20),
+                        "url": page_url,
+                    },
+                },
+            })
+            LOGGER.info(f"Sent {page_type} CTA URL to {phone}")
+            return True
+    except Exception as e:
+        LOGGER.warning(f"CTA URL failed for {page_type}, falling back: {e}")
+        return False
+
+
 # --- MENU_DATA ---
 
 async def _convert_menu_data(phone: str, agui: dict) -> None:
@@ -1333,40 +1384,13 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
     # ── CTA URL path: open mobile menu page in WhatsApp's in-app browser ──
-    if MENU_PAGE_BASE_URL:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"{CHATBOT_API_BASE_URL}/api/v1/menu/token",
-                    json={"phone": phone},
-                )
-                if resp.status_code == 200:
-                    token = resp.json().get("token", "")
-                    menu_url = f"{MENU_PAGE_BASE_URL}/menu/{token}"
-
-                    body = f"{meal_emoji} *Menu*"
-                    if meal:
-                        body += f" \u2014 {meal} Time"
-                    body += f"\n{len(items)} items available"
-                    body += "\n\nTap below to browse, select items & quantities:"
-
-                    await send_whatsapp_interactive(phone, {
-                        "type": "cta_url",
-                        "body": {"text": body},
-                        "action": {
-                            "name": "cta_url",
-                            "parameters": {
-                                "display_text": "Browse Full Menu",
-                                "url": menu_url,
-                            },
-                        },
-                    })
-                    LOGGER.info(f"Sent menu CTA URL to {phone}: {menu_url}")
-                    return
-                else:
-                    LOGGER.warning(f"Failed to get menu token: {resp.status_code} {resp.text}")
-        except Exception as e:
-            LOGGER.warning(f"Menu CTA URL failed, falling back to Flows/list: {e}")
+    body = f"{meal_emoji} *Menu*"
+    if meal:
+        body += f" \u2014 {meal} Time"
+    body += f"\n{len(items)} items available"
+    body += "\n\nTap below to browse, select items & quantities:"
+    if await _send_cta_page(phone, "menu", body, "Browse Full Menu"):
+        return
 
     # ── Fallback: Flow/list paths (when MENU_PAGE_BASE_URL is not set) ──
 
@@ -1456,7 +1480,13 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
         await send_whatsapp_reply(phone, "\ud83d\uded2 Your cart is empty.")
         return
 
-    # Always send text summary first
+    # ── CTA URL path: full cart management in web page ──
+    cart_body = f"\ud83d\uded2 *Your Cart* \u2014 {len(items)} items, \u20b9{total}\n\nTap below to edit quantities, remove items, or checkout:"
+    cart_data = {"items": items, "total": total, "packaging_charge_per_item": packaging}
+    if await _send_cta_page(phone, "cart", cart_body, "Manage Cart", cart_data):
+        return
+
+    # ── Fallback: text summary + buttons ──
     lines = ["\ud83d\uded2 *Your Cart*\n"]
     for i, item in enumerate(items, 1):
         name = item.get("name") or item.get("item_name", "Item")
@@ -1468,45 +1498,15 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
     lines.append(f"\ud83d\udcb0 *Total: \u20b9{total}*")
     await send_whatsapp_reply(phone, "\n".join(lines))
 
-    if USE_WHATSAPP_FLOWS and FLOW_MANAGE_CART_ID and len(items) <= 10:
-        # Cart Management Flow (TextInput qty for all cart sizes)
-        await _send_cart_management_flow(phone, items, total)
-        buttons = [
-            {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
-            {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}},
-        ]
-        await send_whatsapp_interactive(phone, {
-            "type": "button",
-            "body": {"text": "Or proceed directly:"},
-            "action": {"buttons": buttons},
-        })
-
-    elif len(items) <= 3:
-        # Fallback (no Flow): per-item button cards with +/- buttons
-        for item in items:
-            await _send_cart_item_buttons(phone, item)
-        buttons = [
-            {"type": "reply", "reply": {"id": "add more items", "title": "Add More Items"}},
-            {"type": "reply", "reply": {"id": "checkout", "title": "Proceed to Checkout"}},
-        ]
-        await send_whatsapp_interactive(phone, {
-            "type": "button",
-            "body": {"text": "Ready to checkout?"},
-            "action": {"buttons": buttons},
-        })
-
-    else:
-        # Fallback (no Flow, >3 items): simplified action buttons
-        buttons = [
-            {"type": "reply", "reply": {"id": "modify_cart_items", "title": "Modify Items"}},
-            {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
-            {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}},
-        ]
-        await send_whatsapp_interactive(phone, {
-            "type": "button",
-            "body": {"text": "What would you like to do?"},
-            "action": {"buttons": buttons},
-        })
+    buttons = [
+        {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
+        {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}},
+    ]
+    await send_whatsapp_interactive(phone, {
+        "type": "button",
+        "body": {"text": "What would you like to do?"},
+        "action": {"buttons": buttons},
+    })
 
     LOGGER.info(f"Sent cart ({len(items)} items, \u20b9{total}) to {phone}")
 
@@ -1671,27 +1671,38 @@ async def _convert_quick_replies(phone: str, agui: dict) -> None:
 
 # --- ORDER_DATA ---
 async def _convert_order_data(phone: str, agui: dict) -> None:
-    """Convert order data to a formatted text message."""
+    """Convert order data to a CTA web page or formatted text message."""
     order_id = agui.get("order_id", "")
     items = agui.get("items", [])
     total = agui.get("total", 0)
     status = agui.get("status", "")
     order_type = agui.get("order_type", "")
 
-    lines = ["📋 *Order Details*\n"]
-    if order_id:
-        lines.append(f"🆔 Order: {order_id}")
+    # ── CTA URL path: visual order card ──
+    order_body = f"\ud83d\udccb *Order #{order_id}*"
     if status:
-        lines.append(f"📊 Status: {status.title()}")
+        order_body += f" \u2014 {status.title()}"
+    order_body += f"\n{len(items)} items \u2022 \u20b9{total}"
+    order_body += "\n\nTap below to view full order details:"
+    order_data = {"order_id": order_id, "items": items, "total": total, "status": status, "order_type": order_type}
+    if await _send_cta_page(phone, "order", order_body, "View Order", order_data):
+        return
+
+    # ── Fallback: text message ──
+    lines = ["\ud83d\udccb *Order Details*\n"]
+    if order_id:
+        lines.append(f"\ud83c\udd94 Order: {order_id}")
+    if status:
+        lines.append(f"\ud83d\udcca Status: {status.title()}")
     if order_type:
-        lines.append(f"📦 Type: {order_type.replace('_', ' ').title()}")
+        lines.append(f"\ud83d\udce6 Type: {order_type.replace('_', ' ').title()}")
     lines.append("")
     for i, item in enumerate(items, 1):
         name = item.get("name", "Item")
         qty = item.get("quantity", 1)
         price = item.get("price", 0)
-        lines.append(f"{i}. {name} × {qty} — ₹{price * qty}")
-    lines.append(f"\n💰 *Total: ₹{total}*")
+        lines.append(f"{i}. {name} \u00d7 {qty} \u2014 \u20b9{price * qty}")
+    lines.append(f"\n\ud83d\udcb0 *Total: \u20b9{total}*")
 
     await send_whatsapp_reply(phone, "\n".join(lines))
     LOGGER.info(f"Sent order data ({order_id}) to {phone}")
@@ -2017,47 +2028,125 @@ async def send_whatsapp_interactive(to_number: str, interactive: dict) -> bool:
 # ===================================================================
 @app.post("/internal/add-to-cart")
 async def internal_add_to_cart(request: Request):
+    """Legacy: add-to-cart endpoint. Redirects to unified wa-action."""
+    body = await request.json()
+    body["action"] = "add_to_cart"
+    body["items"] = body.get("items", [])
+    # Forward to unified handler
+    from starlette.requests import Request as StarletteRequest
+    return await internal_wa_action_handler(body)
+
+
+@app.post("/internal/wa-action")
+async def internal_wa_action(request: Request):
+    """Unified internal endpoint for all WhatsApp web page actions."""
+    body = await request.json()
+    return await internal_wa_action_handler(body)
+
+
+async def internal_wa_action_handler(body: dict):
     """
-    Internal endpoint called by the chatbot's WhatsApp menu API.
-    Receives cart items from the web menu page and pushes them through
-    the existing WebSocket to the chatbot for processing.
+    Handle all actions from WhatsApp web pages:
+    - add_to_cart: Add items to cart via form_response
+    - update_cart: Update quantities / remove items
+    - checkout: Trigger checkout flow
+    - add_more: Send "show menu" to reopen menu
+    - message: Send arbitrary text message to chatbot
     """
     try:
-        body = await request.json()
         phone = body.get("phone", "")
-        items = body.get("items", [])
+        action = body.get("action", "")
 
-        if not phone or not items:
-            return JSONResponse(status_code=400, content={"error": "phone and items required"})
+        if not phone:
+            return JSONResponse(status_code=400, content={"error": "phone required"})
 
-        # Build form_response (same format as Flow select_items)
-        items_payload = [{"name": it["name"], "quantity": it.get("quantity", 1)} for it in items]
-        form_response = {
-            "type": "form_response",
-            "form_type": "direct_add_to_cart",
-            "data": {"items": items_payload},
-        }
+        LOGGER.info(f"Internal wa-action for {phone}: {action}")
 
-        item_summary = ", ".join(f"{it.get('quantity', 1)}x {it['name']}" for it in items)
-        LOGGER.info(f"Internal add-to-cart for {phone}: {item_summary}")
+        # Helper: ensure WS connection exists
+        async def _ensure_session_and_send(message: str):
+            ws = ws_connections.get(phone)
+            if not ws or not ws.open:
+                reply = await get_chatbot_reply(phone, message)
+                if reply:
+                    await send_whatsapp_reply(phone, reply)
+                _start_bg_listener(phone)
+                return {"success": True, "method": "new_session"}
+            return None
 
-        # Check if WS connection exists; if not, create one via get_chatbot_reply
-        ws = ws_connections.get(phone)
-        if not ws or not ws.open:
-            # No active session — send as a regular message to create one
-            reply = await get_chatbot_reply(phone, f"add to cart: {item_summary}")
+        # Helper: send form_response through existing WS
+        async def _send_form(form_type: str, data: dict):
+            form_response = {"type": "form_response", "form_type": form_type, "data": data}
+            ws = ws_connections.get(phone)
+            if not ws or not ws.open:
+                # Fallback: send as text
+                return await _ensure_session_and_send(str(data))
+            await _send_form_response_to_chatbot(phone, form_response)
+            _start_bg_listener(phone)
+            return {"success": True, "method": "form_response"}
+
+        if action == "add_to_cart":
+            items = body.get("items", [])
+            if not items:
+                return JSONResponse(status_code=400, content={"error": "items required"})
+            items_payload = [{"name": it["name"], "quantity": it.get("quantity", 1)} for it in items]
+            item_summary = ", ".join(f"{it.get('quantity', 1)}x {it['name']}" for it in items)
+            LOGGER.info(f"Add to cart for {phone}: {item_summary}")
+
+            fallback = await _ensure_session_and_send(f"add to cart: {item_summary}")
+            if fallback:
+                return fallback
+            return await _send_form("direct_add_to_cart", {"items": items_payload})
+
+        elif action == "update_cart":
+            updates = body.get("updates", [])
+            removes = body.get("removes", [])
+            # Process removes
+            for name in removes:
+                await _send_form("direct_remove_from_cart", {"item_name": name})
+            # Process quantity updates
+            for upd in updates:
+                await _send_form("direct_update_cart", {
+                    "item_name": upd.get("item_name", ""),
+                    "quantity": upd.get("quantity", 1),
+                })
+            return {"success": True}
+
+        elif action == "checkout":
+            fallback = await _ensure_session_and_send("I want to checkout")
+            if fallback:
+                return fallback
+            # Send checkout as a regular message
+            reply = await get_chatbot_reply(phone, "checkout")
             if reply:
                 await send_whatsapp_reply(phone, reply)
             _start_bg_listener(phone)
-            return {"success": True, "method": "new_session"}
+            return {"success": True}
 
-        # Existing session — use form_response for direct processing
-        await _send_form_response_to_chatbot(phone, form_response)
-        _start_bg_listener(phone)
-        return {"success": True, "method": "form_response"}
+        elif action == "add_more":
+            fallback = await _ensure_session_and_send("show menu")
+            if fallback:
+                return fallback
+            reply = await get_chatbot_reply(phone, "show menu")
+            if reply:
+                await send_whatsapp_reply(phone, reply)
+            _start_bg_listener(phone)
+            return {"success": True}
+
+        elif action == "message":
+            message = body.get("message", "")
+            if not message:
+                return JSONResponse(status_code=400, content={"error": "message required"})
+            reply = await get_chatbot_reply(phone, message)
+            if reply:
+                await send_whatsapp_reply(phone, reply)
+            _start_bg_listener(phone)
+            return {"success": True}
+
+        else:
+            return JSONResponse(status_code=400, content={"error": f"Unknown action: {action}"})
 
     except Exception as e:
-        LOGGER.error(f"Internal add-to-cart error: {e}", exc_info=True)
+        LOGGER.error(f"Internal wa-action error: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 

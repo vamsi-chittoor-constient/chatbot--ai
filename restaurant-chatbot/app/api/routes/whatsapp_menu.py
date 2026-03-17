@@ -1,19 +1,27 @@
 """
-WhatsApp Menu API — serves menu data and processes cart submissions
-from the mobile-optimized menu web page opened via WhatsApp CTA URL.
+WhatsApp Web Pages API — serves data for mobile-optimized web pages
+opened via WhatsApp CTA URL buttons. Replaces complex AGUI→WhatsApp
+conversions with full web UI capability.
+
+Pages:
+- /menu/{token}    → Browse full menu, select items + qty, add to cart
+- /cart/{token}    → View/edit cart, change quantities, checkout
+- /search/{token}  → Search results with add-to-cart
+- /order/{token}   → Order details and tracking
 
 Flow:
-1. WhatsApp bridge generates a token via POST /api/v1/menu/token
-2. User opens /menu/{token} in WhatsApp's in-app browser
-3. React page fetches GET /api/v1/menu/whatsapp/{token}
-4. User selects items, submits via POST /api/v1/cart/whatsapp
-5. This endpoint calls the WhatsApp bridge to push cart to the chatbot
+1. WhatsApp bridge stores page data in Redis via POST /api/v1/wa/token
+2. User taps CTA button → opens web page in WhatsApp's in-app browser
+3. React page fetches GET /api/v1/wa/page/{token}
+4. User interacts, submits via POST /api/v1/wa/action
+5. Backend calls WhatsApp bridge to push result to chatbot
 """
 
 import os
 import uuid
+import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -22,15 +30,12 @@ from pydantic import BaseModel
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# WhatsApp bridge internal URL (Docker service name)
 WHATSAPP_BRIDGE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge:8002")
 
-# Redis for token storage
 _redis_client = None
 
 
 def _get_redis():
-    """Get sync Redis client (lazy init)."""
     global _redis_client
     if _redis_client is None:
         from app.core.redis import get_sync_redis_client
@@ -40,67 +45,139 @@ def _get_redis():
 
 # ── Token management ──
 
-def generate_menu_token(phone: str) -> str:
-    """Create a short-lived token mapping to a phone number. Stored in Redis with 30min TTL."""
+def create_page_token(phone: str, page_type: str, data: dict = None) -> str:
+    """Create a token that stores phone + page type + optional data. 30min TTL."""
     token = uuid.uuid4().hex
     redis = _get_redis()
-    redis.set(f"menu_token:{token}", phone, ex=1800)  # 30 min
-    logger.info(f"Generated menu token for {phone}: {token[:8]}...")
+    payload = json.dumps({"phone": phone, "page_type": page_type, "data": data or {}})
+    redis.set(f"wa_page:{token}", payload, ex=1800)
+    logger.info(f"Created {page_type} token for {phone}: {token[:8]}...")
     return token
 
 
-def resolve_menu_token(token: str) -> Optional[str]:
-    """Resolve a token to a phone number. Returns None if expired/invalid."""
+def resolve_page_token(token: str) -> Optional[dict]:
+    """Resolve token → {phone, page_type, data}. Returns None if expired."""
     redis = _get_redis()
-    phone = redis.get(f"menu_token:{token}")
-    return phone
+    raw = redis.get(f"wa_page:{token}")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
 
 
 # ── Request/Response models ──
 
 class TokenRequest(BaseModel):
     phone: str
+    page_type: str  # menu, cart, search, order
+    data: Dict[str, Any] = {}
 
 
 class TokenResponse(BaseModel):
     token: str
 
 
-class CartItem(BaseModel):
-    name: str
-    quantity: int
-    price: float = 0
-
-
-class CartSubmitRequest(BaseModel):
+class ActionRequest(BaseModel):
     token: str
-    items: List[CartItem]
+    action: str  # add_to_cart, update_cart, checkout, etc.
+    data: Dict[str, Any] = {}
 
 
 # ── Endpoints ──
 
-@router.post("/menu/token", response_model=TokenResponse)
-async def create_menu_token(req: TokenRequest):
-    """Generate a menu browsing token for a WhatsApp phone number."""
-    token = generate_menu_token(req.phone)
+@router.post("/wa/token", response_model=TokenResponse)
+async def create_token(req: TokenRequest):
+    """Generate a page token. Called by WhatsApp bridge before sending CTA URL."""
+    token = create_page_token(req.phone, req.page_type, req.data)
     return TokenResponse(token=token)
 
 
-@router.get("/menu/whatsapp/{token}")
-async def get_whatsapp_menu(token: str):
-    """Fetch menu items for the WhatsApp menu page. Token must be valid."""
-    phone = resolve_menu_token(token)
-    if not phone:
-        raise HTTPException(status_code=404, detail="Menu session expired. Please request the menu again from WhatsApp.")
+@router.get("/wa/page/{token}")
+async def get_page_data(token: str):
+    """Fetch page data for a WhatsApp web page. Token must be valid."""
+    info = resolve_page_token(token)
+    if not info:
+        raise HTTPException(status_code=404, detail="Session expired. Please request this again from WhatsApp.")
 
+    phone = info["phone"]
+    page_type = info["page_type"]
+    stored_data = info.get("data", {})
+
+    if page_type == "menu":
+        return await _get_menu_data(phone, stored_data)
+    elif page_type == "cart":
+        return _get_cart_data(stored_data)
+    elif page_type == "search":
+        return _get_search_data(stored_data)
+    elif page_type == "order":
+        return _get_order_data(stored_data)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown page type: {page_type}")
+
+
+@router.post("/wa/action")
+async def perform_action(req: ActionRequest):
+    """Handle user actions from WhatsApp web pages (add to cart, checkout, etc.)."""
+    info = resolve_page_token(req.token)
+    if not info:
+        raise HTTPException(status_code=401, detail="Session expired. Please go back to WhatsApp and try again.")
+
+    phone = info["phone"]
+
+    # Build the appropriate message/form_response for the bridge
+    bridge_payload = {"phone": phone}
+
+    if req.action == "add_to_cart":
+        items = req.data.get("items", [])
+        if not items:
+            raise HTTPException(status_code=400, detail="No items selected.")
+        bridge_payload["items"] = items
+        bridge_payload["action"] = "add_to_cart"
+
+    elif req.action == "update_cart":
+        bridge_payload["updates"] = req.data.get("updates", [])
+        bridge_payload["removes"] = req.data.get("removes", [])
+        bridge_payload["action"] = "update_cart"
+
+    elif req.action == "checkout":
+        bridge_payload["action"] = "checkout"
+
+    elif req.action == "add_more":
+        bridge_payload["action"] = "add_more"
+
+    else:
+        # Generic message passthrough
+        bridge_payload["action"] = "message"
+        bridge_payload["message"] = req.data.get("message", req.action)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{WHATSAPP_BRIDGE_URL}/internal/wa-action",
+                json=bridge_payload,
+            )
+            if resp.status_code != 200:
+                logger.error(f"Bridge action failed: {resp.status_code} {resp.text}")
+                raise HTTPException(status_code=502, detail="Failed to process action.")
+            return resp.json()
+    except httpx.ConnectError:
+        logger.error("Cannot connect to WhatsApp bridge")
+        raise HTTPException(status_code=502, detail="Service unavailable.")
+
+
+# ── Page data builders ──
+
+async def _get_menu_data(phone: str, stored_data: dict) -> dict:
+    """Build menu page data from the preloaded menu cache."""
     from app.core.preloader import get_menu_preloader
     preloader = get_menu_preloader()
-    items = preloader.search()  # All available items
+    items = preloader.search()
 
     if not items:
         raise HTTPException(status_code=404, detail="Menu is currently unavailable.")
 
-    # Group by category for the frontend
     categories = []
     seen = set()
     for item in items:
@@ -110,43 +187,49 @@ async def get_whatsapp_menu(token: str):
             seen.add(cat)
 
     return {
+        "page_type": "menu",
         "items": items,
         "categories": categories,
-        "phone": phone[-4:],  # Last 4 digits only (privacy)
+        "phone_last4": phone[-4:],
     }
 
 
-@router.post("/cart/whatsapp")
-async def submit_whatsapp_cart(req: CartSubmitRequest):
-    """
-    Receive cart selections from the WhatsApp menu page.
-    Forwards to the WhatsApp bridge which pushes it through the chatbot WebSocket.
-    """
-    phone = resolve_menu_token(req.token)
-    if not phone:
-        raise HTTPException(status_code=401, detail="Session expired. Please request the menu again from WhatsApp.")
+def _get_cart_data(stored_data: dict) -> dict:
+    """Return cart data that was stored in the token."""
+    return {
+        "page_type": "cart",
+        "items": stored_data.get("items", []),
+        "total": stored_data.get("total", 0),
+        "packaging_charge": stored_data.get("packaging_charge_per_item", 30),
+    }
 
-    if not req.items:
-        raise HTTPException(status_code=400, detail="No items selected.")
 
-    # Invalidate token (one-time use for cart submission)
-    redis = _get_redis()
-    redis.delete(f"menu_token:{req.token}")
+def _get_search_data(stored_data: dict) -> dict:
+    """Return search results that were stored in the token."""
+    return {
+        "page_type": "search",
+        "query": stored_data.get("query", ""),
+        "items": stored_data.get("items", []),
+        "current_meal_period": stored_data.get("current_meal_period", ""),
+    }
 
-    # Call WhatsApp bridge internal endpoint to add items to cart
-    items_payload = [{"name": it.name, "quantity": it.quantity, "price": it.price} for it in req.items]
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{WHATSAPP_BRIDGE_URL}/internal/add-to-cart",
-                json={"phone": phone, "items": items_payload},
-            )
-            if resp.status_code != 200:
-                logger.error(f"Bridge add-to-cart failed: {resp.status_code} {resp.text}")
-                raise HTTPException(status_code=502, detail="Failed to add items to cart.")
-    except httpx.ConnectError:
-        logger.error("Cannot connect to WhatsApp bridge")
-        raise HTTPException(status_code=502, detail="WhatsApp bridge unavailable.")
+def _get_order_data(stored_data: dict) -> dict:
+    """Return order data that was stored in the token."""
+    return {
+        "page_type": "order",
+        "order_id": stored_data.get("order_id", ""),
+        "items": stored_data.get("items", []),
+        "total": stored_data.get("total", 0),
+        "status": stored_data.get("status", ""),
+        "order_type": stored_data.get("order_type", ""),
+    }
 
-    return {"success": True, "message": "Items added to cart! You can close this page and return to WhatsApp."}
+
+# ── Legacy endpoints (backward compatibility) ──
+
+@router.post("/menu/token", response_model=TokenResponse)
+async def create_menu_token_legacy(req: TokenRequest):
+    """Legacy: Generate menu token. Redirects to new unified token system."""
+    token = create_page_token(req.phone, "menu")
+    return TokenResponse(token=token)
