@@ -373,6 +373,10 @@ app.include_router(llm_manager.router, prefix="/api/v1", tags=["llm-manager"])  
 app.include_router(stream.router, prefix="/api/v1", tags=["ag-ui-streaming"])  # AG-UI SSE streaming
 app.include_router(voice.router, prefix="/api/v1", tags=["voice"])  # Voice chat WebSocket
 
+# WhatsApp menu page API (CTA URL → mobile menu → cart submission)
+from app.api.routes import whatsapp_menu
+app.include_router(whatsapp_menu.router, prefix="/api/v1", tags=["whatsapp-menu"])
+
 # ============ TESTING MODULE ROUTES ============
 from app.api.routes import testing
 app.include_router(testing.router, prefix="/api/v1", tags=["testing"])

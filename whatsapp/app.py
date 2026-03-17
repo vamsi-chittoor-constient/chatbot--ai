@@ -36,10 +36,15 @@ FLOW_SELECT_ITEMS_QTY_ID = os.getenv("FLOW_SELECT_ITEMS_QTY_ID", "")
 FLOW_MANAGE_CART_ID = os.getenv("FLOW_MANAGE_CART_ID", "")
 FLOW_BOOKING_ID = os.getenv("FLOW_BOOKING_ID", "")
 
+# Menu page CTA URL (set to your public domain/ngrok URL)
+MENU_PAGE_BASE_URL = os.getenv("MENU_PAGE_BASE_URL", "")
+CHATBOT_API_BASE_URL = os.getenv("CHATBOT_API_BASE_URL", "http://chatbot-app:8000")
+
 LOGGER.info("WhatsApp Bridge starting...")
 LOGGER.info(f"Chatbot WebSocket base URL: {CHATBOT_WS_BASE_URL}")
 LOGGER.info(f"Use WhatsApp Flows: {USE_WHATSAPP_FLOWS}")
 LOGGER.info(f"Flow provision mode: {FLOW_PROVISION_MODE}")
+LOGGER.info(f"Menu page base URL: {MENU_PAGE_BASE_URL or '(not set — using Flows/list fallback)'}")
 
 
 @app.on_event("startup")
@@ -1324,6 +1329,47 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
         categories = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
     LOGGER.info(f"MENU_DATA: {len(items)} items, categories({type(categories).__name__})={categories!r}")
 
+    meal = agui.get("current_meal_period", "")
+    meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
+
+    # ── CTA URL path: open mobile menu page in WhatsApp's in-app browser ──
+    if MENU_PAGE_BASE_URL:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{CHATBOT_API_BASE_URL}/api/v1/menu/token",
+                    json={"phone": phone},
+                )
+                if resp.status_code == 200:
+                    token = resp.json().get("token", "")
+                    menu_url = f"{MENU_PAGE_BASE_URL}/menu/{token}"
+
+                    body = f"{meal_emoji} *Menu*"
+                    if meal:
+                        body += f" \u2014 {meal} Time"
+                    body += f"\n{len(items)} items available"
+                    body += "\n\nTap below to browse, select items & quantities:"
+
+                    await send_whatsapp_interactive(phone, {
+                        "type": "cta_url",
+                        "body": {"text": body},
+                        "action": {
+                            "name": "cta_url",
+                            "parameters": {
+                                "display_text": "Browse Full Menu",
+                                "url": menu_url,
+                            },
+                        },
+                    })
+                    LOGGER.info(f"Sent menu CTA URL to {phone}: {menu_url}")
+                    return
+                else:
+                    LOGGER.warning(f"Failed to get menu token: {resp.status_code} {resp.text}")
+        except Exception as e:
+            LOGGER.warning(f"Menu CTA URL failed, falling back to Flows/list: {e}")
+
+    # ── Fallback: Flow/list paths (when MENU_PAGE_BASE_URL is not set) ──
+
     # Group items by category
     by_category: Dict[str, list] = {}
     for item in items:
@@ -1331,8 +1377,6 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
         by_category.setdefault(cat, []).append(item)
 
     cat_order = categories if categories else list(by_category.keys())
-    meal = agui.get("current_meal_period", "")
-    meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
     # ── Flow path: send one Flow per category (multi-select + qty) ──
     _has_any_select_flow = USE_WHATSAPP_FLOWS and (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID)
@@ -1971,6 +2015,52 @@ async def send_whatsapp_interactive(to_number: str, interactive: dict) -> bool:
 # ===================================================================
 # HEALTH CHECK & ADMIN ENDPOINTS
 # ===================================================================
+@app.post("/internal/add-to-cart")
+async def internal_add_to_cart(request: Request):
+    """
+    Internal endpoint called by the chatbot's WhatsApp menu API.
+    Receives cart items from the web menu page and pushes them through
+    the existing WebSocket to the chatbot for processing.
+    """
+    try:
+        body = await request.json()
+        phone = body.get("phone", "")
+        items = body.get("items", [])
+
+        if not phone or not items:
+            return JSONResponse(status_code=400, content={"error": "phone and items required"})
+
+        # Build form_response (same format as Flow select_items)
+        items_payload = [{"name": it["name"], "quantity": it.get("quantity", 1)} for it in items]
+        form_response = {
+            "type": "form_response",
+            "form_type": "direct_add_to_cart",
+            "data": {"items": items_payload},
+        }
+
+        item_summary = ", ".join(f"{it.get('quantity', 1)}x {it['name']}" for it in items)
+        LOGGER.info(f"Internal add-to-cart for {phone}: {item_summary}")
+
+        # Check if WS connection exists; if not, create one via get_chatbot_reply
+        ws = ws_connections.get(phone)
+        if not ws or not ws.open:
+            # No active session — send as a regular message to create one
+            reply = await get_chatbot_reply(phone, f"add to cart: {item_summary}")
+            if reply:
+                await send_whatsapp_reply(phone, reply)
+            _start_bg_listener(phone)
+            return {"success": True, "method": "new_session"}
+
+        # Existing session — use form_response for direct processing
+        await _send_form_response_to_chatbot(phone, form_response)
+        _start_bg_listener(phone)
+        return {"success": True, "method": "form_response"}
+
+    except Exception as e:
+        LOGGER.error(f"Internal add-to-cart error: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint to monitor service status"""

@@ -25,6 +25,7 @@ import { BookingFormCard } from './components/BookingFormCard'
 import { OrderTypeCard } from './components/OrderTypeCard'
 import PaymentSuccess from './components/PaymentSuccess'
 import PaymentFailure from './components/PaymentFailure'
+import WhatsAppMenu from './components/WhatsAppMenu'
 
 function ChatInterface() {
   const chatContainerRef = useRef(null)
@@ -382,6 +383,7 @@ function App() {
       <Routes>
         <Route path="/payment/success" element={<PaymentSuccess />} />
         <Route path="/payment/failure" element={<PaymentFailure />} />
+        <Route path="/menu/:sessionId" element={<WhatsAppMenu />} />
         <Route path="/" element={<ChatInterface />} />
       </Routes>
     </Router>
