@@ -1719,6 +1719,11 @@ async def _convert_receipt_link(phone: str, agui: dict) -> None:
     if not download_url:
         return
 
+    # Fix relative URLs — prepend public base URL
+    if download_url.startswith("/"):
+        base = MENU_PAGE_BASE_URL or CHATBOT_API_BASE_URL
+        download_url = f"{base.rstrip('/')}{download_url}"
+
     # Build receipt summary text
     text = f"🧾 *Receipt — {order_number}*\n"
     if items:
