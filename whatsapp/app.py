@@ -495,7 +495,7 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
             # On new connection, drain welcome/init messages from chatbot
             # suppress_quick_replies=True prevents stale init quick replies leaking to user
             if is_new_connection:
-                welcome_text, _ = await _drain_and_collect_response(
+                welcome_text, _, _ = await _drain_and_collect_response(
                     websocket, phone, timeout=15, suppress_quick_replies=True
                 )
                 if welcome_text:
@@ -532,12 +532,19 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
             LOGGER.info(f"Sent to chatbot from {phone}: {user_message[:50]}...")
 
             # Collect response (text via AGUI streaming + interactive cards sent directly)
-            text, any_sent = await _drain_and_collect_response(websocket, phone, timeout=45)
+            text, any_sent, pending_qr = await _drain_and_collect_response(websocket, phone, timeout=45)
 
+            # Send text FIRST, then quick replies — ensures correct ordering
             if text:
-                return text  # Caller will send this as WhatsApp text message
-            elif any_sent:
-                return None  # Response already handled via AGUI (interactive messages / streamed text)
+                await send_whatsapp_reply(phone, text)
+                any_sent = True
+            if pending_qr:
+                await _convert_quick_replies(phone, pending_qr)
+                LOGGER.info(f"Sent final QUICK_REPLIES to {phone}")
+                any_sent = True
+
+            if any_sent:
+                return None  # Everything already sent in correct order
             else:
                 return "Sorry, I couldn't get a response. Please try again."
 
@@ -687,15 +694,6 @@ async def _drain_and_collect_response(
                 direct_parts.append(raw.strip())
                 break
 
-    # Flush the last buffered QUICK_REPLIES (deduplicates tool + orchestrator emissions)
-    # Skip during welcome drain — init quick replies are stale and leak into new sessions
-    if last_quick_replies and not suppress_quick_replies:
-        await _convert_quick_replies(phone, last_quick_replies)
-        any_sent = True
-        LOGGER.info(f"Sent final QUICK_REPLIES to {phone}")
-    elif last_quick_replies and suppress_quick_replies:
-        LOGGER.info(f"Suppressed welcome QUICK_REPLIES for {phone} (session init)")
-
     # Build final text from any remaining pieces
     remaining_text = None
     if direct_parts:
@@ -706,7 +704,15 @@ async def _drain_and_collect_response(
         if text:
             remaining_text = text
 
-    return (remaining_text, any_sent)
+    # Return buffered quick replies so caller can send AFTER text
+    # (sending inside drain causes quick replies to appear before the text message)
+    pending_qr = None
+    if last_quick_replies and not suppress_quick_replies:
+        pending_qr = last_quick_replies
+    elif last_quick_replies and suppress_quick_replies:
+        LOGGER.info(f"Suppressed welcome QUICK_REPLIES for {phone} (session init)")
+
+    return (remaining_text, any_sent, pending_qr)
 
 
 async def _drain_trailing_events(
@@ -1199,10 +1205,12 @@ async def _send_form_response_to_chatbot(phone: str, form_response: dict) -> Non
             LOGGER.info(f"Sent form_response to chatbot for {phone}: {form_response['form_type']}")
 
             # Drain response — chatbot emits CART_DATA and/or ai_response
-            text, any_sent = await _drain_and_collect_response(ws, phone, timeout=15)
+            text, any_sent, pending_qr = await _drain_and_collect_response(ws, phone, timeout=15)
             if text:
                 await send_whatsapp_reply(phone, text)
-            elif not any_sent:
+            if pending_qr:
+                await _convert_quick_replies(phone, pending_qr)
+            elif not any_sent and not text:
                 LOGGER.warning(f"No response after form_response for {phone}")
 
     except Exception as e:
