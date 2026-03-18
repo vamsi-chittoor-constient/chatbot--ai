@@ -1994,7 +1994,9 @@ async def chat_endpoint(
 
                         if _display_id:
                             # Emit RECEIPT_LINK card via AGUI (same as get_order_receipt tool)
-                            _pdf_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
+                            import os as _os
+                            _base_url = _os.getenv("FRONTEND_URL", "").rstrip("/")
+                            _pdf_url = f"{_base_url}/api/v1/payment/receipt/pdf?session_id={session_id}"
                             _receipt_items = []
                             for _ri in _items:
                                 _receipt_items.append({

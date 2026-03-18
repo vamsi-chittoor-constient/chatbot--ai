@@ -113,7 +113,9 @@ async def handle_payment_message(
         }.get(method, method or "Online")
 
         if display_id:
-            pdf_url = f"/api/v1/payment/receipt/pdf?session_id={session_id}"
+            import os as _os
+            _base_url = _os.getenv("FRONTEND_URL", "").rstrip("/")
+            pdf_url = f"{_base_url}/api/v1/payment/receipt/pdf?session_id={session_id}"
 
             lines = [
                 "📄 **Order Receipt**\n",
