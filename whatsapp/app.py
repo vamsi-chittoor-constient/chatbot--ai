@@ -592,6 +592,7 @@ async def _drain_and_collect_response(
     direct_parts = []      # ai_response / system_message text (legacy path)
     any_sent = False       # Whether we already sent messages to WhatsApp
     last_quick_replies = None  # Buffer: only send the LAST QUICK_REPLIES (web UI replaces them)
+    seen_content = False   # True once we see real content from THIS response (text/cards)
     deadline = asyncio.get_event_loop().time() + timeout
 
     while True:
@@ -620,6 +621,7 @@ async def _drain_and_collect_response(
             # --- Legacy ai_response (welcome messages, direct actions like add-to-cart) ---
             if msg_type == "ai_response" and message_text:
                 direct_parts.append(message_text)
+                seen_content = True
                 # Drain trailing AGUI events (QUICK_REPLIES often follow direct actions)
                 trailing_sent = await _drain_trailing_events(websocket, phone)
                 any_sent = any_sent or trailing_sent
@@ -635,6 +637,7 @@ async def _drain_and_collect_response(
                     delta = agui_data.get("delta", "")
                     if delta:
                         text_chunks.append(delta)
+                    seen_content = True
                     continue
 
                 # Text stream ended: flush accumulated text to WhatsApp immediately
@@ -647,10 +650,12 @@ async def _drain_and_collect_response(
                             any_sent = True
                             LOGGER.info(f"Sent streamed text to {phone}: {text[:80]}...")
                         text_chunks.clear()
+                    seen_content = True
                     continue
 
                 # Text stream start: just a marker, skip
                 elif agui_type == "TEXT_MESSAGE_START":
+                    seen_content = True
                     continue
 
                 # RUN_FINISHED: chatbot may have follow-up processing stages.
@@ -667,9 +672,14 @@ async def _drain_and_collect_response(
 
                 # QUICK_REPLIES: buffer instead of sending (web UI replaces them;
                 # tools emit one, then orchestrator emits another — only last matters)
+                # Only accept quick replies AFTER we've seen real content from this
+                # response — any arriving before are stale from the previous turn.
                 elif agui_type == "QUICK_REPLIES":
-                    last_quick_replies = agui_data
-                    LOGGER.debug(f"Buffered QUICK_REPLIES for {phone} (will send last one)")
+                    if seen_content:
+                        last_quick_replies = agui_data
+                        LOGGER.debug(f"Buffered QUICK_REPLIES for {phone} (will send last one)")
+                    else:
+                        LOGGER.info(f"Discarded stale QUICK_REPLIES for {phone} (no content seen yet)")
                     continue
 
                 # Other interactive events: convert and send to WhatsApp
@@ -677,6 +687,7 @@ async def _drain_and_collect_response(
                     sent = await _handle_agui_event(phone, agui_data)
                     if sent:
                         any_sent = True
+                        seen_content = True
                     continue
 
             elif msg_type == "typing_indicator":
