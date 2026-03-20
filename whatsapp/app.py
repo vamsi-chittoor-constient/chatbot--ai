@@ -115,6 +115,17 @@ async def receive_message(request: Request):
                         _processed_msg_ids[msg_id] = asyncio.get_event_loop().time()
                         _cleanup_dedup()
 
+                    # --- Handle catalog order (cart sent by customer) ---
+                    if message_type == "order":
+                        order_data = message.get("order", {})
+                        product_items = order_data.get("product_items", [])
+                        catalog_id = order_data.get("catalog_id", "")
+                        LOGGER.info(f"Catalog order from {from_number}: {len(product_items)} items, catalog={catalog_id}")
+                        asyncio.create_task(
+                            _process_catalog_order(from_number, product_items, msg_id)
+                        )
+                        continue
+
                     # Extract user message based on message type
                     user_message = _extract_user_message(message, message_type)
 
@@ -142,6 +153,78 @@ async def receive_message(request: Request):
 
     # Always return 200 immediately to Meta (prevents timeout retries)
     return JSONResponse(content={"status": "ok"}, status_code=200)
+
+
+async def _process_catalog_order(phone: str, product_items: list, msg_id: str):
+    """Handle a catalog order (cart sent by customer from WhatsApp catalog).
+
+    Converts catalog product_items to a chatbot-compatible direct_add_to_cart.
+    Each product_item has: product_retailer_id, quantity, item_price, currency.
+    The retailer_id = our menu_item_id (UUID).
+
+    Steps:
+    1. Look up item names from chatbot menu cache via internal API
+    2. Send as direct_add_to_cart form_response (bypasses LLM, adds directly)
+    3. Chatbot responds with cart update + AGUI events
+    """
+    try:
+        if not product_items:
+            await send_whatsapp_reply(phone, "Your cart appears to be empty. Please add items and try again.")
+            return
+
+        LOGGER.info(f"Catalog order from {phone}: {len(product_items)} items")
+
+        # Look up item names from chatbot's menu API
+        item_names = {}
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{CHATBOT_API_BASE_URL}/api/v1/config/restaurant")
+                if resp.status_code == 200:
+                    menu_items = resp.json().get("menu", {}).get("items", [])
+                    for mi in menu_items:
+                        mid = mi.get("id", "")
+                        if mid:
+                            item_names[mid] = mi.get("name", "")
+        except Exception as e:
+            LOGGER.warning(f"Failed to fetch menu for name lookup: {e}")
+
+        # Build items list with names for direct_add_to_cart
+        cart_items = []
+        summary_parts = []
+        for pi in product_items:
+            retailer_id = pi.get("product_retailer_id", "")
+            qty = pi.get("quantity", 1)
+            price_str = pi.get("item_price", "0")
+            name = item_names.get(retailer_id, "")
+
+            if name:
+                cart_items.append({"name": name, "quantity": qty})
+                summary_parts.append(f"{qty}x {name}")
+            else:
+                # Fallback: use retailer_id as identifier
+                cart_items.append({"name": retailer_id, "quantity": qty})
+                summary_parts.append(f"{qty}x item")
+                LOGGER.warning(f"No name found for retailer_id {retailer_id}")
+
+        if not cart_items:
+            await send_whatsapp_reply(phone, "Could not process your order. Please try again.")
+            return
+
+        LOGGER.info(f"Catalog order resolved: {', '.join(summary_parts)} for {phone}")
+
+        # Send as direct_add_to_cart — chatbot handles this without LLM
+        form_response = {
+            "type": "form_response",
+            "form_type": "direct_add_to_cart",
+            "data": {"items": cart_items}
+        }
+        await _send_form_response_to_chatbot(phone, form_response)
+
+    except Exception as e:
+        LOGGER.error(f"Error processing catalog order for {phone}: {e}", exc_info=True)
+        await send_whatsapp_reply(phone, "Sorry, something went wrong processing your order. Please try again.")
+
+    _start_bg_listener(phone)
 
 
 async def _process_message(phone: str, user_message: str, msg_id: str):
