@@ -162,6 +162,37 @@ print(json.dumps(r.json(), indent=2))
 "
 ```
 
+### 10. Product Sets Created (Category Grouping)
+- 8 categories created as Product Sets via `POST /{catalog_id}/product_sets`
+- Categories and counts:
+  - Side Orders: 13 items (set: 2062370404328886)
+  - Seafood Meal: 6 items (set: 935694739395349)
+  - Desserts: 4 items (set: 767449336200311)
+  - Hot Coffees: 4 items (set: 1559731412413901)
+  - Chicken Meal: 12 items (set: 1818094438861022)
+  - Chicken: 4 items (set: 910233591986794)
+  - Beverages: 16 items (set: 1363404188883075)
+  - Add Ons: 8 items (set: 1257879979782899)
+- Uses filter: `{"retailer_id": {"is_any": [<retailer_ids>]}}`
+
+### 11. Catalog Message Types in Use
+| Use Case | Message Type | Header | Max Items |
+|----------|-------------|--------|-----------|
+| Full menu browse | `catalog_message` | "View X's Catalog" (Meta-controlled) | All |
+| Menu by category | `product_list` | "Browse Menu" (custom) | 30, 10 sections |
+| Search results | `product_list` | "Results: query" (custom) | 30 |
+| Similar items | `product_list` | "You might also like" (custom) | 30 |
+| Single recommendation | `product` | Product name (auto) | 1 |
+
+All message types use the same catalog (1585007629445142).
+
+### 12. Catalog Order Handling
+- Customer sends cart → webhook receives `message.type: "order"`
+- Bridge looks up item names via chatbot menu API
+- Sends `direct_add_to_cart` form_response to chatbot
+- Chatbot adds items to cart, responds with cart update + AGUI events
+- Checkout flow continues as normal (dine-in/takeaway → payment → receipt)
+
 ## Steps Remaining
 
 ### 10. Handle Order Webhooks

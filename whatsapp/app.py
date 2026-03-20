@@ -1107,16 +1107,52 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     meal = agui.get("current_meal_period", "")
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
-    # ── 1. WhatsApp Catalog: native in-app menu browsing + cart ──
-    catalog_body = f"{meal_emoji} *Menu*"
-    if meal:
-        catalog_body += f" \u2014 {meal} Time"
-    catalog_body += f"\n{len(items)} items available"
-    catalog_body += "\n\nBrowse our menu, add items to cart, and send your order!"
-    # Use first item's ID as thumbnail
-    first_item_id = items[0].get("id", "") if items else ""
-    if await _send_catalog_message(phone, catalog_body, first_item_id):
-        return
+    # ── 1. WhatsApp Catalog product_list: grouped by category with custom header ──
+    if CATALOG_ID:
+        try:
+            # Group items by category for sections
+            by_category: Dict[str, list] = {}
+            for item in items:
+                cat = item.get("category", "Other")
+                by_category.setdefault(cat, []).append(item)
+
+            cat_order = categories if categories else list(by_category.keys())
+            sections = []
+            total_products = 0
+            for cat in cat_order:
+                if cat not in by_category:
+                    continue
+                product_items = []
+                for item in by_category[cat]:
+                    item_id = item.get("id", "")
+                    if item_id and total_products < 30:  # product_list max 30
+                        product_items.append({"product_retailer_id": item_id})
+                        total_products += 1
+                if product_items and len(sections) < 10:  # max 10 sections
+                    sections.append({
+                        "title": _truncate(cat, 24),
+                        "product_items": product_items
+                    })
+
+            if sections:
+                header_text = f"{meal_emoji} Browse Menu"
+                if meal:
+                    header_text += f" \u2014 {meal}"
+                body_text = f"{len(items)} items available. Tap items to view details and add to cart."
+
+                await send_whatsapp_interactive(phone, {
+                    "type": "product_list",
+                    "header": {"type": "text", "text": _truncate(header_text, 60)},
+                    "body": {"text": body_text},
+                    "action": {
+                        "catalog_id": CATALOG_ID,
+                        "sections": sections
+                    }
+                })
+                LOGGER.info(f"Sent product_list menu ({total_products} items, {len(sections)} categories) to {phone}")
+                return
+        except Exception as e:
+            LOGGER.warning(f"product_list menu failed, falling back: {e}")
 
     # ── 2. CTA URL fallback: open mobile menu page in browser ──
     body = f"{meal_emoji} *Menu*"
