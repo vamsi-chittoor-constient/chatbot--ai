@@ -1238,15 +1238,16 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
         lines.append(f"{i}. {name} \u00d7 {qty} \u2014 \u20b9{price * qty}")
 
     lines.append(f"\n\ud83d\udcb0 *Total: \u20b9{total}*")
-    await send_whatsapp_reply(phone, "\n".join(lines))
+    lines.append("\nTo update, just tell me (e.g. \"remove Cheese Slice\" or \"change Bun to 3\")")
 
     buttons = [
         {"type": "reply", "reply": {"id": "checkout", "title": "\u2705 Checkout"}},
-        {"type": "reply", "reply": {"id": "clear cart", "title": "\ud83d\uddd1 Clear Cart"}},
+        {"type": "reply", "reply": {"id": "clear cart", "title": "\ud83d\uddd1\ufe0f Clear Cart"}},
+        {"type": "reply", "reply": {"id": "add more items", "title": "\ud83c\udf54 Add More"}},
     ]
     await send_whatsapp_interactive(phone, {
         "type": "button",
-        "body": {"text": "Ready to order?"},
+        "body": {"text": "\n".join(lines)},
         "action": {"buttons": buttons},
     })
 
