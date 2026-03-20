@@ -5,8 +5,7 @@ import asyncio
 import websockets
 import json
 import os
-import uuid
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional
 from logger_wrapper import LOGGER
 from dotenv import load_dotenv
 
@@ -25,16 +24,9 @@ WHATSAPP_PHONE_ID = os.getenv("PHONE_NUMBER_ID")
 CHATBOT_WS_BASE_URL = os.getenv("CHATBOT_WS_BASE_URL", "ws://chatbot-app:8000/api/v1/chat")
 WHATSAPP_API_VERSION = "v21.0"
 
-# WhatsApp Flows
-# USE_WHATSAPP_FLOWS: "true" (default) = use Flows when available, "false" = always use list/button fallback
-# FLOW_PROVISION_MODE: "auto" (default) = provision on startup, "manual" = use .env IDs only
-USE_WHATSAPP_FLOWS = os.getenv("USE_WHATSAPP_FLOWS", "true").strip().lower() == "true"
+# WhatsApp Catalog
 WABA_ID = os.getenv("WABA_ID", "")
-FLOW_PROVISION_MODE = os.getenv("FLOW_PROVISION_MODE", "auto").strip().lower()
-FLOW_SELECT_ITEMS_ID = os.getenv("FLOW_SELECT_ITEMS_ID", "")
-FLOW_SELECT_ITEMS_QTY_ID = os.getenv("FLOW_SELECT_ITEMS_QTY_ID", "")
-FLOW_MANAGE_CART_ID = os.getenv("FLOW_MANAGE_CART_ID", "")
-FLOW_BOOKING_ID = os.getenv("FLOW_BOOKING_ID", "")
+CATALOG_ID = os.getenv("CATALOG_ID", "1585007629445142")
 
 # Menu page CTA URL (set to your public domain/ngrok URL)
 MENU_PAGE_BASE_URL = os.getenv("MENU_PAGE_BASE_URL", "")
@@ -42,48 +34,8 @@ CHATBOT_API_BASE_URL = os.getenv("CHATBOT_API_BASE_URL", "http://chatbot-app:800
 
 LOGGER.info("WhatsApp Bridge starting...")
 LOGGER.info(f"Chatbot WebSocket base URL: {CHATBOT_WS_BASE_URL}")
-LOGGER.info(f"Use WhatsApp Flows: {USE_WHATSAPP_FLOWS}")
-LOGGER.info(f"Flow provision mode: {FLOW_PROVISION_MODE}")
-LOGGER.info(f"Menu page base URL: {MENU_PAGE_BASE_URL or '(not set — using Flows/list fallback)'}")
-
-
-@app.on_event("startup")
-async def _auto_provision_flows():
-    """Auto-provision WhatsApp Flows on server startup when FLOW_PROVISION_MODE=auto.
-    Checks existing flows by name, creates missing ones, uploads JSON, publishes drafts.
-    In manual mode, flow IDs must be set in .env.
-    """
-    global FLOW_SELECT_ITEMS_ID, FLOW_SELECT_ITEMS_QTY_ID, FLOW_MANAGE_CART_ID, FLOW_BOOKING_ID
-
-    if FLOW_PROVISION_MODE != "auto":
-        LOGGER.info("FLOW_PROVISION_MODE=manual — using .env flow IDs")
-        return
-
-    if not WABA_ID:
-        LOGGER.info("WABA_ID not set — skipping flow auto-provision")
-        return
-
-    try:
-        from manage_flows import auto_provision_flows
-        LOGGER.info("Auto-provisioning WhatsApp Flows...")
-        flow_ids = await asyncio.to_thread(auto_provision_flows)
-
-        if "select_items" in flow_ids:
-            FLOW_SELECT_ITEMS_ID = flow_ids["select_items"]
-            LOGGER.info(f"Provisioned select_items: {FLOW_SELECT_ITEMS_ID}")
-        if "select_items_qty" in flow_ids:
-            FLOW_SELECT_ITEMS_QTY_ID = flow_ids["select_items_qty"]
-            LOGGER.info(f"Provisioned select_items_qty: {FLOW_SELECT_ITEMS_QTY_ID}")
-        if "manage_cart" in flow_ids:
-            FLOW_MANAGE_CART_ID = flow_ids["manage_cart"]
-            LOGGER.info(f"Provisioned manage_cart: {FLOW_MANAGE_CART_ID}")
-        if "booking" in flow_ids:
-            FLOW_BOOKING_ID = flow_ids["booking"]
-            LOGGER.info(f"Provisioned booking: {FLOW_BOOKING_ID}")
-
-        LOGGER.info("Flow auto-provision complete")
-    except Exception as e:
-        LOGGER.error(f"Flow auto-provision failed (non-fatal): {e}", exc_info=True)
+LOGGER.info(f"Catalog ID: {CATALOG_ID or '(not set)'}")
+LOGGER.info(f"Menu page base URL: {MENU_PAGE_BASE_URL or '(not set)'}")
 
 # === Global persistent WebSocket connections (per user) ===
 ws_connections: Dict[str, websockets.WebSocketClientProtocol] = {}
@@ -95,17 +47,15 @@ _processed_msg_ids: Dict[str, float] = {}   # msg_id → monotonic timestamp
 _DEDUP_WINDOW = 300  # seconds (5 min)
 # Background listeners for server-pushed events (e.g. PAYMENT_SUCCESS after Razorpay)
 _bg_listeners: Dict[str, asyncio.Task] = {}
-# Active Flow contexts: phone -> {type, items/item_names, flow_token, ts}
-# Used to correlate nfm_reply responses with the flow that triggered them
-_active_flows: Dict[str, dict] = {}
-_FLOW_CONTEXT_TTL = 1800  # 30 min
+# Active contexts: phone -> {type, order_id, ts} (e.g. order_type_selection)
+_active_contexts: Dict[str, dict] = {}
 
 
 def _cleanup_user(phone: str):
     """Remove all per-user state when WebSocket closes."""
     ws_connections.pop(phone, None)
     _user_locks.pop(phone, None)
-    _active_flows.pop(phone, None)
+    _active_contexts.pop(phone, None)
 
 
 # ===================================================================
@@ -197,23 +147,9 @@ async def receive_message(request: Request):
 async def _process_message(phone: str, user_message: str, msg_id: str):
     """Background task: forward message to chatbot, send response to WhatsApp."""
     try:
-        # Intercept WhatsApp Flow responses (nfm_reply sentinel)
-        if user_message.startswith("__FLOW_RESPONSE__"):
-            response_json_str = user_message[len("__FLOW_RESPONSE__"):]
-            try:
-                response_data = json.loads(response_json_str)
-            except json.JSONDecodeError:
-                LOGGER.error(f"Failed to parse flow response for {phone}")
-                await send_whatsapp_reply(phone, "Sorry, something went wrong. Please try again.")
-                _start_bg_listener(phone)
-                return
-            await _handle_flow_response(phone, response_data)
-            _start_bg_listener(phone)
-            return
-
         # Intercept order type selection button replies
         if user_message in ("order_type_takeaway", "order_type_dinein"):
-            flow_ctx = _active_flows.pop(phone, {})
+            flow_ctx = _active_contexts.pop(phone, {})
             order_id = flow_ctx.get("order_id", "")
             order_type = "take_away" if user_message == "order_type_takeaway" else "dine_in"
             form_response = {
@@ -243,15 +179,11 @@ async def _process_message(phone: str, user_message: str, msg_id: str):
 
 
 def _cleanup_dedup():
-    """Remove expired entries from the dedup map and stale flow contexts."""
+    """Remove expired entries from the dedup map."""
     now = asyncio.get_event_loop().time()
     expired = [k for k, ts in _processed_msg_ids.items() if now - ts > _DEDUP_WINDOW]
     for k in expired:
         del _processed_msg_ids[k]
-    # Clean up abandoned flow contexts (>30 min old)
-    stale = [k for k, v in _active_flows.items() if now - v.get("ts", 0) > _FLOW_CONTEXT_TTL]
-    for k in stale:
-        del _active_flows[k]
 
 
 # ===================================================================
@@ -406,19 +338,6 @@ def _extract_user_message(message: dict, message_type: str) -> Optional[str]:
             row_title = interactive.get("list_reply", {}).get("title", "")
             LOGGER.info(f"List reply: id={row_id}, title={row_title}")
             return row_id or row_title
-
-        elif reply_type == "nfm_reply":
-            # WhatsApp Flow completion — extract structured response
-            nfm = interactive.get("nfm_reply", {})
-            response_json_str = nfm.get("response_json", "{}")
-            try:
-                response_data = json.loads(response_json_str)
-            except json.JSONDecodeError:
-                LOGGER.warning(f"Invalid nfm_reply JSON: {response_json_str[:200]}")
-                return None
-            LOGGER.info(f"Flow response (nfm_reply): {json.dumps(response_data)[:200]}")
-            # Return sentinel so _process_message routes to flow handler
-            return f"__FLOW_RESPONSE__{json.dumps(response_data)}"
 
     return None
 
@@ -860,330 +779,6 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:max_len - 3] + "..."
 
 
-# ===================================================================
-# WHATSAPP FLOWS — send flow messages & handle nfm_reply responses
-# ===================================================================
-
-async def send_whatsapp_flow_message(
-    to_number: str,
-    flow_id: str,
-    flow_cta: str,
-    body_text: str,
-    screen_id: str,
-    flow_data: dict,
-    flow_token: str = None,
-    header_text: str = None,
-    footer_text: str = None,
-) -> bool:
-    """Send a WhatsApp Flow interactive message (navigate mode)."""
-    if flow_token is None:
-        flow_token = str(uuid.uuid4())
-
-    interactive = {
-        "type": "flow",
-        "body": {"text": _truncate(body_text, 1024)},
-        "action": {
-            "name": "flow",
-            "parameters": {
-                "flow_message_version": "3",
-                "flow_id": flow_id,
-                "flow_cta": _truncate(flow_cta, 20),
-                "flow_token": flow_token,
-                "flow_action": "navigate",
-                "flow_action_payload": {
-                    "screen": screen_id,
-                    "data": flow_data,
-                },
-            },
-        },
-    }
-    if header_text:
-        interactive["header"] = {"type": "text", "text": _truncate(header_text, 60)}
-    if footer_text:
-        interactive["footer"] = {"text": _truncate(footer_text, 60)}
-
-    return await send_whatsapp_interactive(to_number, interactive)
-
-
-async def _send_item_selection_flow(
-    phone: str, category_name: str, items: list, meal: str = ""
-) -> None:
-    """Send Item Selection Flow with CheckboxGroup for a set of menu items."""
-
-    flow_items = []
-    for item in items[:20]:  # CheckboxGroup max 20 items
-        name = item.get("name", "Item")
-        price = item.get("price", 0)
-        flow_items.append({
-            "id": name,
-            "title": _truncate(f"{name} - \u20b9{price}", 30),
-        })
-
-    flow_data = {
-        "screen_title": _truncate(category_name, 80),
-        "items": flow_items,
-    }
-
-    meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
-    body = f"{meal_emoji} *{category_name}*\n{len(flow_items)} items available. Select to add:"
-
-    flow_token = f"select_{phone}_{uuid.uuid4().hex[:8]}"
-    _active_flows[phone] = {
-        "type": "select_items",
-        "category": category_name,
-        "items": {it["id"]: it for it in flow_items},
-        "flow_token": flow_token,
-        "ts": asyncio.get_event_loop().time(),
-    }
-
-    await send_whatsapp_flow_message(
-        to_number=phone,
-        flow_id=FLOW_SELECT_ITEMS_ID,
-        flow_cta="Select Items",
-        body_text=body,
-        screen_id="SELECT_ITEMS",
-        flow_data=flow_data,
-        flow_token=flow_token,
-    )
-    LOGGER.info(f"Sent item selection flow ({len(flow_items)} items, {category_name}) to {phone}")
-
-
-async def _send_item_selection_qty_flow(
-    phone: str, category_name: str, items: list, meal: str = ""
-) -> None:
-    """Send Item Selection + Qty Flow: per-item TextInput (number) for quantity entry."""
-
-    flow_data: Dict[str, Any] = {
-        "screen_title": _truncate(category_name, 80),
-    }
-
-    item_names: List[str] = []
-    for idx in range(10):
-        if idx < len(items):
-            item = items[idx]
-            name = item.get("name", "Item")
-            price = item.get("price", 0)
-            flow_data[f"item_{idx}_visible"] = True
-            flow_data[f"item_{idx}_label"] = _truncate(f"{name} — \u20b9{price}", 80)
-            item_names.append(name)
-        else:
-            flow_data[f"item_{idx}_visible"] = False
-            flow_data[f"item_{idx}_label"] = "-"
-
-    meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
-    body = f"{meal_emoji} *{category_name}*\n{len(item_names)} items. Enter qty to add:"
-
-    flow_token = f"selqty_{phone}_{uuid.uuid4().hex[:8]}"
-    _active_flows[phone] = {
-        "type": "select_items_qty",
-        "category": category_name,
-        "item_names": item_names,
-        "flow_token": flow_token,
-        "ts": asyncio.get_event_loop().time(),
-    }
-
-    await send_whatsapp_flow_message(
-        to_number=phone,
-        flow_id=FLOW_SELECT_ITEMS_QTY_ID,
-        flow_cta="Select Items",
-        body_text=body,
-        screen_id="SELECT_ITEMS_QTY",
-        flow_data=flow_data,
-        flow_token=flow_token,
-    )
-    LOGGER.info(f"Sent item selection+qty flow ({len(item_names)} items, {category_name}) to {phone}")
-
-
-async def _send_cart_management_flow(phone: str, items: list, total: float) -> None:
-    """Send Cart Management Flow with per-item TextInput for quantity entry."""
-
-    flow_data: Dict[str, Any] = {
-        "cart_summary": f"{len(items)} items \u2014 \u20b9{total:.0f}",
-    }
-
-    item_names: List[str] = []
-    item_qtys: List[int] = []
-    for idx in range(10):
-        if idx < len(items):
-            item = items[idx]
-            name = item.get("name") or item.get("item_name", "Item")
-            price = item.get("price", 0)
-            qty = item.get("quantity", 1)
-            flow_data[f"item_{idx}_visible"] = True
-            flow_data[f"item_{idx}_label"] = _truncate(f"{name} \u2014 \u20b9{price} each (now: {qty})", 80)
-            flow_data[f"item_{idx}_qty"] = qty
-            item_names.append(name)
-            item_qtys.append(qty)
-        else:
-            flow_data[f"item_{idx}_visible"] = False
-            flow_data[f"item_{idx}_label"] = "-"
-            flow_data[f"item_{idx}_qty"] = 0
-
-    flow_token = f"cart_{phone}_{uuid.uuid4().hex[:8]}"
-    _active_flows[phone] = {
-        "type": "manage_cart",
-        "item_names": item_names,
-        "item_qtys": item_qtys,
-        "flow_token": flow_token,
-        "ts": asyncio.get_event_loop().time(),
-    }
-
-    await send_whatsapp_flow_message(
-        to_number=phone,
-        flow_id=FLOW_MANAGE_CART_ID,
-        flow_cta="Modify Cart",
-        body_text="Tap to adjust quantities or remove items:",
-        screen_id="MANAGE_CART",
-        flow_data=flow_data,
-        flow_token=flow_token,
-    )
-    LOGGER.info(f"Sent cart management flow ({len(items)} items) to {phone}")
-
-
-async def _handle_flow_response(phone: str, response_data: dict) -> None:
-    """Process a WhatsApp Flow nfm_reply: convert to form_response and send to chatbot."""
-    flow_type = response_data.get("flow_type", "")
-    flow_ctx = _active_flows.pop(phone, {})
-
-    if flow_type == "select_items":
-        selected_items = response_data.get("selected_items", [])
-        if not selected_items:
-            await send_whatsapp_reply(phone, "No items selected.")
-            return
-
-        items_payload = [{"name": name, "quantity": 1} for name in selected_items]
-        form_response = {
-            "type": "form_response",
-            "form_type": "direct_add_to_cart",
-            "data": {"items": items_payload},
-        }
-        LOGGER.info(f"Flow select_items -> direct_add_to_cart: {len(items_payload)} items for {phone}")
-        await _send_form_response_to_chatbot(phone, form_response)
-
-    elif flow_type == "manage_cart":
-        item_names = flow_ctx.get("item_names", [])
-        if not item_names:
-            LOGGER.warning(f"No flow context for manage_cart from {phone}")
-            await send_whatsapp_reply(phone, "Session expired. Please view your cart again.")
-            return
-
-        item_qtys = flow_ctx.get("item_qtys", [])
-        updates = []
-        removes = []
-        for idx, name in enumerate(item_names):
-            new_qty_str = response_data.get(f"qty_{idx}", "")
-            if not new_qty_str:
-                continue
-            try:
-                new_qty = int(new_qty_str)
-            except (ValueError, TypeError):
-                continue
-            # Skip if quantity unchanged
-            old_qty = item_qtys[idx] if idx < len(item_qtys) else 0
-            if new_qty == old_qty:
-                continue
-            if new_qty <= 0:
-                removes.append(name)
-            else:
-                updates.append({"item_name": name, "quantity": new_qty})
-
-        # Process removes first, then updates
-        for name in removes:
-            fr = {
-                "type": "form_response",
-                "form_type": "direct_remove_from_cart",
-                "data": {"item_name": name},
-            }
-            LOGGER.info(f"Flow manage_cart -> remove: {name} for {phone}")
-            await _send_form_response_to_chatbot(phone, fr)
-
-        for update in updates:
-            fr = {
-                "type": "form_response",
-                "form_type": "direct_update_cart",
-                "data": update,
-            }
-            LOGGER.info(f"Flow manage_cart -> update: {update['item_name']}={update['quantity']} for {phone}")
-            await _send_form_response_to_chatbot(phone, fr)
-
-        if not removes and not updates:
-            await send_whatsapp_reply(phone, "Cart unchanged.")
-
-    elif flow_type == "booking_intake":
-        booking_date = response_data.get("booking_date", "")
-        booking_time = response_data.get("booking_time", "")
-        party_size = response_data.get("party_size", "2")
-
-        if not booking_date or not booking_time:
-            await send_whatsapp_reply(phone, "Please select a date and time for your booking.")
-            return
-
-        # Validate date format and ensure it's not in the past
-        from datetime import datetime as _dt, date as _date
-        try:
-            parsed_date = _dt.strptime(booking_date, "%Y-%m-%d").date()
-            if parsed_date < _date.today():
-                await send_whatsapp_reply(phone, "That date is in the past. Please select a future date.")
-                return
-        except ValueError:
-            await send_whatsapp_reply(phone, "Invalid date format. Please try booking again.")
-            return
-
-        try:
-            ps = int(party_size)
-            if ps < 1 or ps > 20:
-                await send_whatsapp_reply(phone, "Party size must be between 1 and 20.")
-                return
-        except (ValueError, TypeError):
-            ps = 2
-
-        form_response = {
-            "type": "form_response",
-            "form_type": "booking_intake",
-            "data": {
-                "date": booking_date,
-                "time": booking_time,
-                "party_size": ps,
-            },
-        }
-        LOGGER.info(f"Flow booking_intake -> {booking_date} {booking_time} party={ps} for {phone}")
-        await _send_form_response_to_chatbot(phone, form_response)
-
-    elif flow_type == "select_items_qty":
-        item_names = flow_ctx.get("item_names", [])
-        if not item_names:
-            LOGGER.warning(f"No flow context for select_items_qty from {phone}")
-            await send_whatsapp_reply(phone, "Session expired. Please try again.")
-            return
-
-        items_payload = []
-        for idx, name in enumerate(item_names):
-            qty_str = response_data.get(f"qty_{idx}", "")
-            if not qty_str:
-                continue
-            try:
-                qty = int(qty_str)
-            except (ValueError, TypeError):
-                continue
-            if qty > 0:
-                items_payload.append({"name": name, "quantity": qty})
-
-        if not items_payload:
-            await send_whatsapp_reply(phone, "No items selected. Enter a quantity to add items.")
-            return
-
-        form_response = {
-            "type": "form_response",
-            "form_type": "direct_add_to_cart",
-            "data": {"items": items_payload},
-        }
-        LOGGER.info(f"Flow select_items_qty -> direct_add_to_cart: {len(items_payload)} items for {phone}")
-        await _send_form_response_to_chatbot(phone, form_response)
-
-    else:
-        LOGGER.warning(f"Unknown flow_type in nfm_reply: {flow_type} for {phone}")
-        await send_whatsapp_reply(phone, "Thanks for your selection!")
-
 
 async def _send_form_response_to_chatbot(phone: str, form_response: dict) -> None:
     """Send a form_response to the chatbot via the existing WebSocket connection."""
@@ -1284,20 +879,6 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
             "body": {"text": _truncate(body, 1024)},
             "action": {"buttons": buttons}
         })
-    elif USE_WHATSAPP_FLOWS and (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID) and len(available) >= 4:
-        # Use Flow for multi-select when there are enough available items
-        if unavailable:
-            note_lines = ["\ud83d\udd50 *Also available later:*"]
-            for item in unavailable[:5]:
-                name = item.get("name", "Item")
-                meals = ", ".join(item.get("meal_types", ["later"])[:2])
-                note_lines.append(f"  - {name} ({meals})")
-            await send_whatsapp_reply(phone, "\n".join(note_lines))
-        if FLOW_SELECT_ITEMS_QTY_ID and len(available) <= 10:
-            await _send_item_selection_qty_flow(phone, f"Results: {query}", available, "")
-        else:
-            await _send_item_selection_flow(phone, f"Results: {query}", available, "")
-
     else:
         # List message with sections for available/unavailable
         sections = []
@@ -1383,11 +964,7 @@ async def _send_cta_page(phone: str, page_type: str, body_text: str, cta_label: 
 
 async def _convert_menu_data(phone: str, agui: dict) -> None:
     """
-    Convert menu to WhatsApp interactive messages.
-
-    - Single category or ≤20 items → Item Selection Flow (multi-select CheckboxGroup)
-    - Multiple categories, ≤100 items → interactive list grouped by category
-    - Large menu (>100 items) → category picker list
+    Convert menu to CTA web page or WhatsApp interactive list grouped by category.
     """
     items = agui.get("items", [])
     categories = agui.get("categories", [])
@@ -1411,7 +988,7 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     if await _send_cta_page(phone, "menu", body, "Browse Full Menu"):
         return
 
-    # ── Fallback: Flow/list paths (when MENU_PAGE_BASE_URL is not set) ──
+    # ── Fallback: interactive list grouped by category (when MENU_PAGE_BASE_URL is not set) ──
 
     # Group items by category
     by_category: Dict[str, list] = {}
@@ -1420,36 +997,6 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
         by_category.setdefault(cat, []).append(item)
 
     cat_order = categories if categories else list(by_category.keys())
-
-    # ── Flow path: send one Flow per category (multi-select + qty) ──
-    _has_any_select_flow = USE_WHATSAPP_FLOWS and (FLOW_SELECT_ITEMS_QTY_ID or FLOW_SELECT_ITEMS_ID)
-    if _has_any_select_flow:
-        # Send header message
-        body = f"{meal_emoji} *Menu*"
-        if meal:
-            body += f" \u2014 {meal} Time"
-        body += f"\n{len(items)} items across {len(cat_order)} categories."
-        body += "\nSelect items & qty from each category below:"
-        await send_whatsapp_reply(phone, body)
-
-        # Send one Flow per category
-        for cat in cat_order:
-            cat_items = by_category.get(cat, [])
-            if not cat_items:
-                continue
-            if FLOW_SELECT_ITEMS_QTY_ID and len(cat_items) <= 10:
-                await _send_item_selection_qty_flow(phone, cat, cat_items, meal)
-            else:
-                # CheckboxGroup max 20 — split if needed
-                for chunk_start in range(0, len(cat_items), 20):
-                    chunk = cat_items[chunk_start:chunk_start + 20]
-                    suffix = f" ({chunk_start + 1}-{chunk_start + len(chunk)})" if len(cat_items) > 20 else ""
-                    await _send_item_selection_flow(phone, f"{cat}{suffix}", chunk, meal)
-
-        LOGGER.info(f"Sent {len(cat_order)} category flows ({len(items)} total items) to {phone}")
-        return
-
-    # ── Fallback (no Flows): interactive list grouped by category ──
     sections = []
     for cat in cat_order:
         if cat not in by_category:
@@ -1485,11 +1032,7 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
 # --- CART_DATA ---
 async def _convert_cart_data(phone: str, agui: dict) -> None:
     """
-    Convert cart to text summary + interactive management.
-
-    - ≤3 items: per-item button cards (simple, intuitive)
-    - >3 items + Flow: Cart Management Flow (qty dropdowns + remove)
-    - >3 items, no Flow: simplified action buttons (fallback)
+    Convert cart to CTA web page or text summary + action buttons.
     """
     items = agui.get("items", [])
     total = agui.get("total", 0)
@@ -1829,7 +1372,7 @@ async def _convert_order_type_selection(phone: str, agui: dict) -> None:
     body += "How would you like your order?"
 
     # Store order_id so button response can include it
-    _active_flows[phone] = {
+    _active_contexts[phone] = {
         "type": "order_type_selection",
         "order_id": order_id,
         "ts": asyncio.get_event_loop().time(),
@@ -1861,88 +1404,30 @@ async def _convert_booking_intake_form(phone: str, agui: dict) -> None:
     party_sizes = agui.get("party_sizes", list(range(1, 9)))
     max_party = agui.get("max_party_size", 8)
 
-    if USE_WHATSAPP_FLOWS and FLOW_BOOKING_ID:
-        # Build flow data from availability
-        date_options = []
-        time_slots_by_date = {}
-        for date_str, date_info in sorted(availability.items())[:7]:
-            slots = date_info.get("slots", {})
-            available_slots = [t for t, s in slots.items() if s.get("available", False)]
-            if available_slots:
-                # Parse date for display
-                try:
-                    from datetime import datetime as _dt
-                    d = _dt.strptime(date_str, "%Y-%m-%d")
-                    display = d.strftime("%a, %b %d")
-                except Exception:
-                    display = date_str
-                date_options.append({"id": date_str, "title": display})
-                time_slots_by_date[date_str] = available_slots
+    # Text prompt — user types booking details
+    dates_preview = []
+    for date_str, date_info in sorted(availability.items())[:5]:
+        slots = date_info.get("slots", {})
+        available_count = sum(1 for s in slots.values() if s.get("available", False))
+        if available_count > 0:
+            try:
+                from datetime import datetime as _dt
+                d = _dt.strptime(date_str, "%Y-%m-%d")
+                display = d.strftime("%a, %b %d")
+            except Exception:
+                display = date_str
+            dates_preview.append(f"  • {display} — {available_count} slots")
 
-        if not date_options:
-            await send_whatsapp_reply(
-                phone,
-                "Sorry, no tables are available for booking right now. "
-                "Please contact the restaurant directly."
-            )
-            return
-
-        # For navigate-mode flow, we pre-load all time slots as a flat list
-        # (user picks date first, then time — but flow is single screen so we
-        # show all available times across all dates)
-        all_times = sorted(set(t for times in time_slots_by_date.values() for t in times))
-        time_options = [{"id": t, "title": t} for t in all_times[:20]]
-        party_options = [{"id": str(p), "title": f"{p} guest{'s' if p > 1 else ''}"} for p in party_sizes[:10]]
-
-        flow_data = {
-            "date_options": date_options,
-            "time_options": time_options,
-            "party_options": party_options,
-        }
-
-        flow_token = f"booking_{phone}_{uuid.uuid4().hex[:8]}"
-        _active_flows[phone] = {
-            "type": "booking_intake",
-            "flow_token": flow_token,
-            "ts": asyncio.get_event_loop().time(),
-        }
-
-        await send_whatsapp_flow_message(
-            to_number=phone,
-            flow_id=FLOW_BOOKING_ID,
-            flow_cta="Book a Table",
-            body_text="📅 *Reserve a Table*\nSelect your preferred date, time, and party size.",
-            screen_id="BOOKING_FORM",
-            flow_data=flow_data,
-            flow_token=flow_token,
-        )
-        LOGGER.info(f"Sent booking flow ({len(date_options)} dates, {len(time_options)} times) to {phone}")
-
-    else:
-        # Fallback: text prompt — user types booking details
-        dates_preview = []
-        for date_str, date_info in sorted(availability.items())[:5]:
-            slots = date_info.get("slots", {})
-            available_count = sum(1 for s in slots.values() if s.get("available", False))
-            if available_count > 0:
-                try:
-                    from datetime import datetime as _dt
-                    d = _dt.strptime(date_str, "%Y-%m-%d")
-                    display = d.strftime("%a, %b %d")
-                except Exception:
-                    display = date_str
-                dates_preview.append(f"  • {display} — {available_count} slots")
-
-        text = "📅 *Book a Table*\n\n"
-        if dates_preview:
-            text += "Available dates:\n" + "\n".join(dates_preview) + "\n\n"
-        text += (
-            f"Party sizes: 1-{max_party} guests\n\n"
-            "Please reply with your booking details, e.g.:\n"
-            '*"Book a table for 4 on March 20 at 7 PM"*'
-        )
-        await send_whatsapp_reply(phone, text)
-        LOGGER.info(f"Sent booking text fallback ({len(dates_preview)} dates) to {phone}")
+    text = "📅 *Book a Table*\n\n"
+    if dates_preview:
+        text += "Available dates:\n" + "\n".join(dates_preview) + "\n\n"
+    text += (
+        f"Party sizes: 1-{max_party} guests\n\n"
+        "Please reply with your booking details, e.g.:\n"
+        '*"Book a table for 4 on March 20 at 7 PM"*'
+    )
+    await send_whatsapp_reply(phone, text)
+    LOGGER.info(f"Sent booking text prompt ({len(dates_preview)} dates) to {phone}")
 async def send_whatsapp_reply(to_number: str, message: str) -> bool:
     """
     Send text message to WhatsApp user via WhatsApp Business Cloud API.
