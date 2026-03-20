@@ -839,7 +839,26 @@ async def _convert_search_results(phone: str, agui: dict) -> None:
     available = [i for i in items if i.get("is_available_now", True)]
     unavailable = [i for i in items if not i.get("is_available_now", True)]
 
-    # ── CTA URL path: full search results with add-to-cart ──
+    # ── 1. Catalog product_list: native product cards with add-to-cart ──
+    if CATALOG_ID and available:
+        try:
+            product_items = [{"product_retailer_id": item.get("id", "")} for item in available[:30] if item.get("id")]
+            if product_items:
+                await send_whatsapp_interactive(phone, {
+                    "type": "product_list",
+                    "header": {"type": "text", "text": f"Results: {query}"},
+                    "body": {"text": f"{len(available)} items found. Tap to view details and add to cart."},
+                    "action": {
+                        "catalog_id": CATALOG_ID,
+                        "sections": [{"title": _truncate(f"Results for {query}", 24), "product_items": product_items[:30]}]
+                    }
+                })
+                LOGGER.info(f"Sent product_list search results ({len(product_items)} items) to {phone}")
+                return
+        except Exception as e:
+            LOGGER.warning(f"product_list failed for search, falling back: {e}")
+
+    # ── 2. CTA URL fallback: full search results with add-to-cart ──
     search_body = f"\ud83d\udd0d *{len(items)} results for \"{query}\"*"
     if available:
         search_body += f"\n\u2705 {len(available)} available now"
@@ -962,9 +981,35 @@ async def _send_cta_page(phone: str, page_type: str, body_text: str, cta_label: 
 
 # --- MENU_DATA ---
 
+async def _send_catalog_message(phone: str, body_text: str, thumbnail_retailer_id: str = "") -> bool:
+    """Send a WhatsApp catalog_message. Returns True on success, False to fall back."""
+    if not CATALOG_ID:
+        return False
+    try:
+        # Pick a thumbnail product — use provided or first available
+        thumb_id = thumbnail_retailer_id or ""
+        payload = {
+            "type": "catalog_message",
+            "body": {"text": body_text},
+            "action": {
+                "name": "catalog_message",
+                "parameters": {}
+            }
+        }
+        if thumb_id:
+            payload["action"]["parameters"]["thumbnail_product_retailer_id"] = thumb_id
+        await send_whatsapp_interactive(phone, payload)
+        LOGGER.info(f"Sent catalog_message to {phone}")
+        return True
+    except Exception as e:
+        LOGGER.warning(f"catalog_message failed for {phone}, falling back: {e}")
+        return False
+
+
 async def _convert_menu_data(phone: str, agui: dict) -> None:
     """
-    Convert menu to CTA web page or WhatsApp interactive list grouped by category.
+    Convert menu to WhatsApp catalog message, CTA web page, or interactive list.
+    Priority: Catalog > CTA > List
     """
     items = agui.get("items", [])
     categories = agui.get("categories", [])
@@ -979,7 +1024,18 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
     meal = agui.get("current_meal_period", "")
     meal_emoji = {"Breakfast": "\u2615", "Lunch": "\u2600\ufe0f", "Dinner": "\ud83c\udf19"}.get(meal, "\ud83c\udf7d\ufe0f")
 
-    # ── CTA URL path: open mobile menu page in WhatsApp's in-app browser ──
+    # ── 1. WhatsApp Catalog: native in-app menu browsing + cart ──
+    catalog_body = f"{meal_emoji} *Menu*"
+    if meal:
+        catalog_body += f" \u2014 {meal} Time"
+    catalog_body += f"\n{len(items)} items available"
+    catalog_body += "\n\nBrowse our menu, add items to cart, and send your order!"
+    # Use first item's ID as thumbnail
+    first_item_id = items[0].get("id", "") if items else ""
+    if await _send_catalog_message(phone, catalog_body, first_item_id):
+        return
+
+    # ── 2. CTA URL fallback: open mobile menu page in browser ──
     body = f"{meal_emoji} *Menu*"
     if meal:
         body += f" \u2014 {meal} Time"
