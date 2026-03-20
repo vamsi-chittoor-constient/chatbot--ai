@@ -174,19 +174,21 @@ async def _process_catalog_order(phone: str, product_items: list, msg_id: str):
 
         LOGGER.info(f"Catalog order from {phone}: {len(product_items)} items")
 
-        # Look up item names from chatbot's menu API
+        # Look up item names from database directly
         item_names = {}
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(f"{CHATBOT_API_BASE_URL}/api/v1/config/restaurant")
-                if resp.status_code == 200:
-                    menu_items = resp.json().get("menu", {}).get("items", [])
-                    for mi in menu_items:
-                        mid = mi.get("id", "")
-                        if mid:
-                            item_names[mid] = mi.get("name", "")
+            retailer_ids = [pi.get("product_retailer_id", "") for pi in product_items if pi.get("product_retailer_id")]
+            if retailer_ids:
+                placeholders = ",".join(f"'{rid}'" for rid in retailer_ids)
+                import asyncpg
+                conn = await asyncpg.connect(os.getenv("DATABASE_URL", "postgresql://admin:admin123@postgres:5432/restaurant_ai"))
+                rows = await conn.fetch(f"SELECT menu_item_id::text, menu_item_name FROM menu_item WHERE menu_item_id::text IN ({placeholders})")
+                for row in rows:
+                    item_names[row["menu_item_id"]] = row["menu_item_name"]
+                await conn.close()
+                LOGGER.info(f"Looked up {len(item_names)} item names from DB")
         except Exception as e:
-            LOGGER.warning(f"Failed to fetch menu for name lookup: {e}")
+            LOGGER.warning(f"Failed to look up item names from DB: {e}")
 
         # Build items list with names for direct_add_to_cart
         cart_items = []
