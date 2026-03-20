@@ -471,14 +471,25 @@ async def get_chatbot_reply(phone: str, user_message: str) -> Optional[str]:
         async with user_lock:
             # Lock for connection management
             async with ws_lock:
-                # Check if connection exists and is open
+                # Check if connection exists and is alive
                 if phone in ws_connections:
                     ws = ws_connections[phone]
                     if not ws.open:
                         LOGGER.warning(f"WebSocket for {phone} is closed, reconnecting...")
                         _cleanup_user(phone)
                     else:
-                        LOGGER.debug(f"Reusing existing WebSocket for {phone}")
+                        # Verify connection is alive with a ping
+                        try:
+                            pong = await asyncio.wait_for(ws.ping(), timeout=3)
+                            await asyncio.wait_for(pong, timeout=3)
+                            LOGGER.debug(f"Reusing existing WebSocket for {phone} (ping ok)")
+                        except Exception:
+                            LOGGER.warning(f"WebSocket for {phone} failed ping, reconnecting...")
+                            try:
+                                await ws.close()
+                            except Exception:
+                                pass
+                            _cleanup_user(phone)
 
                 # Create new connection if needed
                 if phone not in ws_connections:
@@ -1209,23 +1220,16 @@ async def _convert_menu_data(phone: str, agui: dict) -> None:
 # --- CART_DATA ---
 async def _convert_cart_data(phone: str, agui: dict) -> None:
     """
-    Convert cart to CTA web page or text summary + action buttons.
+    Convert cart to text summary with checkout/clear buttons.
+    Cart management (add/remove/qty) is handled natively in WhatsApp catalog cart.
     """
     items = agui.get("items", [])
     total = agui.get("total", 0)
-    packaging = agui.get("packaging_charge_per_item", 30)
 
     if not items:
         await send_whatsapp_reply(phone, "\ud83d\uded2 Your cart is empty.")
         return
 
-    # ── CTA URL path: full cart management in web page ──
-    cart_body = f"\ud83d\uded2 *Your Cart* \u2014 {len(items)} items, \u20b9{total}\n\nTap below to edit quantities, remove items, or checkout:"
-    cart_data = {"items": items, "total": total, "packaging_charge_per_item": packaging}
-    if await _send_cta_page(phone, "cart", cart_body, "Manage Cart", cart_data):
-        return
-
-    # ── Fallback: text summary + buttons ──
     lines = ["\ud83d\uded2 *Your Cart*\n"]
     for i, item in enumerate(items, 1):
         name = item.get("name") or item.get("item_name", "Item")
@@ -1233,17 +1237,16 @@ async def _convert_cart_data(phone: str, agui: dict) -> None:
         price = item.get("price", 0)
         lines.append(f"{i}. {name} \u00d7 {qty} \u2014 \u20b9{price * qty}")
 
-    lines.append(f"\n\ud83d\udce6 Packaging: \u20b9{packaging} \u00d7 {len(items)} = \u20b9{packaging * len(items)}")
-    lines.append(f"\ud83d\udcb0 *Total: \u20b9{total}*")
+    lines.append(f"\n\ud83d\udcb0 *Total: \u20b9{total}*")
     await send_whatsapp_reply(phone, "\n".join(lines))
 
     buttons = [
-        {"type": "reply", "reply": {"id": "add more items", "title": "Add More"}},
-        {"type": "reply", "reply": {"id": "checkout", "title": "Checkout"}},
+        {"type": "reply", "reply": {"id": "checkout", "title": "\u2705 Checkout"}},
+        {"type": "reply", "reply": {"id": "clear cart", "title": "\ud83d\uddd1 Clear Cart"}},
     ]
     await send_whatsapp_interactive(phone, {
         "type": "button",
-        "body": {"text": "What would you like to do?"},
+        "body": {"text": "Ready to order?"},
         "action": {"buttons": buttons},
     })
 
